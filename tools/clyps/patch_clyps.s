@@ -3429,22 +3429,11 @@ th_same:
     beq.b   th_l
     moveq   #127,%d3
 th_l:
-|   the top line: y = 60 - 15k, x 2..7
-    moveq   #60,%d4
-    add.l   %d2,%d4
-    moveq   #2,%d0
-    moveq   #7,%d1
-    bsr.b   th_h
-|   the bottom line: y = 48 - 15k
+|   one vertical line on the outer side (the user, 2026-11-06): x = 1 (right: 126), y 48 - 15k .. 60 - 15k,
+|   the outer edge's straight run (the corners curve in at 47 / 61)
     moveq   #48,%d4
     add.l   %d2,%d4
-    moveq   #2,%d0
-    moveq   #7,%d1
-    bsr.b   th_h
-|   the outer side: x = 1, y 49 - 15k .. 59 - 15k
-    moveq   #49,%d4
-    add.l   %d2,%d4
-    moveq   #59,%d5
+    moveq   #60,%d5
     add.l   %d2,%d5
     moveq   #1,%d0
     tst.l   %d3
@@ -3464,22 +3453,39 @@ th_sx:
     lea     16(%sp),%sp
 th_out:
     rts
-th_h:                                   | x d0..d1 (left side's), y d4 -> mirrored when d3 = 127
-    tst.l   %d3
-    beq.b   th_hx
-    neg.l   %d0
-    add.l   %d3,%d0
-    neg.l   %d1
-    add.l   %d3,%d1
-th_hx:
-    pea     TABMODE
-    move.l  %d4,-(%sp)
-    move.l  %d1,-(%sp)
-    move.l  %d4,-(%sp)
+
+| cl_ptnswitch (UI task): a pattern reload from the card finished (cl_ptngo = 0x80 | N, clyps_reload.s):
+| the OT goes to pattern N of the playing bank (the user, 2026-11-06), as stock's [PTN] + trig does
+| (0x40056b2c, without its window teardown, PTN_CONSUMED -- which would close Clyps -- or chain bits):
+| the chain off (0x4009a404), the cue 0x400a1030(bank, N) -- running: a pending change, so DIRECT JUMP
+| (on) jumps at its landing point and stock (off) switches at CHAIN AFTER / the pattern end; stopped: at
+| once -- then stock's page refreshes. Your own pattern: nothing (it already plays what was reloaded).
+cl_ptnswitch:
+    move.l  %d2,-(%sp)
+    moveq   #0,%d2
+    move.b  cl_ptngo,%d2
+    clr.b   cl_ptngo
+    andi.l  #15,%d2
+    moveq   #0,%d0
+    move.b  ACT_PAT,%d0
+    cmp.l   %d2,%d0
+    beq.b   pw_out
+    jsr     0x4009a404                  | the chain off
+    move.l  %d2,-(%sp)
+    moveq   #0,%d0
+    move.b  PLAY_BANK,%d0
     move.l  %d0,-(%sp)
-    pea     TABSURF
-    jsr     RECT
-    lea     24(%sp),%sp
+    jsr     0x400a1030                  | the cue
+    jsr     0x400418e0                  | stock's refreshes after it (0x40056b6e..0x40056b8c)
+    pea     -1
+    jsr     0x40083bc0
+    jsr     0x40032208
+    jsr     0x400486cc
+    jsr     0x4004b528
+    jsr     0x4004b08c
+    lea     12(%sp),%sp
+pw_out:
+    move.l  (%sp)+,%d2
     rts
 
 | cl_pshow: an arrow moved the pre-select box -- it shows until the next execution. Uses d0.
@@ -4212,6 +4218,10 @@ cn_n:
 | The UI task's message loop, common tail 0x40062d1c (replaces `tst.l 0x46c7c72c`, 6 B; stock's
 | beq.w follows on those flags). Runs after every UI message. Does what a landing owes the UI.
 cl_uitail:
+    tst.b   cl_ptngo                    | a pattern reload from the card finished: go to that pattern
+    beq.b   ut_ng
+    jsr     cl_ptnswitch
+ut_ng:
     tst.l   RUNNING
     bne.b   ut_run
     clr.b   cl_self                     | stopped before it landed: ORIG PTN+PART's request goes
@@ -6305,6 +6315,7 @@ cl_pmoved:  .byte 0                     | the pre-select box shows (an arrow sin
 cl_pre:     .space 32                   | per track: its pre-select arrows (cl_psave / cl_pload; 0 = none)
             .align 2
 cl_tabt:    .byte -1                    | the track whose tab has the line (cl_tabhook), -1 = none
+cl_ptngo:   .byte 0                     | 0x80 | N: a pattern reload finished, go to pattern N (cl_ptnswitch)
 cl_boxreq:  .byte 0                     | a card reload: the box home at the UI tail (cl_boxhome)
 cl_self:    .byte 0                     | ORIG PTN+PART playing: a pattern change to itself is pending
 cl_wpart:   .byte 0                     | the rest of a Part changed (cl_slrest, a card pattern): its whole mirror

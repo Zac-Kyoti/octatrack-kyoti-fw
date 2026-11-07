@@ -38088,3 +38088,15 @@ Now 936 / 932 (<= 945): the pair fits, SC's donor becomes PLATE REV.
 - **octabam:** since #977, octabam's HOOKS bridges `status_icon` / `icon_draw` (and FREE LOOP's `fl_draw`, which
   jumped to `rtm_draw`) were built on our two status-icon sites, so the pin PR also retires `icon_draw`, takes
   REC_TRIG_MUTE out of `status_icon` and reworks `verify_hooks.py` around REC THRESHOLD + FREE LOOP.
+- **KYOTI CL18** (2026-11-06, NOT flashed; CL17 not flashed either, CL16 on the unit): (1) the [PTN]+[BANK] +
+  trig N pattern reload from the card now goes to N (in or out of Clyps): the job sets `cl_ptngo` at its success
+  point, the UI tail's `cl_ptnswitch` runs stock's [PTN]+trig body (0x40056b2c) without PTN_CONSUMED (it would
+  close Clyps) -- 0x4009a404, 0x400a1030(playing bank, N), stock's refreshes; running = a pending cue (DIRECT JUMP
+  on: a jump; off: stock's switch), stopped = at once; your own pattern: no change. (2) The active-track tab line
+  is one vertical stroke on the outer side (x 1 / 126, rows 3..15 + 15k), top / bottom strokes gone. (3) main
+  merged in (f4a504f): REC_TRIG_MUTE's mute dots (detour 0x40040146; its old status-icon sites stock again).
+  Gate L extended (stopped in Clyps: switch + box follows; begun outside: closes + switches; playing: lands) and
+  now runs on its own: a stopped reload after the live-transport part stalls the emulator (frames on: the audio
+  MAC loops eat the key-call budget; frames off: the card job never completes) -- harness only, the check after
+  it was dropped. Gates on CL18: full 116, T 21, F+Q 27, L 17, J 8, M+U 38, X+O+W 15, V+Z+I 29, H 3.
+  syx f99f3492….

@@ -208,6 +208,20 @@ quick check for each:
   responsive.
 - **PART_CHANGE_CARRYOVER_FIX** — a track that is PICKUP on one Part and FLEX on
   another: switching patterns across the Parts plays the FLEX sample, not the old loop.
+- **KYOTI CL18 walk-through** (WIP; `out/KYOTI_WIP/KYOTI_V1.7_WITH_CLYPS/OCTATRACK_OS1.40C_KYOTI_V1.7_WITH_CLYPS.syx`)
+  = CL17 (its list below still applies) + the pattern reload switches pattern, a new tab line, and the
+  REC_TRIG_MUTE mute dots:
+  1. Stopped, in Clyps: hold [PTN]+[BANK], trig 5 (another pattern than yours): `PATTERN A05` /
+     `RELOADED FROM PROJ`, and the OT is on pattern 5 at once -- Clyps stays, its highlight and box on 5.
+  2. Same from outside Clyps (the chord opens it): Clyps closes and you are on that pattern.
+  3. Playing, DIRECT JUMP off: the reload cues the pattern the stock way (it lands at CHAIN AFTER / the
+     pattern end). DIRECT JUMP on: it lands as a jump.
+  4. Your own pattern: reloaded in place, no pattern change (as before).
+  5. A [CUE] group: the active member's tab shows one vertical line on its outer side, over the straight part of
+     the edge (not at the rounded corners); no top or bottom strokes.
+  6. REC_TRIG_MUTE: a recorder-trig-muted track shows two stacked dots beside its tab letter (inner side); the
+     play / stop icon is stock (FLASHING §4 REC_TRIG_MUTE).
+
 - **KYOTI CL17 walk-through** (WIP; `out/KYOTI_WIP/KYOTI_V1.7_WITH_CLYPS/OCTATRACK_OS1.40C_KYOTI_V1.7_WITH_CLYPS.syx`)
   = CL16 (flashed 2026-11-06; its list below still applies) + the active-track tab line fixed:
   1. Hold [CUE], add T1 then T2 then T3 (left side): only the newest member's tab has the line, top and bottom

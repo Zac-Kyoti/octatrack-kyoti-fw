@@ -532,6 +532,12 @@ rj_pb:
     move.l  %d0,RDRAW
     moveq   #1,%d0
     move.b  %d0,rq_own                  | success: doneFn skips its whole-bank reload once
+    cmpi.l  #RQ_PTN,%d7                 | a pattern: the OT goes to it (cl_ptnswitch at the UI tail; the
+    bne.b   rj_ng                       | user, 2026-11-06 -- no more silent reloads in the background)
+    move.l  %d5,%d0
+    ori.l   #0x80,%d0
+    move.b  %d0,cl_ptngo
+rj_ng:
 |   the live cache (SRAM mirror, the UI bank only): only what changed (the user, 2026-11-04 -- stock's
 |   0x4000faf0 rewrote the whole bank, ~620 KB of battery NVRAM, for one track). A pattern: its slab
 |   here (it need not be the playing one); a track: its record + the trailer at the UI tail

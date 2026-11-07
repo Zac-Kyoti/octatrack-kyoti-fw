@@ -1255,6 +1255,22 @@ the chord reads `PTN LOAD:`, a group `MULTI LOAD:` ("ORIGS FULL"'s box to x 86).
 - Render check (painters + hook each pass): T7 active = line on T7 only; T6 active = line on T6, T7 plain;
   group ended = no line anywhere.
 
+### 1.22 The pattern reload goes to the pattern; the tab line as one vertical stroke (the user, 2026-11-06; KYOTI CL18, not flashed)
+
+- **Pattern reload = a pattern change** (supersedes §1.8's "the transport keeps running" silent reload of another
+  pattern): when the chord + trig N reload finishes on a pattern other than yours, the OT goes to N, in or out of
+  Clyps. The job marks it (`cl_ptngo` = 0x80 | N at its success point, clyps_reload.s); the UI tail runs
+  `cl_ptnswitch`: stock's [PTN] + trig body (0x40056b2c) without its window teardown, PTN_CONSUMED (-1 would close
+  Clyps through `cl_uitail`'s stock-pick rule) or chain bits -- 0x4009a404 (chain off), 0x400a1030(playing bank, N),
+  then stock's refreshes (0x400418e0, 0x40083bc0(-1), 0x40032208, 0x400486cc, 0x4004b528, 0x4004b08c). Running =
+  a pending cue, so DIRECT JUMP on lands it as a jump (dj_land arms on any pending cue) and stock off at CHAIN
+  AFTER / the pattern end; stopped = at once. Your own pattern: no change. Gate L checks stopped-in-Clyps (box
+  follows), begun outside (closes, switches) and playing (lands).
+- **Tab line:** only the outer side, x 1 (right 126), y 48 - 15k .. 60 - 15k (rows 3..15 + 15k from the top) --
+  the outer edge's straight run; the corners curve in at rows 2 / 16. Top and bottom strokes removed.
+- **REC_TRIG_MUTE's mute dots** (main 4d03a7c, merged into trkseq): the letter renderer detour 0x40040146 sits
+  inside 0x4003fed8; Clyps' tab line is drawn after all three painters, on the outer side, the dots on the inner.
+
 ## 2. Decisions
 
 ### Settled (2026-10-26, the user)

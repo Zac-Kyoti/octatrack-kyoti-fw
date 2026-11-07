@@ -1025,11 +1025,60 @@ def main(argv):
                   f"chord + trig {q + 1} (Part {pq + 1}, not sounding): its Part from the card, edited mark cleared")
             check(all(bytes(u.mem_read(bb + 0x8ED80 + k * PARTSZ, PARTSZ)) == v for k, v in others.items()),
                   "... and no other Part touched")
+            # the OT goes to the reloaded pattern (the user, 2026-11-06): stopped = at once
+            s_ = state()
+            print(f"      after: act {rd(0x800065BE, 1)} pend {rd(0x800065C0, 1)} open {s_['open']} box {s_['cur']}", flush=True)
+            check(rd(0x800065BE, 1) == q and s_["open"] == 1 and s_["cur"] == q,
+                  f"... stopped: the OT goes to pattern {q + 1} at once; Clyps stays, its box on it")
         if ndl0 is not None:
             ndl = rd(syms["rq_ndir"], 4) - ndl0
             check(ndl >= 4, f"every card reload above read its chunks directly (the seek path: {ndl} direct reloads)")
         tap(NO)
         closed_ok("[NO]")
+        if q is not None:
+            # begun outside Clyps: the chord opens it, the trig reloads, Clyps closes, the OT goes back
+            key(PTN, 1)
+            key(BANK, 1)
+            key(act, 1)
+            settle()
+            key(act, 0)
+            key(BANK, 0)
+            key(PTN, 0)
+            check(rd(0x800065BE, 1) == act, f"chord (begun outside) + trig {act + 1}: the OT goes to pattern {act + 1}")
+            closed_ok("... and Clyps closes")
+            # playing: the reload cues pattern q the stock way (DIRECT JUMP off), CHAIN AFTER = 1 step
+            sl = BLOB + bank * BANKSTRIDE + act * PATSTRIDE
+            q0 = rd(sl + 0x8E56, 1)
+            u.mem_write(sl + 0x8E56, bytes([1]))
+            rt.run(until=lambda x: x.pc == er.MAIN_SPIN)
+            rt.internal_clock()
+            rt.frame = True
+            rt.next_frame = rt.sample + er.FRAME_PERIOD
+            rt.exact_clock()
+            rt.start_transport_live()
+            rt.run(ms=200)
+            key(PTN, 1)
+            key(BANK, 1)
+            key(q, 1)
+            key(q, 0)
+            key(BANK, 0)
+            key(PTN, 0)
+            seen = set()
+            for _ in range(80):
+                rt.run(ms=50)
+                seen.add((rd(0x800065BE, 1), rd(0x800065C0, 1)))
+                if rd(0x800065BE, 1) == q:
+                    break
+            print(f"      playing: (act, pend) seen {sorted(seen)}; running {rd(0x800065B8, 4)}", flush=True)
+            check(rd(0x800065B8, 4) == 1 and rd(0x800065BE, 1) == q,
+                  f"playing: chord + trig {q + 1} reloads it and the OT switches to it (stock's cue)")
+            closed_ok("... Clyps closes (the chord began outside)")
+            key(0x27, 1)                   # STOP
+            key(0x27, 0)
+            rt.run(ms=300)
+            u.mem_write(sl + 0x8E56, bytes([q0]))
+            check(rd(0x800065B8, 4) == 0, "stopped again")
+            # the playing pattern is now q: L runs on its own (gate set: L, then J separately)
 
     if "Q" in a.only:
         # --- Q: [FUNC]+[MIDI] (the Parts menu) inside Clyps
