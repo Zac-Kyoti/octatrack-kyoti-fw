@@ -1241,6 +1241,20 @@ the chord reads `PTN LOAD:`, a group `MULTI LOAD:` ("ORIGS FULL"'s box to x 86).
   `SUM_GAP` 2 (label at number + 10). 1 px to the border both sides; the spare pixel between box 1 and x 2.
   Checked pixel by pixel on renders with 35 px names in both columns.
 
+### 1.21 The active-track tab line, fixed (the user's CL16 report, 2026-11-06; KYOTI CL17, not flashed)
+
+- CL16 on the unit: earlier members kept the line in the bottom half of their tabs, the right side's upper half
+  showed line / gap / pixel / gap, and the bottom half stayed after the group ended. Two causes: stock's tab
+  painters (lower half 0x4004bd48, upper half 0x4003fed8) repaint only tabs whose cached state changed, so a line
+  on a tab nobody repaints stays; and the status-mark painter 0x40044804 runs after them and drew over the right
+  tab's line.
+- `cl_tabhook` now replaces the `jsr 0x40044804` at 0x40052238 (calls it first, so it paints last); the old jsrs
+  at 0x40052232 / 0x4004d870 are gone. It works out the target (the active member in an open group, else -1);
+  when that differs from the last pass (`cl_tabt`) it writes -1 to both painters' side caches (0x400c0c50,
+  0x400c0c94) so the next pass repaints every tab, then draws the line (RECT mode 0) on the target.
+- Render check (painters + hook each pass): T7 active = line on T7 only; T6 active = line on T6, T7 plain;
+  group ended = no line anywhere.
+
 ## 2. Decisions
 
 ### Settled (2026-10-26, the user)

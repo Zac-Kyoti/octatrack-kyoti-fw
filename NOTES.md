@@ -37957,3 +37957,11 @@ closes Clyps when the chord began outside); the 4th page LED shows ORIG / chord 
   everything (`cl_colx`). TRAPS: `cl_pexec` (d0-d1) placed before `cl_tsyn` kept its d1 broke temp save / reload
   (gate T caught it); `cl_tps` was already the ticks-per-step routine (the array is `cl_pre`). Gates on CL16: full
   116, T 21, F+Q 27, L+J 19, M+U 38, X+O+W 15, V+Z+I 29, H 3. syx bc274305….
+- **KYOTI CL17** (2026-11-06, NOT flashed; CL16 on the unit): the active-track tab line fixed (the user's CL16
+  report: earlier members kept the bottom-half line, the right tab's upper half drew line / gap / pixel / gap, the
+  bottom half stayed after the group ended). Stock's tab painters (0x4004bd48 lower, 0x4003fed8 upper) repaint only
+  tabs whose cached state changed, and the status-mark painter 0x40044804 runs after them. `cl_tabhook` now
+  replaces the `jsr 0x40044804` at 0x40052238 (calls it, then draws), the 0x40052232 / 0x4004d870 detours are gone;
+  a target change (`cl_tabt`) writes -1 to the side caches 0x400c0c50 / 0x400c0c94 so the next pass repaints every
+  tab. Renders (painters + hook per pass) clean in all three states. Gates on CL17: full 116, T 21, F+Q 27,
+  L+J 19, M+U 38, X+O+W 15, V+Z+I 29, H 3. syx 69f6e4d6….

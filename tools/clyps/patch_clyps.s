@@ -3385,8 +3385,9 @@ sl_f:
     rts
 
 | ================================================================ the group's active track, in its tab
-| cl_tabhook: replaces `jsr 0x4003fed8` (the track sidebars' upper half, the last of stock's sidebar painters, at
-| 0x40052232 every pass and 0x4004d870): the painter, then -- with a [CUE] group that has members and the active
+| cl_tabhook: replaces `jsr 0x40044804` at 0x40052238 (every pass, after the tabs' lower half 0x4004bd48 and upper
+| half 0x4003fed8 -- the status mark painter, the last; it draws over the right tabs' side): it, then -- with a
+| [CUE] group that has members and the active
 | track one of them -- a line inside that track's tab, one pixel in from its outline: along the top, the outer
 | side and the bottom, the corners rounded (the user, 2026-11-06). The tab of column slot k spans y 61 - 15k
 | (top) .. 47 - 15k (bottom) on the main surface 0x400bf10a, x 0..8 (left, tracks 1-4) / 119..127 (right).
@@ -3394,17 +3395,29 @@ sl_f:
     .equ TABSURF,     0x400bf10a
     .equ TABMODE,     0                 | the line: cleared (dark) in the lit tab -- not XOR: a pass that does not repaint the tab would toggle it
 cl_tabhook:
-    jsr     0x4003fed8
+    jsr     0x40044804                  | the last of the three (the status mark draws over the tab's side)
+    moveq   #-1,%d0                     | d0 = the track to mark: none ...
     tst.b   cl_open
-    beq.w   th_out
-    moveq   #0,%d0
-    move.w  cl_grp,%d0
-    beq.w   th_out
-    move.l  %d0,-(%sp)
-    jsr     cl_trk
+    beq.b   th_t
+    moveq   #0,%d1
+    move.w  cl_grp,%d1
+    beq.b   th_t
+    move.l  %d1,-(%sp)
+    jsr     cl_trk                      | ... or the active track, when it is a member of a group
     move.l  (%sp)+,%d1
     btst    %d0,%d1
-    beq.w   th_out                      | the active track is no member
+    bne.b   th_t
+    moveq   #-1,%d0
+th_t:
+    cmp.b   cl_tabt,%d0
+    beq.b   th_same
+    move.b  %d0,cl_tabt                 | another track (or none): both tab painters repaint every tab on
+    moveq   #-1,%d1                     | the next pass -- their per-tab caches skip a tab they think is
+    move.l  %d1,0x400c0c50              | unchanged, which left old lines in place on hardware (the user,
+    move.l  %d1,0x400c0c94              | 2026-11-06): their side-mode caches made invalid
+th_same:
+    tst.b   %d0
+    bmi.w   th_out
     lea     -16(%sp),%sp
     movem.l %d2-%d5,(%sp)
     moveq   #3,%d2
@@ -6291,6 +6304,7 @@ cl_pmoved:  .byte 0                     | the pre-select box shows (an arrow sin
             .align 2
 cl_pre:     .space 32                   | per track: its pre-select arrows (cl_psave / cl_pload; 0 = none)
             .align 2
+cl_tabt:    .byte -1                    | the track whose tab has the line (cl_tabhook), -1 = none
 cl_boxreq:  .byte 0                     | a card reload: the box home at the UI tail (cl_boxhome)
 cl_self:    .byte 0                     | ORIG PTN+PART playing: a pattern change to itself is pending
 cl_wpart:   .byte 0                     | the rest of a Part changed (cl_slrest, a card pattern): its whole mirror

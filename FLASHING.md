@@ -206,6 +206,15 @@ quick check for each:
   responsive.
 - **PART_CHANGE_CARRYOVER_FIX** — a track that is PICKUP on one Part and FLEX on
   another: switching patterns across the Parts plays the FLEX sample, not the old loop.
+- **KYOTI CL17 walk-through** (WIP; `out/KYOTI_WIP/KYOTI_V1.7_WITH_CLYPS/OCTATRACK_OS1.40C_KYOTI_V1.7_WITH_CLYPS.syx`)
+  = CL16 (flashed 2026-11-06; its list below still applies) + the active-track tab line fixed:
+  1. Hold [CUE], add T1 then T2 then T3 (left side): only the newest member's tab has the line, top and bottom
+     halves both; the earlier members' tabs are back to plain.
+  2. Same on the right (MIDI) side with the first member: a full line in the upper half too (not line / gap /
+     single pixel / gap).
+  3. [CUE] up, TRACK of another member: the line moves to it and leaves the old tab clean.
+  4. [NO] ends the group: no tab keeps a line, top or bottom.
+
 - **KYOTI CL16 walk-through** (WIP; `out/KYOTI_WIP/KYOTI_V1.7_WITH_CLYPS/OCTATRACK_OS1.40C_KYOTI_V1.7_WITH_CLYPS.syx`)
   = CL15 (its list below still applies; CL15 was never flashed) + the new multi-select and executions:
   1. Every execution ([YES] or a trig, with or without [FUNC]) takes, per track: its pre-select arrows, else its select
