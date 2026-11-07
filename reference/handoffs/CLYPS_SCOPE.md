@@ -1234,6 +1234,12 @@ the chord reads `PTN LOAD:`, a group `MULTI LOAD:` ("ORIGS FULL"'s box to x 86).
   clears a line one pixel inside the tab (top 60 - 15k, bottom 48 - 15k, side x 1 / 126, x 2..7 / 120..125) on the
   main surface 0x400bf10a with RECT mode 0 (mode 1 is the tab's own colour; not XOR, so a pass that does not
   repaint cannot toggle it). Mock-up approved, then the built hook rendered byte-identical to it.
+- The columns (the user's rules, 2026-11-06): the arrows' long edges on the box borders and 1 px clear of the
+  widest text (a 9-character name: 35 px -- the editor's set, 0x400a77fe, is 4 px at most); every "x" 1 px clear
+  of its box, the box to its left and the window's border. Column 1 holds one-digit slots, so its box starts at
+  the digit: `cl_colx` col 1 = number 5 (digit at 9), box 6..52, x 2..4; col 2 = number 62, box 59..109, x 55..57;
+  `SUM_GAP` 2 (label at number + 10). 1 px to the border both sides; the spare pixel between box 1 and x 2.
+  Checked pixel by pixel on renders with 35 px names in both columns.
 
 ## 2. Decisions
 

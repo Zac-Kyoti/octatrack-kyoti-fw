@@ -37946,3 +37946,14 @@ closes Clyps when the chord began outside); the 4th page LED shows ORIG / chord 
   `A01 07 LK` (`cl_nlocks`: steps with a lock trig or a parameter lock, each once, max 64; step n = bit n of the
   big-endian 64-bit mask, checked on 100 real tracks). No renders this round (the user). Gates on CL14: full 116,
   T 21, F+Q 27, L+J 19, M+U 32, X+O+W 15, V+Z+I 26. syx e72e7c17….
+- **KYOTI CL15 / CL16** (2026-11-06, NOT flashed; CL14 on the unit; CL15 never built for flashing on its own): the grid's
+  yellow only while the pre-select arrows show; ORIG restores no longer bring garbage names (NAMESNAP: cleared before
+  names exist, refreshed per bank as names are read -- a boot-time snapshot left DRAM leftovers); pre-select arrows
+  per track (`cl_pre`); no flash when nothing loads. CL16: every execution through `cl_exec` (per track: a trig's slot
+  for the active track -- with [CUE] held for every member -- else the arrows, else the select box, else the original);
+  `cl_cueload` skips loads of data already playing (`cl_samein`, `cl_slsame`); groups: a non-member TRACK does nothing,
+  [CUE] held moves every member's arrows, the active member's tab gets an inner line (`cl_tabhook`, RECT mode 0 on
+  0x400bf10a after stock's painter); the columns realigned so 35 px names clear the arrows and every "x" clears
+  everything (`cl_colx`). TRAPS: `cl_pexec` (d0-d1) placed before `cl_tsyn` kept its d1 broke temp save / reload
+  (gate T caught it); `cl_tps` was already the ticks-per-step routine (the array is `cl_pre`). Gates on CL16: full
+  116, T 21, F+Q 27, L+J 19, M+U 38, X+O+W 15, V+Z+I 29, H 3. syx bc274305….

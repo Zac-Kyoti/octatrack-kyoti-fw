@@ -6312,9 +6312,13 @@ cl_nq:      .byte 0                     | cues pending (the tick's fast path)
 cl_corners: .short 0,63, 1,63, 0,62, WIN_W-1,63, WIN_W-2,63, WIN_W-1,62
 cl_xpix:    .byte 0,1, 2,1, 1,2, 0,3, 2,3   | the "x": corners and centre of a 3 x 3 at rows y + 1..3
             .align 2
-cl_colx:    .short 7, 8, 52, 3          | column 1: number field, bar / box 8..52, its x at 3..5 (the text 1 px right
-            .short 63, 60, 108, 55      | column 2: numbers 63..69, bar / box 60..108, its x at 55..57   of its box,
-                                        | the user 2026-11-05: was 6 / 62)
+cl_colx:    .short 5, 6, 52, 2          | column 1: number field (slots 1-8: one digit, at 9), bar / box 6..52, x 2..4
+            .short 62, 59, 109, 55      | column 2: numbers 62..68, bar / box 59..109, its x at 55..57
+| (the user, 2026-11-06) the widest text -- a 9-character name, 35 px: the editor's set is 4 px at most
+| (0x400a77fe) -- clears the pre-select arrows by 1 px on both sides (the box: 3 px, the text, 3 px); each
+| "x" clears its box, the box to its left and the window's border. Column 1 holds one-digit slots only, so
+| its box starts at the digit: 47 px against column 2's 51. 1 px from the window's border on both sides (the
+| user); the spare pixel sits between column 1's box and column 2's x (2 px there).
 cl_fmt_hdrt:.asciz "%c%d "
 cl_s_multi: .asciz "MULTI LOAD:"          | a group (40 px: "ORIGS FULL"'s box ends at x 86)
 cl_s_ptnld: .asciz "PTN LOAD:"            | the [PTN]+[BANK] chord held (32 px: "ORIG PTN+PRT"'s box ends at x 86)

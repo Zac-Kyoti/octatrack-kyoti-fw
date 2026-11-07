@@ -218,6 +218,8 @@ quick check for each:
   5. [CUE] held: the arrows move every member's pre-select to the same slot; a trig loads that slot into every
      member.
   6. [NO] ends the group (Clyps stays); [NO] again closes Clyps.
+  7. The columns realigned: a 9-letter name (e.g. `SNAREROLL`) clears the pre-select arrows by a pixel on both sides;
+     every "x" clears the boxes, the arrows and the window's border.
 
 - **KYOTI CL15 walk-through** (WIP; `out/KYOTI_WIP/KYOTI_V1.7_WITH_CLYPS/OCTATRACK_OS1.40C_KYOTI_V1.7_WITH_CLYPS.syx`)
   = CL14 (flashed 2026-11-06) + LED / name fixes and pre-select arrows per track:
