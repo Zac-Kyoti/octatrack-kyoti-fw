@@ -25,6 +25,8 @@ SITES (our own disassembly of 1.40C; proofs: reference/handoffs/REC_TRIG_MUTE_SC
   * the tab letter renderer 0x4003fed8 (audio mode redraws every letter cell on every UI
     poll): its PICKUP test (0x40040146), where rtm_dots adds the dots before the active-tab
     inversion;
+  * the tab mark painter 0x40044804, which runs after it and rewrites the column of T1-4's dots
+    (its '!'): its per-track end (0x400448ba), where rtm_mark writes the dots again;
   * the stock CC handler's fall-through for every CC it ignores (0x4000f210);
   * the track-key release handler 0x40083e40, where it clears the key's held bit (0x40083e84).
 
@@ -57,6 +59,11 @@ GATE_STOCK = bytes.fromhex("4a83676e243c0000091a")
 # the PICKUP test and draws the dots for a muted track
 DOTS = 0x40040146
 DOTS_STOCK = bytes.fromhex("7004b08c667a")
+# stock's mark painter 0x40044804 (after both tab renderers, every UI pass): its per-track end
+# `addq.l #1,%d4 ; lea 32(%sp),%sp` -- it rewrites the T1-4 dot column, so rtm_mark writes the
+# dots again there (and clears its '!' under them)
+MARK = 0x400448ba
+MARK_STOCK = bytes.fromhex("52844fef0020")
 # CC handler fall-through: `moveq #119,%d6 ; cmp.l %d1,%d6 ; bge 0x4000f274`
 CC = 0x4000f210
 CC_STOCK = bytes.fromhex("7c77bc816c5e")
@@ -73,7 +80,7 @@ REC_STOCK = 0x40048774              # stock [REC]: GRID REC toggle, "REC held"
 # tools/build_rec_trig_mute.py builds this on every run, with octabam's own DRAM-unit oracle
 # recipe (m68k-elf-as -mcpu=54455 --defsym OCTABAM_UNIT=0x1; ld -Ttext=0x40000000 + the same
 # defsym; objcopy -O binary), and refuses if this line no longer matches.
-REFERENCE = (0x40000000, "db6105972abe1b7c2accdb8b6af836f3ffe0f6237271aa6043fecb651b56bc23")
+REFERENCE = (0x40000000, "39377c4ed7140925f4d3e5a4f3cd1a14796df3b40901ec7c3abd0426644157b1")
 
 
 MODULE = Module(
@@ -91,6 +98,8 @@ MODULE = Module(
                "step handler: a muted track's step has no recorder trig", pad_to=10),
         Detour(DOTS, DOTS_STOCK, "rtm", "rtm_dots",
                "tab letter renderer: two dots beside a muted track's letter"),
+        Detour(MARK, MARK_STOCK, "rtm", "rtm_mark",
+               "tab mark painter: the T1-4 dots again after its column (it runs last)"),
         Detour(CC, CC_STOCK, "rtm", "rtm_cc",
                "CC handler fall-through: CC 80, else stock's compare replayed"),
         Detour(TREL, TREL_STOCK, "rtm", "rtm_trel",

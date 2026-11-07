@@ -19,8 +19,10 @@ Boots the image, loads the factory OT DEMO, then drives:
                barely runs the UI frame) LCD pixels: two dots stacked beside every muted
                track's machine letter on its inner side (x+4 on T1-4, x-2 on T5-8; rows = the
                letter's top row and two below), inverted on the active tab, a blank pixel
-               between letter and dots, none on unmuted or PICKUP tracks; the status
-               renderer's cache stays stock; LCD screenshot
+               between letter and dots, none on unmuted or PICKUP tracks; rendered as
+               hardware does, the mark painter 0x40044804 last (its '!' column is T1-4's dot
+               column): dots over a lit '!', stock '!' elsewhere; the status renderer's cache
+               stays stock; LCD screenshots
 
 Every result is printed as PASS / FAIL.  Logic only: route A has no real DSP/audio path, so
 whether a recording really stops is a hardware question.
@@ -49,6 +51,7 @@ RTM_MASK, HELD, CACHE = 0x400d7c3a, 0x460fab40, 0x400c0cb8
 RENDER = 0x4004bd48                 # the status-icon renderer; on hardware FUN_40052200's
                                     # UI-frame path polls it (0x4005222e), which route A barely runs
 LETTERS = 0x4003fed8                # the tab letter renderer, polled right after it (0x40052232)
+MARKS = 0x40044804                  # the tab mark painter ('!'), polled last (0x40052238)
 LCD = 0x46c7e0ea
 REC_FIELDS = (0x400c003c, 0x400c0040, 0x400c0620, 0x400c0624)    # [REC] keymap press/release
 TRK_YES_FIELD, TRK_NO_FIELD = 0x400d15e4, 0x400d15fe                # [TRACK]-layer YES / NO
@@ -81,6 +84,8 @@ def main():
     ap.add_argument("--frames", type=int, default=1500)
     ap.add_argument("--png", default=str(ROOT / "out" / "rec_trig_mute_lcd.png"))
     a = ap.parse_args()
+    if not pathlib.Path(a.png).is_absolute():          # the module chdir'd into octabam: like --image,
+        a.png = str(ROOT / a.png)                       # a relative path is the repo's
     image = pathlib.Path(a.image)
     if not image.is_absolute():
         image = ROOT / image
@@ -301,36 +306,58 @@ def main():
         spin()
         rt.call_as_main(RENDER)
         rt.call_as_main(LETTERS)
+        rt.call_as_main(MARKS)                           # last, as on hardware: it found the T1-4 bug
         return lcd_view.pixels(rd(LCD, 1024))
-    act = u8(0x80000000)
+    act0 = u8(0x80000000)
     part = u32(0x46c82456) + u8(0x80000003) * 6322 + 585122        # the renderers' machine byte
     machine = [rd(part + t, 1)[0] for t in range(8)]
-    print(f"  active track T{act + 1}, machines {machine} (4 = PICKUP)")
+    print(f"  active track T{act0 + 1}, machines {machine} (4 = PICKUP)")
 
     def dots(px, t):
-        """(dot column rows top..top+3, gap column rows top..top+3, background) for track t."""
-        a = 1 if t == act else 0
+        """(dot column rows top-1..top+3, gap column rows top..top+3, background) for track t."""
+        a = 1 if t == u8(0x80000000) else 0
         x = 2 + a + 4 if t < 4 else 123 - a - 2
         gx = x - 1 if t < 4 else x + 1
         top = 5 + 15 * (t & 3)                           # the letter's top row on screen
-        return ([px[top + i][x] for i in range(4)], [px[top + i][gx] for i in range(4)], a)
+        return ([px[top + i][x] for i in range(-1, 4)], [px[top + i][gx] for i in range(4)], a)
 
-    def check_tabs(mask, what):
+    def check_tabs(mask, what, bang=(), act=None):
+        """bang: tracks whose stock '!' (the mark painter's column: voice +0 and +3 set) is lit."""
         w8(RTM_MASK, mask)
+        if act is not None:
+            w8(0x80000000, act)
+        saved = {t: rd(0x800049d8 + 168 * t, 4) for t in bang}
+        for t in bang:
+            w8(0x800049d8 + 168 * t, 0xff)
+            w8(0x800049d8 + 168 * t + 3, 1)
         px = render()
         for t in range(8):
             col, gap, bg = dots(px, t)
-            want = [1 - bg, bg, 1 - bg, bg] if (mask >> t) & 1 and machine[t] != 4 else [bg] * 4
+            fg = 1 - bg
+            if (mask >> t) & 1 and machine[t] != 4:
+                want = [bg, fg, bg, fg, bg]              # the dots, over a lit '!' too
+            elif t in bang and t < 4:
+                want = [fg, fg, fg, bg, fg]              # stock's '!' (T5-8: at x = 127)
+            else:
+                want = [bg] * 5
             check(col == want and gap == [bg] * 4,
-                  f"{what} T{t + 1}{' (active)' if t == act else ''}"
-                  f"{' (PICKUP: none)' if machine[t] == 4 else ''}: dots {col} want {want}, gap {gap}")
+                  f"{what} T{t + 1}{' (active)' if bg else ''}{' (!)' if t in bang else ''}"
+                  f"{' (PICKUP: none)' if machine[t] == 4 else ''}: column {col} want {want}, gap {gap}")
+        for t, v in saved.items():
+            uc.mem_write(0x800049d8 + 168 * t, v)
+        if act is not None:
+            w8(0x80000000, act0)
         return px
     check_tabs(0, "unmuted: no dots")
-    px = check_tabs(0b00010001 | (1 << act), "T1 + T5 + the active track muted")
+    px = check_tabs(0b00010001 | (1 << act0), "T1 + T5 + the active track muted")
     cache = [u32(CACHE + 4 * t) for t in range(8)]
     check(all(c < 8 for c in cache), f"status-icon cache holds stock states only (0-7): {cache}")
+    pxb = check_tabs(0b00010001, "stock '!' lit on T1 (muted) and T2:", bang=(0, 1))
+    pxa = check_tabs(0b00010001, "T1 active (filled tab):", act=0)
+    for img, tag in ((pxb, "_bang"), (pxa, "_t1active")):
+        lcd_view.png(img, a.png.replace(".png", f"{tag}.png"))
     uc.mem_write(trac(0) + 0x20, b"\0" * 8)                # T1: no recorder trigs at all
-    check(dots(render(), 0)[0][0] == 1 - (act == 0), "muted T1 with NO recorder trigs: still dots")
+    check(dots(render(), 0)[0] == [0, 1, 0, 1, 0], "muted T1 with NO recorder trigs: still dots")
     lcd_view.png(px, a.png)
     print(f"  LCD -> {a.png}")
     uc.mem_write(trac(0) + 0x20, b"\xff" * 8)              # T1's REC1 back for the unmute test
@@ -342,7 +369,7 @@ def main():
     later = [v for tt, v in flag_writes[n0:] if tt == 0 and v & 0x7000]
     check(len(later) > 0, f"T1 recorder trigs reach 0x46c7a6c0[0] again: {len(later)}")
     col, _, bg = dots(render(), 0)
-    check(col == [bg] * 4, f"unmuted T1: dots gone {col}")
+    check(col == [bg] * 5, f"unmuted T1: dots gone {col}")
 
     print(f"\n{'ALL PASS' if not fails else f'{len(fails)} FAIL'}")
     return 1 if fails else 0

@@ -19,7 +19,7 @@
 |   .ccrx   0x4009e7dc  an orphaned arranger-row resolver ("ARR PARSE ERROR")
 | The only runtime-written byte, RTM_MASK, lives in the proven-writable classic cave.
 
-    .globl rtm_rec, rtm_trel, rtm_gate, rtm_dots, rtm_cc
+    .globl rtm_rec, rtm_trel, rtm_gate, rtm_dots, rtm_mark, rtm_cc
 
 | OCTABAM_UNIT (--defsym; the octabam module octabam-modules/rec-trig-mute): one linked unit
 | octabam places itself -- a single section, RTM_MASK inside it, the step-handler hook a plain
@@ -54,6 +54,9 @@
     .equ SETPIX,    0x40011830      | FUN_40011830(plane, x, y, value)
     .equ L_PICKUP,  0x4004014c      | letter renderer: PICKUP's own marks
     .equ L_JOIN,    0x400401c6      | letter renderer: active-tab inversion, then the next track
+    .equ M_NEXT,    0x400448c0      | mark painter: the next track
+    .equ PART_BASE, 0x46c82456      | -> the bank; + part * 6322 + 585122 + t = track t's machine
+    .equ PART_IDX,  0x80000003
 
 | ------------------------------------------------------------------ .main @ 0x40032bd4
 | handler(keycode@4, event@8): the base keymaps' [REC] records (T1 0x400bfc3a, T2 0x400c061e,
@@ -140,6 +143,54 @@ rtm_tx:
     movem.l (%sp),%d2-%d4
     lea     12(%sp),%sp
     rts
+
+| stock's mark painter 0x40044804 runs after both tab renderers on every UI pass (0x40052238) and,
+| per track, sets or clears four pixels in the column beside the letter: x = 6 / 7 (active) on
+| T1-4 -- rtm_dots' column -- and x = 127 / 126 on T5-8, at y = a2, a2+2, a2+3, a2+4 (its a2 =
+| the letter's bottom row; lit -- a '!' -- when the voice runs with byte +3 set).  That cleared
+| our top dot on T1-4 (hardware, 2026-11-07).  `jmp rtm_mark` replaces its per-track end `addq.l
+| #1,%d4 ; lea 32(%sp),%sp`; on a muted, non-PICKUP T1-4 tab it writes the column again from
+| a2+4 down: background, dot, background, dot, background, so the dots win over a lit '!'.
+| d2 = x (6 + active), d3 = what stock wrote; both and a2 are reloaded by the painter's next pass.
+rtm_mark:
+    addq.l  #1,%d4                  | the displaced instructions
+    lea     32(%sp),%sp
+    moveq   #4,%d0
+    cmp.l   %d4,%d0                 | d4 = t + 1 now: T5-8 untouched
+    blt.s   9f
+    move.l  %d5,-(%sp)              | the painter's caller's: kept
+    moveq   #-1,%d5
+    add.l   %d4,%d5                 | d5 = t
+    mvz.b   RTM_MASK,%d0
+    btst    %d5,%d0
+    beq.s   8f
+    mvz.b   PART_IDX,%d0            | the letter renderer's machine byte (0x4004009a)
+    mulu.w  #6322,%d0
+    add.l   PART_BASE,%d0
+    add.l   %d5,%d0
+    move.l  %d0,%a0
+    adda.l  #585122,%a0
+    mvs.b   (%a0),%d0
+    moveq   #4,%d1
+    cmp.l   %d0,%d1                 | PICKUP: no dots, stock's marks stand
+    beq.s   8f
+    move.l  %d2,%d3
+    subq.l  #6,%d3                  | background: 0 on a tab, 1 on the active (filled) one
+    move.l  %a2,%d5                 | the last row, a2+0
+    addq.l  #5,%a2
+1:  subq.l  #1,%a2                  | a2+4 .. a2+0
+    move.l  %d3,-(%sp)
+    move.l  %a2,-(%sp)
+    move.l  %d2,-(%sp)
+    pea     PLANE
+    jsr     (%a3)                   | the painter's SETPIX (0x40011830); keeps d2-d5, a2-a4
+    lea     16(%sp),%sp
+    moveq   #1,%d0
+    eor.l   %d0,%d3                 | background, dot, background, dot, background
+    cmp.l   %a2,%d5
+    bne.s   1b
+8:  move.l  (%sp)+,%d5
+9:  jmp     M_NEXT
 
 | ------------------------------------------------------------------ .draw @ 0x4005a0e0
 | letter renderer 0x4003fed8 (audio mode; it redraws every tab's letter cell on every UI poll, so
