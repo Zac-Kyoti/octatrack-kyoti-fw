@@ -3384,74 +3384,114 @@ sl_f:
     lea     24(%sp),%sp
     rts
 
-| ================================================================ the group's active track, in its tab
+| ================================================================ the group's tabs
 | cl_tabhook: replaces `jsr 0x40044804` at 0x40052238 (every pass, after the tabs' lower half 0x4004bd48 and upper
-| half 0x4003fed8 -- the status mark painter, the last; it draws over the right tabs' side): it, then -- with a
-| [CUE] group that has members and the active
-| track one of them -- a line inside that track's tab, one pixel in from its outline: along the top, the outer
-| side and the bottom, the corners rounded (the user, 2026-11-06). The tab of column slot k spans y 61 - 15k
-| (top) .. 47 - 15k (bottom) on the main surface 0x400bf10a, x 0..8 (left, tracks 1-4) / 119..127 (right).
+| half 0x4003fed8 -- the status mark painter, the last): it, then -- with a Clyps group (cl_gmask) -- a one-pixel
+| outline of the tab's own edge on every member but the active track, unfilled inside (the user, 2026-11-06);
+| the active track's tab is stock's filled one (cl_act3 / cl_act4 light only it). The tab of column slot k spans
+| y 61 - 15k (top) .. 47 - 15k (bottom) on the main surface 0x400bf10a, x 0..8 (left, tracks 1-4) / 119..127
+| (right): outline = the top and bottom rows x 1..7, the outer column x 0, y 48..60 (the corners rounded, the
+| inner side is the window's border). Pixels SET (mode 1): a pass that does not repaint the tab cannot toggle
+| them. A change of the group, the active track or the side resets both painters' side caches, so their next
+| pass repaints every tab (they skip a tab whose state they think unchanged: stale marks, CL16 on hardware).
 | Drawing as the painters do (RECT); never a kernel / notify call here (CLAUDE.md, 0x40052200).
     .equ TABSURF,     0x400bf10a
-    .equ TABMODE,     0                 | the line: cleared (dark) in the lit tab -- not XOR: a pass that does not repaint the tab would toggle it
 cl_tabhook:
-    jsr     0x40044804                  | the last of the three (the status mark draws over the tab's side)
-    moveq   #-1,%d0                     | d0 = the track to mark: none ...
-    tst.b   cl_open
-    beq.b   th_t
+    jsr     0x40044804
+    move.l  cl_gmask,%d0                | the signature: 0 = no group, else the members | active << 20 | side
+    beq.b   th_sig
     moveq   #0,%d1
-    move.w  cl_grp,%d1
-    beq.b   th_t
-    move.l  %d1,-(%sp)
-    jsr     cl_trk                      | ... or the active track, when it is a member of a group
-    move.l  (%sp)+,%d1
-    btst    %d0,%d1
-    bne.b   th_t
-    moveq   #-1,%d0
-th_t:
-    cmp.b   cl_tabt,%d0
+    move.b  CUR_TRACK,%d1
+    lsl.l   #8,%d1
+    lsl.l   #8,%d1
+    lsl.l   #4,%d1
+    or.l    %d1,%d0
+    tst.l   MIDI_MODE
+    beq.b   th_sig
+    ori.l   #0x08000000,%d0
+th_sig:
+    cmp.l   cl_tabsig,%d0
     beq.b   th_same
-    move.b  %d0,cl_tabt                 | another track (or none): both tab painters repaint every tab on
-    moveq   #-1,%d1                     | the next pass -- their per-tab caches skip a tab they think is
-    move.l  %d1,0x400c0c50              | unchanged, which left old lines in place on hardware (the user,
-    move.l  %d1,0x400c0c94              | 2026-11-06): their side-mode caches made invalid
+    move.l  %d0,cl_tabsig
+    moveq   #-1,%d1
+    move.l  %d1,0x400c0c50              | the painters' side-mode caches made invalid
+    move.l  %d1,0x400c0c94
 th_same:
-    tst.b   %d0
-    bmi.w   th_out
-    lea     -16(%sp),%sp
-    movem.l %d2-%d5,(%sp)
+    tst.l   %d0
+    beq.w   th_out
+    lea     -24(%sp),%sp
+    movem.l %d2-%d7,(%sp)
+    move.l  cl_gmask,%d6                | d6 = the shown side's members ...
+    tst.l   MIDI_MODE
+    beq.b   th_ms
+    lsr.l   #8,%d6
+th_ms:
+    andi.l  #0xff,%d6
+    moveq   #0,%d0
+    move.b  CUR_TRACK,%d0
+    bclr    %d0,%d6                     | ... but the active track (stock's filled tab)
+    moveq   #0,%d7                      | d7 = t 0..7 on that side
+th_lp:
+    btst    %d7,%d6
+    beq.b   th_nx
     moveq   #3,%d2
-    and.l   %d0,%d2
+    and.l   %d7,%d2
     moveq   #-15,%d1
     muls.l  %d1,%d2                     | d2 = -15k
     moveq   #0,%d3                      | d3 = 0: the left side, else 127 (x mirrored: 127 - x)
-    btst    #2,%d0
+    btst    #2,%d7
     beq.b   th_l
     moveq   #127,%d3
 th_l:
-|   one vertical line on the outer side (the user, 2026-11-06): x = 1 (right: 126), y 48 - 15k .. 60 - 15k,
-|   the outer edge's straight run (the corners curve in at 47 / 61)
-    moveq   #48,%d4
+    moveq   #61,%d4                     | the top row
+    add.l   %d2,%d4
+    move.l  %d4,%d5
+    moveq   #1,%d0
+    moveq   #7,%d1
+    bsr.b   th_r
+    moveq   #47,%d4                     | the bottom row
+    add.l   %d2,%d4
+    move.l  %d4,%d5
+    moveq   #1,%d0
+    moveq   #7,%d1
+    bsr.b   th_r
+    moveq   #48,%d4                     | the outer column
     add.l   %d2,%d4
     moveq   #60,%d5
     add.l   %d2,%d5
-    moveq   #1,%d0
-    tst.l   %d3
-    beq.b   th_sx
-    move.l  %d3,%d0
-    subq.l  #1,%d0
-th_sx:
-    pea     TABMODE
+    moveq   #0,%d0
+    moveq   #0,%d1
+    bsr.b   th_r
+th_nx:
+    addq.l  #1,%d7
+    moveq   #8,%d0
+    cmp.l   %d0,%d7
+    bne.b   th_lp
+    movem.l (%sp),%d2-%d7
+    lea     24(%sp),%sp
+th_out:
+    rts
+th_r:                                   | RECT(surf, x0, y0, x1, y1, 1): x d0..d1 (the left side's), y d4..d5;
+    pea     1                           | mirrored when d3 = 127 (x0 = 127 - d1, x1 = 127 - d0)
     move.l  %d5,-(%sp)
-    move.l  %d0,-(%sp)
+    tst.l   %d3
+    bne.b   th_rm
+    move.l  %d1,-(%sp)
     move.l  %d4,-(%sp)
     move.l  %d0,-(%sp)
+    bra.b   th_rd
+th_rm:
+    neg.l   %d0
+    add.l   %d3,%d0
+    neg.l   %d1
+    add.l   %d3,%d1
+    move.l  %d0,-(%sp)
+    move.l  %d4,-(%sp)
+    move.l  %d1,-(%sp)
+th_rd:
     pea     TABSURF
     jsr     RECT
     lea     24(%sp),%sp
-    movem.l (%sp),%d2-%d5
-    lea     16(%sp),%sp
-th_out:
     rts
 
 | cl_ptnswitch (UI task): a pattern reload from the card finished (cl_ptngo = 0x80 | N, clyps_reload.s):
@@ -4480,15 +4520,33 @@ uk_out:
 | the glyph (0x40044804, audio, d4; CLYPV missed it: a stray "!") -- and of the track LED painter
 | (0x40083eb0, LED slot 6, its track in d5: the active colours), nine sites of
 | `mvzb 0x80000000,%d0` -> jsr here (scope §1.9). With a Clyps group (cl_gmask: [CUE] held, or
-| members picked) d0 = the track itself when it is a member, -1 otherwise, so every member gets the
-| tab and the colours and the active track only if it is one. Else stock's byte. Keeps all but d0.
+| members picked): the LED painter (cl_act5) gets d0 = the track itself when it is a member, -1 otherwise,
+| so every member gets the colours; the tab sites (cl_act3 / cl_act4) get the active track when it is a
+| member, else -1 -- only its tab is filled, cl_tabhook outlines the others (the user, 2026-11-06). Else
+| stock's byte. Keeps all but d0.
 | ROM: both painters run before the DRAM part exists (cl_magic).
 cl_act3:
     move.l  %d3,%d0
-    bra.b   ca_go
+    bra.b   ct_go
 cl_act4:
     move.l  %d4,%d0
-    bra.b   ca_go
+ct_go:                                  | the tabs (the user, 2026-11-06): in a group only the active track's
+    move.l  %d1,-(%sp)                  | tab is the filled one, when it is a member (the other members: an
+    move.l  cl_magic,%d1                | outline, cl_tabhook); the LEDs (cl_act5) still light every member
+    cmpi.l  #CL_MAGIC,%d1
+    bne.b   ca_stock
+    move.l  cl_gmask,%d1
+    beq.b   ca_stock
+    tst.l   MIDI_MODE
+    beq.b   ct_side
+    lsr.l   #8,%d1
+ct_side:
+    moveq   #0,%d0
+    move.b  CUR_TRACK,%d0
+    btst    %d0,%d1
+    bne.b   ca_out
+    moveq   #-1,%d0
+    bra.b   ca_out
 cl_act5:
     move.l  %d5,%d0
 ca_go:
@@ -6258,6 +6316,7 @@ cl_ledrec:  .long 0, cl_paint, cl_blink
 
 cl_win:     .long 0
 cl_gmask:   .long 0                     | the painters' group test (cl_gupd): 0 = none, else 0x10000 | members
+cl_tabsig:  .long 0                     | the tabs' last group / active / side (cl_tabhook)
 cl_grp:     .short 0                    | the group's members: bit t, MIDI 8..15 (scope §1.9)
 cl_cuh:     .byte 0                     | [CUE] held (our own press / release record)
 cl_gn:      .byte 0                     | cl_gord's entries
@@ -6314,7 +6373,6 @@ cl_pmoved:  .byte 0                     | the pre-select box shows (an arrow sin
             .align 2
 cl_pre:     .space 32                   | per track: its pre-select arrows (cl_psave / cl_pload; 0 = none)
             .align 2
-cl_tabt:    .byte -1                    | the track whose tab has the line (cl_tabhook), -1 = none
 cl_ptngo:   .byte 0                     | 0x80 | N: a pattern reload finished, go to pattern N (cl_ptnswitch)
 cl_boxreq:  .byte 0                     | a card reload: the box home at the UI tail (cl_boxhome)
 cl_self:    .byte 0                     | ORIG PTN+PART playing: a pattern change to itself is pending

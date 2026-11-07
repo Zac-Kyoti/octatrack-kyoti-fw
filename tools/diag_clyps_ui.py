@@ -1951,14 +1951,23 @@ def main(argv):
         def tabs():
             # stock's sidebars 0x4003fed8: 0x40052200 runs them on every pass on hardware, route A never
             # does. An inverted tab fills its 8 x 8 edge cell; a plain one holds only its glyph.
+            # The group's members but the active track: a one-pixel outline (cl_tabhook, after all three
+            # painters; the user, 2026-11-06) -- top / bottom rows x 1..7, the outer column x 0 (mirrored right).
+            callm(0x4004BD48)
             callm(0x4003FED8)
+            callm(syms["cl_tabhook"])
             px = lcd_view.pixels(bytes(u.mem_read(PLANE, 1024)))
-            n = []
+            n, outl = [], []
             for k in range(8):
                 xs = range(0, 8) if k < 4 else range(120, 128)
                 y0 = 63 - (61 - 15 * (k & 3))
                 n.append(sum(px[y][x] for y in range(y0, y0 + 8) for x in xs))
-            return [k for k in range(8) if n[k] >= 32], n
+                mx = (lambda x: x) if k < 4 else (lambda x: 127 - x)
+                edge = (all(px[y0][mx(x)] for x in range(1, 8)) and all(px[y0 + 14][mx(x)] for x in range(1, 8))
+                        and all(px[y][mx(0)] for y in range(y0 + 1, y0 + 14)))
+                if edge and n[k] < 32:
+                    outl.append(k)
+            return [k for k in range(8) if n[k] >= 32], n, outl
         grp = lambda: rd(syms["cl_grp"], 2)
         gmask = lambda: rd(syms["cl_gmask"], 4)
         if rd(0x80000012, 4):              # M leaves the MIDI side showing: U starts on the audio side
@@ -1982,14 +1991,14 @@ def main(argv):
         key(BANK, 0)
         key(PTN, 0)
         act = rd(0x800065BE, 1)
-        t0, n0 = tabs()
-        check(state()["open"] == 1 and gmask() == 0 and t0 == [a0] and tled()[a0] == lact[a0],
+        t0, n0, o0 = tabs()
+        check(state()["open"] == 1 and gmask() == 0 and t0 == [a0] and o0 == [] and tled()[a0] == lact[a0],
               f"open, no group: the tab and the active colours on T{a0 + 1} (tabs {t0}, cells {n0})")
         q = next(q for q in range(16) if q != act and all(rec(q, k) != rec(act, k) for k in m))
         before = [rec(act, k) for k in range(8)]
         key(CUE, 1)
-        t1, n1 = tabs()
-        check(rd(syms["cl_cuh"], 1) != 0 and gmask() == 0x10000 and t1 == [] and tled() == lnone,
+        t1, n1, o1 = tabs()
+        check(rd(syms["cl_cuh"], 1) != 0 and gmask() == 0x10000 and t1 == [] and o1 == [] and tled() == lnone,
               f"[CUE] held: no tab, no active colours (tabs {t1}, cells {n1})")
         tap(q)
         check([rec(act, k) for k in range(8)] == before and rd(syms["cl_flk"], 1) == 0,
@@ -1997,9 +2006,11 @@ def main(argv):
         for k in m:
             tap(0x10 + k)
         bits = sum(1 << k for k in m)
-        t2, n2 = tabs()
+        t2, n2, o2 = tabs()
         led2 = tled()
-        check(grp() == bits and t2 == sorted(m), f"[CUE]+TRACK: members {m} have the tabs (tabs {t2}, cells {n2})")
+        check(grp() == bits and t2 == [m[1]] and o2 == [m[0]],
+              f"[CUE]+TRACK: members {m}: the active (last added) T{m[1] + 1} the filled tab, T{m[0] + 1} an outline "
+              f"(filled {t2}, outlined {o2}, cells {n2})")
         check(rd(0x80000000, 1) == m[1], f"... and the view follows the last added, T{m[1] + 1} ({rd(0x80000000, 1)})")
         check(all(led2[k] == (lact[k] if k in m else lnone[k]) for k in range(8)),
               f"... and the active colours, the others plain ({led2})")
@@ -2008,7 +2019,8 @@ def main(argv):
         tap(0x10 + m[1])
         check(grp() == bits and rd(0x80000000, 1) == m[1], "[CUE]+TRACK twice: out, then in again (the view with it)")
         key(CUE, 0)
-        check(gmask() == 0x10000 | bits and tabs()[0] == sorted(m), "[CUE] released: the group stays")
+        t3, _, o3 = tabs()
+        check(gmask() == 0x10000 | bits and t3 == [m[1]] and o3 == [m[0]], f"[CUE] released: the group stays (filled {t3}, outlined {o3})")
         shot("U1_group")
         # executions (the user, 2026-11-06): the active member a trig's slot; every other member its own
         # arrows, else its select box, else its original; a load of what already plays does nothing
@@ -2102,8 +2114,8 @@ def main(argv):
         key(CUE, 0)
         check(rd(0x80000000, 1) == m[0] and grp() == 0x100 | (1 << m[0]), f"... T{m[0] + 1} in again: the view on it")
         tap(NO)
-        t3, _ = tabs()
-        check(state()["open"] == 1 and grp() == 0 and gmask() == 0 and t3 == [m[0]]
+        t3, _, o3 = tabs()
+        check(state()["open"] == 1 and grp() == 0 and gmask() == 0 and t3 == [m[0]] and o3 == []
               and tled()[m[0]] == lact[m[0]] and rd(0x80000000, 1) == m[0],
               "[NO]: the group is gone, Clyps stays, the view and the tab stay on the active track")
         tap(NO)

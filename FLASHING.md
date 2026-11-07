@@ -208,6 +208,14 @@ quick check for each:
   responsive.
 - **PART_CHANGE_CARRYOVER_FIX** — a track that is PICKUP on one Part and FLEX on
   another: switching patterns across the Parts plays the FLEX sample, not the old loop.
+- **KYOTI CL19 walk-through** (WIP; `out/KYOTI_WIP/KYOTI_V1.7_WITH_CLYPS/OCTATRACK_OS1.40C_KYOTI_V1.7_WITH_CLYPS.syx`)
+  = CL18 (its list below still applies, except its step 5) + the group's tabs redrawn:
+  1. Hold [CUE], add T6, T7, T1: T1 (the active track) is the normal filled tab; T6 and T7 show a one-pixel
+     outline of the tab's own edge (rounded corners), unfilled, their letters and icons visible.
+  2. [CUE] up, TRACK 6: T6 becomes the filled tab, T1 an outline; no leftovers.
+  3. [NO] ends the group: every tab back to stock (the active track filled, the others plain).
+  4. The track LEDs still light every member as before.
+
 - **KYOTI CL18 walk-through** (WIP; `out/KYOTI_WIP/KYOTI_V1.7_WITH_CLYPS/OCTATRACK_OS1.40C_KYOTI_V1.7_WITH_CLYPS.syx`)
   = CL17 (its list below still applies) + the pattern reload switches pattern, a new tab line, and the
   REC_TRIG_MUTE mute dots:

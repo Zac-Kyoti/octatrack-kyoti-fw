@@ -1271,6 +1271,16 @@ the chord reads `PTN LOAD:`, a group `MULTI LOAD:` ("ORIGS FULL"'s box to x 86).
 - **REC_TRIG_MUTE's mute dots** (main 4d03a7c, merged into trkseq): the letter renderer detour 0x40040146 sits
   inside 0x4003fed8; Clyps' tab line is drawn after all three painters, on the outer side, the dots on the inner.
 
+### 1.23 The group's tabs: members outlined, the active track filled (the user, 2026-11-06; KYOTI CL19, not flashed)
+
+- Replaces §1.20 / §1.22's line: in a group the tab sites (`cl_act3` / `cl_act4`) answer the active track when
+  it is a member, else -1 -- only its tab is stock's filled one; the LED site (`cl_act5`) still answers every
+  member. `cl_tabhook` SETS (RECT mode 1) a one-pixel outline on every other member of the shown side: the top
+  and bottom rows (y 61 - 15k / 47 - 15k, x 1..7) and the outer column (x 0, y 48..60 - 15k), mirrored on the
+  right (127 - x); the inner side is the window's border. A change of the group, the active track or the side
+  (`cl_tabsig`) resets both painters' side caches so they repaint every tab, which also clears old outlines.
+  Render: T1 active = T1 filled, T6 / T7 outlined; T6 active = T6 filled, T1 / T7 outlined; [NO] = stock tabs.
+
 ## 2. Decisions
 
 ### Settled (2026-10-26, the user)

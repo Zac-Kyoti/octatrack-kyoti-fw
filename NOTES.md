@@ -38100,3 +38100,10 @@ Now 936 / 932 (<= 945): the pair fits, SC's donor becomes PLATE REV.
   MAC loops eat the key-call budget; frames off: the card job never completes) -- harness only, the check after
   it was dropped. Gates on CL18: full 116, T 21, F+Q 27, L 17, J 8, M+U 38, X+O+W 15, V+Z+I 29, H 3.
   syx f99f3492….
+- **KYOTI CL19** (2026-11-06, NOT flashed; CL16 on the unit): the group's tabs redrawn (the user: no vertical
+  line): the tab sites (`cl_act3` / `cl_act4`) light only the active track (when a member), the LED site
+  (`cl_act5`) still every member; `cl_tabhook` SETS a one-pixel outline of the tab's own edge on the other
+  members (top / bottom rows x 1..7, outer column x 0, mirrored right), and resets the painters' side caches on
+  a change of group / active / side (`cl_tabsig`). Gate U's tab check now reads filled vs outlined pixels
+  (painters B, A + cl_tabhook). Gates on CL19: full 116, T 21, F+Q 27, L 17, J 8, M+U 38, X+O+W 15,
+  V+Z+I 29, H 3. syx 2f27938b….
