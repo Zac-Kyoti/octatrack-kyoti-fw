@@ -62,8 +62,8 @@ instead.
   70 Hz filter floor, the 303's accent sweep capacitor, the 303's decays, the knobs on the real 303's ranges,
   a steadier loudness across CUT, +3 dB into the drive, a click-free VOL crossing. What is Open303's and what
   is new: `reference/BLACKPYRAMIDS_303.md` in Zac-Kyoti/octatrack-kyoti-fw.
-- **Cost:** 455 / 598 cycles a sample (saw / square) in `host_check.py`. P: 1,026 words on payload A and
-  1,022 on B, of SPRING's 1,028.
+- **Cost:** 451 / 591 cycles a sample (saw / square) in `host_check.py`. P: 936 words on payload A and
+  932 on B, of SPRING's 1,028.
 - **This octabam form,** built in `remixes/test/blackpyramids-303`:
   - the runtime unit matches the author's bytes (`reference`), and the platform places it at the
     same address as the standalone;

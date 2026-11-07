@@ -29,6 +29,14 @@ THE CHECK: the finished blob is disassembled and every instruction is
 compared, operand for operand, with the source (labels resolved). Any
 mismatch is fatal. Data words are skipped.
 
+SHORT BRANCHES (opt-in: assemble(..., short_branches=STOCK_SHORT)): dsp_asm
+emits only the two-word branch. A branch to a label whose 9-bit displacement
+fits becomes the one-word form, for the ops in short_branches only (STOCK_SHORT:
+the ones stock's own payloads run, never bcc/bcs). A first assembly with every
+branch long gives the distances; shrinking branches only shortens them, so each
+chosen branch still fits after. THE CHECK disassembles each one. Without the
+argument nothing changes, so every other caller's words stay as they were.
+
     python3 tools/dsp_xasm.py SRC ORG [--list]      (prints words as hex)
     import dsp_xasm; words, syms = dsp_xasm.assemble(src_text, org)
 """
@@ -48,6 +56,22 @@ MOVEM_DST = {"x0": 0b000100, "x1": 0b000101, "y0": 0b000110, "y1": 0b000111,
 
 BRANCHES = {"bra", "bsr", "bcc", "bcs", "beq", "bge", "bgt", "bhs", "ble", "blo", "blt",
             "bmi", "bne", "bpl", "bvc", "bvs", "bec", "bes", "blc", "bls", "bnn", "bnr"}
+# The one-word branches stock's payloads run (about 120 of them each): bra, bsr and these conditions.
+STOCK_SHORT = frozenset({"bra", "bsr", "beq", "bne", "bge", "ble", "blt", "bgt", "bmi"})
+CONDITION = {"cc": 0x0, "hs": 0x0, "ge": 0x1, "ne": 0x2, "pl": 0x3, "nn": 0x4, "ec": 0x5, "lc": 0x6, "gt": 0x7,
+             "cs": 0x8, "lo": 0x8, "lt": 0x9, "eq": 0xa, "mi": 0xb, "nr": 0xc, "es": 0xd, "ls": 0xe, "le": 0xf}
+
+
+def short_branch(op, displacement):
+    """The one-word BRA/BSR/Bcc with a 9-bit displacement: 0000 0101 CCCC 01aa aa0a aaaa (Bcc), CCCC = 0000
+    and 11 (BRA) or 10 (BSR) in place of 01; aaaaa aaaa the displacement's bits 8-5 and 4-0."""
+    if not -256 <= displacement <= 255:
+        raise AsmError(f"{op}: displacement {displacement} does not fit the short form")
+    d = displacement & 0x1ff
+    base = {"bra": 0x050c00, "bsr": 0x050800}.get(op)
+    if base is None:
+        base = 0x050400 | CONDITION[op[1:]] << 12
+    return base | (d >> 5) << 6 | (d & 0x1f)
 
 
 class AsmError(Exception):
@@ -177,7 +201,18 @@ def _rr_word(rr, op, parts):
     return w | alu
 
 
-def assemble(src, org):
+def assemble(src, org, short_branches=()):
+    if not short_branches:
+        return _assemble(src, org)
+    if set(short_branches) - STOCK_SHORT:
+        raise AsmError("short branches only for the ops stock runs: " + ", ".join(sorted(STOCK_SHORT)))
+    found = []
+    _assemble(src, org, branches=found)                     # every branch long: the distances
+    short = {k for k, (a, target, op) in enumerate(found) if op in short_branches and -256 <= target - a <= 255}
+    return _assemble(src, org, short=short)
+
+
+def _assemble(src, org, short=frozenset(), branches=None):
     # ---- equ + comments
     consts = {}
     lines = []
@@ -232,9 +267,14 @@ def assemble(src, org):
             out_lines.append("        nop")
             continue
         if op in BRANCHES and rest in labels:
-            # always the long form, displacement patched once labels are known
-            specials.append((len(out_lines), "br", (op, rest, body)))
-            out_lines.append(f"        {op}     >$100")
+            # the long form, displacement patched once labels are known; or (short_branches) one word
+            ordinal = sum(1 for _, kind, _ in specials if kind in ("br", "brs"))
+            if ordinal in short:
+                specials.append((len(out_lines), "brs", (op, rest, body)))
+                out_lines.append("        nop")
+            else:
+                specials.append((len(out_lines), "br", (op, rest, body)))
+                out_lines.append(f"        {op}     >$100")
             continue
         parts = rest.split()
         if op == "tfr" and parts and parts[0] in ("a,b", "b,a"):
@@ -279,6 +319,12 @@ def assemble(src, org):
             if words[a - org + 1] != 0x100:
                 raise AsmError(f"P:{a:05x}: {op} placeholder did not assemble long")
             words[a - org + 1] = (syms[target] - a) & 0xffffff
+            expect[a] = ("br", op, syms[target])
+            if branches is not None:
+                branches.append((a, syms[target], op))
+        elif kind == "brs":
+            op, target, body = pay
+            words[a - org] = short_branch(op, syms[target] - a)
             expect[a] = ("br", op, syms[target])
         elif kind == "movem":
             words[a - org] = pay[0]

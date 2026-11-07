@@ -49,7 +49,7 @@ def main():
     raw = open(ASM).read()
     src = asm_macros.expand(raw)
     ysp = asm_macros.yspace(raw)
-    words, syms = dsp_xasm.assemble(src, ORG)
+    words, syms = dsp_xasm.assemble(src, ORG, short_branches=dsp_xasm.STOCK_SHORT)  # one-word branches where they reach (stock's ops only)
     assert syms['ot303'] < 0x1000
     stub = [0x0d0000 | syms['ot303'], 0x000000]           # jsr <ot303 (short absolute) ; nop = the stop
     d = dsp_xasm.disassemble(stub, STUBORG)

@@ -15,10 +15,12 @@ Boots the image, loads the factory OT DEMO, then drives:
   3. gate   -- REC1 poked on every step of T1 and T2 (a runtime RAM poke into the loaded
                pattern, not a project file), T1 muted: the step handler's recorder flag word
                0x46c7a6c0 must get T2's REC1 bit and never T1's; then unmute -> T1's appears
-  4. glyph  -- (renderer 0x4004bd48 called directly: route A barely runs the UI frame)
-               the edge renderer's cache 0x400c0cb8[t] = 8|playing ("..[]" / "..>") for
-               muted T1 with and without recorder trigs, stock for unmuted T2, stock "+" for
-               a muted track mid-recording; the blit gets our descriptors; LCD screenshot
+  4. dots   -- (the two tab renderers called directly, in the UI frame's order: route A
+               barely runs the UI frame) LCD pixels: two dots stacked beside every muted
+               track's machine letter on its inner side (x+4 on T1-4, x-2 on T5-8; rows = the
+               letter's top row and two below), inverted on the active tab, a blank pixel
+               between letter and dots, none on unmuted or PICKUP tracks; the status
+               renderer's cache stays stock; LCD screenshot
 
 Every result is printed as PASS / FAIL.  Logic only: route A has no real DSP/audio path, so
 whether a recording really stops is a hardware question.
@@ -44,8 +46,10 @@ import emu_bringup as eb
 import lcd_view
 
 RTM_MASK, HELD, CACHE = 0x400d7c3a, 0x460fab40, 0x400c0cb8
-RENDER = 0x4004bd48                 # the edge renderer; on hardware FUN_40052200's UI-frame
-                                    # path polls it (0x4005222e), which route A barely runs
+RENDER = 0x4004bd48                 # the status-icon renderer; on hardware FUN_40052200's
+                                    # UI-frame path polls it (0x4005222e), which route A barely runs
+LETTERS = 0x4003fed8                # the tab letter renderer, polled right after it (0x40052232)
+LCD = 0x46c7e0ea
 REC_FIELDS = (0x400c003c, 0x400c0040, 0x400c0620, 0x400c0624)    # [REC] keymap press/release
 TRK_YES_FIELD, TRK_NO_FIELD = 0x400d15e4, 0x400d15fe                # [TRACK]-layer YES / NO
 GRID_REC, REC_HELD = 0x460d1736, 0x460d1726
@@ -81,7 +85,8 @@ def main():
     if not image.is_absolute():
         image = ROOT / image
     global RTM_MASK
-    maps = list(image.parent.glob("kyoti*_map.json"))
+    own = image.parent / (image.stem.removeprefix("mainos_") + "_map.json")   # the image's own map,
+    maps = [own] if own.exists() else []                                        # never a stale sibling
     if maps:
         import json
         RTM_MASK = int(json.loads(maps[0].read_text())["pieces"]["rtm_mask"]["at"], 16)
@@ -103,7 +108,7 @@ def main():
         rt.run(until=lambda s: s.pc == er.MAIN_SPIN)
 
     # hooks: CC sends and toasts
-    sends, toasts, blits, durs, closes = [], [], [], [], []
+    sends, toasts, durs, closes = [], [], [], []
 
     def on_send(u, adr, size, x):
         sp = u.reg_read(eb.UC_M68K_REG_A7)
@@ -118,14 +123,8 @@ def main():
     def on_close(u, adr, size, x):
         closes.append(adr)
 
-    def on_blit(u, adr, size, x):
-        sp = u.reg_read(eb.UC_M68K_REG_A7)
-        ret, desc, plane, xx, yy = struct.unpack(">IIIII", u.mem_read(sp, 20))
-        if desc in (S["D_DOTSS"], S["D_DOTSP"]):
-            blits.append((desc, xx, yy))
     uc.hook_add(eb.UC_HOOK_CODE, on_send, begin=CC_SEND, end=CC_SEND)
     uc.hook_add(eb.UC_HOOK_CODE, on_notify, begin=NOTIFY, end=NOTIFY)
-    uc.hook_add(eb.UC_HOOK_CODE, on_blit, begin=BLIT, end=BLIT)
     uc.hook_add(eb.UC_HOOK_CODE, on_close, begin=NOTIFY_CLOSE, end=NOTIFY_CLOSE)
     uc.ctl_flush_tb()
 
@@ -296,33 +295,44 @@ def main():
     check(len(rec(1)) > 0, f"T2 (unmuted) recorder trigs reach 0x46c7a6c0[1]: {len(rec(1))}")
     check(len(rec(0)) == 0, f"T1 (muted) recorder trigs never do: {len(rec(0))}")
 
-    print("\n4. glyph: a muted track shows dots + its play state, recorder trigs or not")
+    print("\n4. dots: two stacked dots beside a muted track's letter, on the inner side")
 
     def render():
         spin()
         rt.call_as_main(RENDER)
-    DOTS = (S["D_DOTSS"], S["D_DOTSP"])
-    render()
-    c0, c1 = u32(CACHE), u32(CACHE + 4)
-    check(c0 in (8, 9), f"muted T1 (has recorder trigs): cache {c0} (8 = ..[], 9 = ..>)")
-    check(c1 < 8, f"unmuted T2: cache {c1} (stock)")
-    check(any(d in DOTS for d, _, _ in blits),
-          f"blit called with our glyphs: {[(hex(d), x, y) for d, x, y in blits[:4]]}")
+        rt.call_as_main(LETTERS)
+        return lcd_view.pixels(rd(LCD, 1024))
+    act = u8(0x80000000)
+    part = u32(0x46c82456) + u8(0x80000003) * 6322 + 585122        # the renderers' machine byte
+    machine = [rd(part + t, 1)[0] for t in range(8)]
+    print(f"  active track T{act + 1}, machines {machine} (4 = PICKUP)")
+
+    def dots(px, t):
+        """(dot column rows top..top+3, gap column rows top..top+3, background) for track t."""
+        a = 1 if t == act else 0
+        x = 2 + a + 4 if t < 4 else 123 - a - 2
+        gx = x - 1 if t < 4 else x + 1
+        top = 5 + 15 * (t & 3)                           # the letter's top row on screen
+        return ([px[top + i][x] for i in range(4)], [px[top + i][gx] for i in range(4)], a)
+
+    def check_tabs(mask, what):
+        w8(RTM_MASK, mask)
+        px = render()
+        for t in range(8):
+            col, gap, bg = dots(px, t)
+            want = [1 - bg, bg, 1 - bg, bg] if (mask >> t) & 1 and machine[t] != 4 else [bg] * 4
+            check(col == want and gap == [bg] * 4,
+                  f"{what} T{t + 1}{' (active)' if t == act else ''}"
+                  f"{' (PICKUP: none)' if machine[t] == 4 else ''}: dots {col} want {want}, gap {gap}")
+        return px
+    check_tabs(0, "unmuted: no dots")
+    px = check_tabs(0b00010001 | (1 << act), "T1 + T5 + the active track muted")
+    cache = [u32(CACHE + 4 * t) for t in range(8)]
+    check(all(c < 8 for c in cache), f"status-icon cache holds stock states only (0-7): {cache}")
     uc.mem_write(trac(0) + 0x20, b"\0" * 8)                # T1: no recorder trigs at all
-    render()
-    c0 = u32(CACHE)
-    check(c0 in (8, 9), f"muted T1 with NO recorder trigs: cache {c0} (still dots)")
-    plane = rd(0x46c7e0ea, 1024)
-    lcd_view.png(lcd_view.pixels(plane), a.png)
+    check(dots(render(), 0)[0][0] == 1 - (act == 0), "muted T1 with NO recorder trigs: still dots")
+    lcd_view.png(px, a.png)
     print(f"  LCD -> {a.png}")
-    if c1 in (2, 3):                                       # T2 is mid-recording: "+" wins
-        w8(RTM_MASK, 0b11)
-        render()
-        c1m = u32(CACHE + 4)
-        check(c1m in (2, 3), f"T2 muted while its recording runs: cache {c1m} (stock '+')")
-        w8(RTM_MASK, 0b01)
-    else:
-        print(f"  (T2 not recording at this moment, cache {c1} -- '+' precedence not exercised)")
     uc.mem_write(trac(0) + 0x20, b"\xff" * 8)              # T1's REC1 back for the unmute test
 
     print("\n   unmute T1 -> its recorder trigs come back")
@@ -331,8 +341,8 @@ def main():
     frames(a.frames)
     later = [v for tt, v in flag_writes[n0:] if tt == 0 and v & 0x7000]
     check(len(later) > 0, f"T1 recorder trigs reach 0x46c7a6c0[0] again: {len(later)}")
-    render()
-    check(u32(CACHE) < 8, f"renderer cache T1 = {u32(CACHE)} (stock)")
+    col, _, bg = dots(render(), 0)
+    check(col == [bg] * 4, f"unmuted T1: dots gone {col}")
 
     print(f"\n{'ALL PASS' if not fails else f'{len(fails)} FAIL'}")
     return 1 if fails else 0

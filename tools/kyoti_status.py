@@ -35,7 +35,7 @@ ALLOW_ENV = "KYOTI_ALLOW_WIP"
 # builder -> sha256 of the image it built when the author promoted it.  A builder that
 # writes several images maps to {image file name: sha256}, one per promoted image.
 FINAL = {
-    "build_mute_modes.py":                 "560de34072690afd7238226790342eb2bce7e08f88093d2fe273032a145979e2",
+    "build_mute_modes.py":                 "7d48737df97465df74bebad88e2b92592b96beed1c1e066b597c840c03cbb137",
     "build_direct_jump_kyoti.py":          "3fa14332d95eda55f56de5935afbd988a7179666ae9d8bc2614c1cc7c9f8a896",
     "build_sidechain_compressor.py":       "44465569a6118a9a7936c83d0f728a5f8c81122c42433a7cdaf267206e99f2fc",
     "build_reload_from_project.py":        "439aa3208ace780007139b561b0c2938ae7c4a3cfac3c286c8c691b59d71caae",
@@ -43,23 +43,23 @@ FINAL = {
     "build_erase_empty_trigless_locks.py": "83690ffbd97ad51281630acc8597f6423715885d2a712915df2edc39bb9b6a1c",
     "build_midi_plays_free_fix.py":        "672158c18630703cc1aadc635d45aeb68549a3237830d5c4a0aeb2d113afad35",
     "build_empty_pattern_led_fix.py":      "0e50306d8c242cf0365f2df3e09998be5db3b92a4cc95d5d17e590d9cc36b266",
-    "build_rec_trig_mute.py":              "72260bfd51cb5733ee1bf833f10a27cec370d0ee3e59f80b1ee33c33e4a3a5a3",
+    "build_rec_trig_mute.py":              "fe4008dace51a4f9c49d81a660e6b1530db34610d7a7639ce9838810b87c1cb4",
     "build_bugbuilds.py": {
-        "mainos_mute_modes_batch_bugfixes.bin":              "2b5f7c70ed6fdc3635d82d14db0e8a2d0335c09af0efc7578fef0649f43a6c85",
+        "mainos_mute_modes_batch_bugfixes.bin":              "857d80d3d84f0eecb9bbc23944f83d03f5cf2d6f5934247c183710bb440196b4",
         "mainos_quantize_live_rec_toggle_batch_bugfixes.bin":"df4a24981ace4a163723ab394bf564c9ccd8b4593ba40c9d5461da36fbd226a4",
         "mainos_sidechain_compressor_batch_bugfixes.bin":    "4febe2e60f3ca36df8bac50e291c99f54450adbce188d0f08c5a954b9f48f917",
         "mainos_erase_empty_trigless_locks_batch_bugfixes.bin":"db348f68a32adcc195208e46f6c964d0a5714ba41c1d8c4f2fad6beb2d122922",
         "mainos_reload_from_project_batch_bugfixes.bin":     "0881b726f3617ebfdc6681e988670cf5c24f4001cae5d3fcc0e6bc8b42944db8",
         "mainos_direct_jump_kyoti_batch_bugfixes.bin":       "2cc151e7f9fa7568eca7d1e50d06ed179ff36ffa28f85fe59ce27295917ca21a",
-        "mainos_rec_trig_mute_batch_bugfixes.bin":           "9691e449dbecc5f1f91280b586efe8046f57a5922e1754eb6d5afa85975b7db3",
-        "mainos_blackpyramids_303_batch_bugfixes.bin":       "afc4e27b41a65ae123db54bc693383f32faf8e1f19f9cfd040c57e8ce4e2c5ab",
+        "mainos_rec_trig_mute_batch_bugfixes.bin":           "4e6fa225eba6a0e7d0e3db477c57e102f45161f9d7879596e5e81deafe7feda1",
+        "mainos_blackpyramids_303_batch_bugfixes.bin":       "ca3089ca53aabba09f065d67eab9e21078bf9ea6d2a41ead89df05ece9b1212e",
         "mainos_varispeed_batch_bugfixes.bin":               "c3af514f52feb1c46747736d7a6151b5109f664b2561278f37d01e99d8f10663",
         "mainos_varispeed_emus_batch_bugfixes.bin":          "52823ea6714036808037757ff49e2e6bcf4cc3d2ebe1ced1f2f0810ac9781943",
     },
     "build_kyoti.py": {
-        "mainos_kyoti_v1.7.bin":                             "ea1ffc08cd6231c4f96f2c86c0e4ac02eaf5e5597ec503f1df8a236abd04cca2",
+        "mainos_kyoti_v1.7.bin":                             "2f79d0c6bb8f703c2a100137931628d41552067b7be3657c1ee49edc4bb437fe",
     },
-    "build_blackpyramids_303.py":          "88d49307f481d014b7d5b4c024e918d5b0480c87318eb71798869b300948f62b",
+    "build_blackpyramids_303.py":          "5b7dfb2f8359e0490c44cb92372e481e6750345ff4db72982ac8cc556893810a",
     "build_part_change_carryover_fix.py":  "dd2a7e2ba3328364caa560e431195fd248cbb5d83dce1759de1e7e3effc5febd",
     "build_varispeed.py":                  "ce4f769602d1231ac40c48fde43a00c332a1f7b698fdb9442152864803eff169",
     "build_varispeed_emus.py":             "dbf8cd68cf2180db8924b46317378ccf739a92cb36371de41506b784882affc3",

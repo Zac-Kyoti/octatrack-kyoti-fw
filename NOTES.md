@@ -37965,3 +37965,126 @@ closes Clyps when the chord began outside); the 4th page LED shows ORIG / chord 
   a target change (`cl_tabt`) writes -1 to the side caches 0x400c0c50 / 0x400c0c94 so the next pass repaints every
   tab. Renders (painters + hook per pass) clean in all three states. Gates on CL17: full 116, T 21, F+Q 27,
   L+J 19, M+U 38, X+O+W 15, V+Z+I 29, H 3. syx 69f6e4d6….
+
+## 2026-11-01 (`mm-keyhold`) — MUTE_MODES KEYHOLD: a muted SIDE-CHAIN KEY track stays cut after its key time (octabam#934)
+
+**Report (octabam#934, OCTABAM35 = octabam main bc144523 on the MKI):** moving KEY let a muted track play
+("doubling", "echoes", cleared only by transport restart). Not the demand loader: OCTABAM36
+(`test/sidechain-compressor`, same main) was clean, but it carries no MUTE_MODES. The user then found the
+octabam images run MUTE_MODES with SC_KEY, default DT-T; MUTE MODE OT does not show it. Case: T1 COMPRESSOR
+(FX2), T5 kick, T7 muted one-shot (trig on step 1, one pattern long); KEY had rested on T7, then T6/T8 ->
+T7 audible for 16 steps (a loop: for good).
+
+**Mechanism [C, port + code].** p1_key takes a silenced KEY track out of the silenced set (trigs pass) and
+gives back its D5 mute bit (stock's post-FX cut). When KEY moves away it rejoins the silenced set; DT-T
+never touches a running voice ("rides its own amp envelope"), so the voice started during its key time is
+heard to its end. OTFX-T / OTFX: one frame gets through before the note-off / dry cut (T7 900 Hz, 40 ms
+peak -42.7 / -62.5 dBFS; full level -28). Reproduced in octabam's port at bc144523 (scratch clone in
+main's out/sc-leak/, dsp56300 at the pin, local live-script main-level patch) with a tone fixture
+(usb_sig_project: T_N = 200+100N Hz) and GATE 0x800000dc poked: KEY set to T7 by poking the Part byte +
+live lane (0x80000810 + t*72 + 0x32 FX1 / +0x38 FX2, KEY +2), then T8 mid-pattern -> T7 at -28 dBFS.
+Port traps: FX1 key twice stays on page 1 (page 2 = FUNC+FX1); KEY's rotary switch is not one position per
+fixed count (7 x +4 landed on T8), so set KEY by poke; --live-script never posts --main-level.
+
+**Fix (SC_KEY only):** KEYHOLD byte, hold = (KEYMASK | hold) & silenced; held tracks keep the D5 cut while
+silenced, trigs dropped as before, unmuting releases. mm_softmute SC_KEY 1086 -> 1100 B; plain unit and
+standalone MUTE_MODES unchanged (FINAL 560de340… still matches); Modwerk copy byte-identical. Port, all four
+modes: no leak, no blip; unmute brings T7 back (OTFX-T at its next trig); a plain DT-T mute still rides.
+**Hardware:** OCTABAM37 (bc144523 + this change; syx c8cfc8c2…) on the MKI, DT-T: fixed, rest nominal.
+octabam/Modwerk manifest reference -> KYOTI V1.7's placement (0x400d6e54, ac03f559…).
+
+**KYOTI V1.7 + KEYHOLD (WIP, NOT flashed):** mainos 46f34fc9…, syx 7e6e509f…, softmute 1100@0x400d6e54
+(classic cave, 100 B left). FINAL V1.7 (ea1ffc08…) no longer builds without the opt-in until re-pinned.
+Bugbuilds: 9 of 10 match their pins without the opt-in; BLACKPYRAMIDS_303 could not be built here
+(out/ot303/dsp56300_new/…/dsp_asm missing on this machine; unrelated, its builder untouched).
+- **PROMOTED FINAL (2026-11-02):** the user flashed KYOTI V1.7 + KEYHOLD (syx 7e6e509f…): all tests pass (the
+  KEYHOLD checks, and V1.7's DELAY). build_kyoti.py re-pinned: mainos 46f34fc9…; it rebuilds to that pin
+  without the opt-in. Standalone MUTE_MODES and the Bugbuilds are unchanged.
+
+## Session 2026-11-03 -- Modwerk SC 0.2.2: ColdFire units join the DRAM runtime (repeat98/modwerk#1175)
+
+**Report (#1175):** Synth + Sidechain Compressor + Mute Modes (+ Play Modes, Apply Scene, Direct Jump) left COMPRESSOR
+as the only FX2 effect. Modwerk's full-FX2 build ran 8 bytes short (Mute Modes' PERSONALIZE setters: 68 needed,
+60 left) and `composeSelection` fell back to the module-only FX2 menu without a word. Jannik fixes the silent
+fallback; he asked us for the placement change. Same session found #1176: Modwerk's overflow 0x400d24d0..0x400d2ce0
+is stock DELAY's coefficient table (cf. KYOTI V1.7) -- Jannik's.
+
+**Change (Modwerk side, branch sc-dram-when-present on keybus-7e00):** `modwerk-modules/sidechain-compressor/placement.json`
+names sc_cf + sc_ui; Modwerk links them into the DRAM runtime only when another module already carries one (that
+runtime is a fixed ~10 MB sample-memory reserve, so SC alone never starts paying it). Native: compose_map join +
+raw descriptor words resolved after the DRAM link; browser: same placement order (SC leads while stock FX2 stays).
+SC .text is identical for -mcpu=5407 and 54455. module:verify 0/162 mismatches; SC alone byte-identical to 0.2.1.
+**Hardware (MKI):** OCTATRACK_MWSCDJ (SC + Direct Jump, SC in DRAM; .bin abd1c2c9…) and OCTATRACK_MW1175 (the six
+modules; b4eaa770…): all tests pass.
+
+## 2026-11-03 (`mm-keyhold`) — MUTE_MODES: a track still muted when MUTE MODE leaves OT stays cut (octabam#1013)
+
+**Question (Sam, octabam#1013, from the source):** with MUTE MODE OT, `pre` returns before p1_key and nothing
+else writes KEYHOLD; can a bit set under DT-T outlive an unmute in OT? **[C, port]** Not in his order (unmute in
+OT -> back to DT-T -> mute): the first active frame with the track unmuted clears it. It does when the track is
+muted again *in OT* and MUTE MODE then returns (KEYHOLD 0x40 left; that track kept the hard cut). Clearing the bit
+in OT alone (first attempt, never pushed) exposed an older leak in **every** image, standalone too: stock plays a
+muted track's trigs under its post-FX cut, so OT -> DT-T with a track muted uncovered that voice to its end (T7
+-28 dBFS, a loop for good); OTFX-T/OTFX one blip (-64/-83 dB).
+**Fix (user's choice: hold all, every image):** OT holds every track; a track still muted when MUTE MODE leaves
+OT keeps OT's post-FX cut until it is unmuted (as an ex-KEY track already did). Byte inverted (UNHELD, 0xff =
+nothing held) and word-aligned before SHADOW: OT's `clr.b SHADOW` -> one `clr.w` (ColdFire has no `move #imm`
+to an absolute address). p1_key: +3 `not.l`; plain unit gets p1_hold (970 -> 996 B); SC_KEY unit 1106 B at
+0x400d6e54 (KYOTI cave: later units +8 B, 92 B left). References: plain 0x400d7400 `64d876ca…`, SC `e622ca6b…`.
+**Port** (octabam bc144523 + change = OCTABAM39, scratch main's out/sc-leak/, runs/sam/): re-mute-in-OT case and
+the no-KEY leak (standalone FINAL vs new) silent in OT+FX/DT-T/OTFX, UNHELD 0xbf; Sam's order unchanged; the
+KEYHOLD regression keeps every tone level (0.0 dB). Sample diffs vs OCTABAM37 are not 0 (layout moved).
+- **PROMOTED FINAL (2026-11-03):** the user flashed KYOTI V1.7 (syx dd15ff9a…), MUTE_MODES (syx ade9e85c…), BUG_MUTEDT
+  (syx 2cdcc460…) and OCTABAM39 (d0537e02…): all tests pass. Pins: MUTE_MODES 7d48737d…, BUG_MUTEDT 857d80d3…, KYOTI
+  V1.7 4c0a4c40…; all rebuild without the opt-in.
+## Session (bp-reclaim, 2026-11-03): BLACKPYRAMIDS_303 voice 90 words smaller, bit-exact (WIP)
+
+Why: in Modwerk card builds BLACKPYRAMIDS_303 (1,026 / 1,022 words + DARK REV's 35-word helper) and
+SIDECHAIN_COMPRESSOR (677) did not fit PLATE REV + SPRING REV (1,657 contiguous), so SC cost DARK REV.
+Now 936 / 932 (<= 945): the pair fits, SC's donor becomes PLATE REV.
+- host.asm: the six steps that run from one place are written where they run (no bsr/rts); three
+  reloads of unchanged values and four constant loads folded into their ALU ops; jmp <CONT; MSAV moved to
+  X:$7b0c (below run 1) so m0-m7 are saved before RELOC; OWN/LIVE/LSEQ0-3 into run 1's gap after XC
+  (XB+$49-$4e, zeros in the loader's copy: RELOC's copy clears them); the engine's exit sets only m1 m2
+  m4 m5 and no longer reloads r3 (engine_probe.cpp checks that contract).
+- tools/dsp_xasm.py: opt-in one-word branches (short_branches=STOCK_SHORT: bra bsr beq bne bge ble blt
+  bgt bmi, never bcc/bcs); SC 44465569 and VARISPEED_EMUS dbf8cd68 rebuild their FINAL images.
+- Checks (C): host_check identical to the baseline (claims model incl.), engine_check bit-exact in
+  every scene; cycles/sample saw 454.5 -> 450.6, square 597.4 -> 590.7, stock record 54.6 -> 47.8.
+  verify_ot303 (octabam's out/emu/ot_emu copied as out/ot303/ot_emu_8d0ad6f4): every functional line
+  equal to FINAL 88d49307; both fail the same DARK REV core-1 timing compare against stock (an emulator
+  effect: FINAL fails it too with that copy).
+- **Hardware (user, MKI, 2026-11-03): WIP RECLAIM1 (mainos 5b7dfb2f..., syx 9bd8a78f...) flashed --
+  "All tests pass, sounds as it should"** (both cores' voices with slides/accents/ties and every knob,
+  stock tracks, DARK REV + PLATE REV on FX2, Part change, project save/reload, power cycle, FLEX
+  round trip). First one-word branches of ours on the chip.
+- **PROMOTED FINAL 2026-11-03 (user):** BLACKPYRAMIDS_303 88d49307 -> 5b7dfb2f, BUG_BP303 afc4e27b -> ca3089ca.
+  The old FINAL stays buildable from tag `ref/blackpyramids-303-2026-11-03` (bb9bead); its .syx/.bin are kept in
+  the main checkout's out/BLACKPYRAMIDS_303_FINAL_88d49307/ (SHA256SUMS).
+- octabam-modules/blackpyramids-303 regenerated (bp_dsp_data.py, bp_dsp_A/B.asm; runtime a6c4efba
+  unchanged).
+
+## 2026-11-06 (`rec-trig-mute`) — REC_TRIG_MUTE: the mute dots move beside the tab's machine letter (re-pinned, NOT flashed)
+
+- **Request (user):** instead of `..■` / `..▶` in the status-icon cell, two dots stacked vertically beside
+  the tab's machine letter, on the inner side (right of the letter on T1–T4, left on T5–T8), one blank pixel
+  from the letter, the first dot level with its top row, one blank row, the second dot.
+- **Mechanism (C, own disassembly):** the letter is drawn by `0x4003fed8`, whose audio branch has no cache: it
+  clears, redraws and (active track) inverts every tab's letter cell on every UI poll (`0x40052232`, right
+  after the status-icon renderer). One 6-B detour at its PICKUP test `0x40040146` → `rtm_dots` (`.draw`,
+  88/108 B): PICKUP → stock `0x4004014c` (no dots, as before); muted → `SETPIX` at letter x+4 (T1–4) / x−2
+  (T5–8), y `a2+4` / `a2+2`; then `0x400401c6` (the inversion). Both status-icon detours (`0x4004bee2`,
+  `0x4004c00c`), `rtm_glyph` and the `..` glyphs are gone: that renderer is stock, so a muted track that is
+  still recording shows stock `+` and the dots. Scope §20.
+- **Checks:** `emu_rec_trig_mute.py` section 4 is now LCD pixel checks per tab (dots, gap, inverted active tab,
+  none unmuted / PICKUP, status cache stock): ALL PASS 56/56 on the standalone and on KYOTI V1.7 (the test now
+  reads the map named after the image; it had picked a stale `kyoti_v1.6_map.json`). Render shown to the
+  user in the browser: "The render is correct." KYOTI V1.7 and BUG_RTM differ from their previous pins only
+  inside REC_TRIG_MUTE's spans (147 B each). Octabam oracle 458 B `db610597…` (was 556 B `aa2d1ae3…`).
+- **Re-pinned FINAL on the user's instruction (push + redo standalone / Bugbuild / KYOTI + octabam pin), not
+  flashed:** `build_rec_trig_mute.py` mainos `fe4008da…` (syx `bd219007…`), BUG_RTM mainos `4e6fa225…`
+  (syx `71176b70…`), KYOTI V1.7 mainos `2f79d0c6…` (syx `1030bfaa…`, OS VERSION still `KYOTI V1.7`).
+  Hardware to check: FLASHING §4 REC_TRIG_MUTE.
+- **octabam:** since #977, octabam's HOOKS bridges `status_icon` / `icon_draw` (and FREE LOOP's `fl_draw`, which
+  jumped to `rtm_draw`) were built on our two status-icon sites, so the pin PR also retires `icon_draw`, takes
+  REC_TRIG_MUTE out of `status_icon` and reworks `verify_hooks.py` around REC THRESHOLD + FREE LOOP.

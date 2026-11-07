@@ -7,8 +7,9 @@ Each track keeps its own state: with several track keys held, each one flips
 (`REC TRIGS TOGGLED` when they end up mixed). The toast stays up while the track key is
 held, up to 1 s (QUANTIZE_LIVE_REC_TOGGLE's length), and closes when it is let go. While a
 track key is held, `[REC]` does not switch grid recording; on its own `[REC]` is stock. Any screen; it holds across pattern
-changes until you unmute, and every track starts unmuted at power-on. A muted track shows
-two dots beside its play/stop icon at the screen edge (`..■` / `..▶`).
+changes until you unmute, and every track starts unmuted at power-on. A muted track's tab at
+the screen edge shows two dots stacked beside its machine letter, on the inner side (right of
+the letter on T1–T4, left of it on T5–T8); the play/stop icon below is stock.
 
 MIDI **CC 80**: 0 unmutes, 1–127 mutes, on a track's channel (AUTO channel = the active
 track), with AUDIO CC IN on. The keys send CC 80 (1 muted / 0 unmuted) on each held track's
@@ -22,16 +23,18 @@ KYOTI. The earlier form (`[TRACK]` + `[NO]` / `[YES]`) is **hardware-confirmed**
 author's MKI as the standalone image and in KYOTI (keys, toasts, the edge icons, a running
 recording finishing and nothing new starting). The `[TRACK]` + `[REC]` form — the per-track
 toggle, and the 1 s toast that closes on release — ran on the same MKI inside KYOTI V1.6 on
-29 Oct 2026 ("all good"). MIDI CC 80 has not been tried on hardware. This octabam
+29 Oct 2026 ("all good"). The dots beside the tab letter (6 Nov 2026, replacing the `..■` /
+`..▶` status icons) are checked pixel by pixel in the emulator, not yet on hardware. MIDI CC 80
+has not been tried on hardware. This octabam
 form — the `OCTABAM_UNIT` variant of the source — has not been flashed. Its `reference` is the
-author's build of that form (linked alone at `0x40000000`, 556 B, sha256 `aa2d1ae3…`), made by
+author's build of that form (linked alone at `0x40000000`, 458 B, sha256 `db610597…`), made by
 `tools/build_rec_trig_mute.py` with octabam's own DRAM-unit oracle recipe on every run.
 
 ## Contents
 
 | file | what it is |
 |---|---|
-| `manifest.py` | the module: one DRAM `Linked` unit, five `Detour`s, four `SymbolRef`s |
+| `manifest.py` | the module: one DRAM `Linked` unit, four `Detour`s, four `SymbolRef`s |
 | `patch_rec_trig_mute.s` | the m68k source for every layout; octabam builds it with `--defsym OCTABAM_UNIT` |
 
 ## Sites
@@ -39,8 +42,7 @@ author's build of that form (linked alone at `0x40000000`, 556 B, sha256 `aa2d1a
 | site | stock | kind | what |
 |---|---|---|---|
 | `0x4009d9a4` | `tst.l %d3 ; beq.s ; move.l #0x91a,%d2` | `jmp`, padded to 10 B | step handler: a muted track's step has no recorder trig |
-| `0x4004bee2` | `lea 0x400c0cb8,%a0` | `jsr` | edge renderer: the mute folded into its state cache |
-| `0x4004c00c` | `moveq #3,%d0 ; cmpl %a4,%d0 ; bnes` | `jmp` | edge renderer: `..■` / `..▶` |
+| `0x40040146` | `moveq #4,%d0 ; cmpl %a4,%d0 ; bnes` | `jmp` | tab letter renderer: the two dots beside a muted track's letter |
 | `0x4000f210` | `moveq #119,%d6 ; cmp.l %d1,%d6 ; bge` | `jmp` | CC handler fall-through: CC 80 |
 | `0x40083e84` | `and.l %d0,0x460fab40` | `jsr` | track-key release: our toast closes once no track key is held |
 | `0x400c003c` / `0x400c0040` | `0x40048774` | data | T1 keymap `[REC]` record, press / release → `rtm_rec` |
