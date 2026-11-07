@@ -6,8 +6,8 @@ Build REC_TRIG_MUTE on TOP OF STOCK 1.40C (WIP).
 
 [TRACK]+[REC] toggles the held tracks' recorder trigs muted / unmuted (with a track key held,
 [REC] no longer switches GRID REC; without one it is stock); MIDI CC 80 does the same (receive
-and transmit); the track-edge status glyph shows "..[]" / "..>" on a muted track.  [TRACK]+
-[YES]/[NO] stay stock (ARM / DISARM REC TRK).  Mechanism and proofs:
+and transmit); a muted track's tab shows two stacked dots beside its machine letter, on the
+inner side.  [TRACK]+[YES]/[NO] stay stock (ARM / DISARM REC TRK).  Mechanism and proofs:
 reference/handoffs/REC_TRIG_MUTE_SCOPE.md; source: octabam-modules/rec-trig-mute/patch_rec_trig_mute.s
 (the octabam module's own source, one file for every layout).
 
@@ -75,8 +75,7 @@ RTM_MASK = kyoti_place.at("rtm_mask", 0x400d7c3a)
 # detours: site -> (stock bytes, symbol, kind)
 SITES = {
     0x4009d9a4: ("4a83676e243c0000091a", "rtm_gate",  "gate"),   # step handler
-    0x4004bee2: ("41f9400c0cb8",         "rtm_glyph", "jsr"),    # edge renderer: state
-    0x4004c00c: ("7003b08c6618",         "rtm_draw",  "jmp"),    # edge renderer: draw
+    0x40040146: ("7004b08c667a",         "rtm_dots",  "jmp"),    # letter renderer: the dots
     0x4000f210: ("7c77bc816c5e",         "rtm_cc",    "jmp"),    # CC handler fall-through
     0x40083e84: ("c1b9460fab40",         "rtm_trel",  "jsr"),    # track-key release: close toast
 }

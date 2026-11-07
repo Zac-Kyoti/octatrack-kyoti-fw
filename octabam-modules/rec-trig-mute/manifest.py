@@ -11,8 +11,8 @@ switch GRID REC; without one [REC] is stock.  Toasts REC TRIGS MUTED / UNMUTED /
 (mixed), 1.0 s like QUANTIZE_LIVE_REC_TOGGLE's, closed when the last track key is released.
 MIDI CC 80: 0 = unmute, 1-127 = mute, on a track's channel (AUTO channel = active track),
 gated by AUDIO CC IN; the keys send CC 80 (1 / 0) on each held track's channel, gated by
-AUDIO CC OUT -- both exactly like stock's CC 52/53.  The track-edge status icon shows
-"..[]" / "..>" on a muted track that is not recording.  [TRACK]+[YES]/[NO] and
+AUDIO CC OUT -- both exactly like stock's CC 52/53.  A muted track's tab shows two dots
+stacked beside its machine letter, on the inner side (right of it on T1-4, left on T5-8).  [TRACK]+[YES]/[NO] and
 [FUNC]+[YES]/[NO] stay stock.
 
 SITES (our own disassembly of 1.40C; proofs: reference/handoffs/REC_TRIG_MUTE_SCOPE.md):
@@ -22,8 +22,9 @@ SITES (our own disassembly of 1.40C; proofs: reference/handoffs/REC_TRIG_MUTE_SC
     STEM REC's UP+REC, still runs).  The [TRACK]-held layer 0x400d164a has no [REC] record;
   * the step handler's recorder-trig test at 0x4009d9a4 (`tst.l %d3` = REC1/2/3 of track
     d7) -- the only producer of recorder events (0x46c7a6c0 has three references);
-  * the edge renderer 0x4004bd48: its state cache load (0x4004bee2) and its 4-way draw
-    switch (0x4004c00c);
+  * the tab letter renderer 0x4003fed8 (audio mode redraws every letter cell on every UI
+    poll): its PICKUP test (0x40040146), where rtm_dots adds the dots before the active-tab
+    inversion;
   * the stock CC handler's fall-through for every CC it ignores (0x4000f210);
   * the track-key release handler 0x40083e40, where it clears the key's held bit (0x40083e84).
 
@@ -35,7 +36,9 @@ the unit, the step-handler hook a plain jmp so octabam's nop padding can follow 
 MEASURED: the earlier [TRACK]+[NO]/[YES] form was hardware-confirmed on the author's MKI as
 the standalone image and inside KYOTI -- keys, toasts, the edge icons, recording stopping and
 resuming; MIDI CC 80 not tried on hardware.  The [TRACK]+[REC] form (toggle + the 1.0 s toast
-closed on release) ran on the same MKI inside KYOTI V1.6 on 29 Oct 2026 ("all good").  This octabam form (the OCTABAM_UNIT variant) has not been
+closed on release) ran on the same MKI inside KYOTI V1.6 on 29 Oct 2026 ("all good").  The
+dots beside the tab letter (6 Nov 2026, replacing the "..[]" / "..>" status icons) are checked
+pixel by pixel in the emulator, not yet on hardware.  This octabam form (the OCTABAM_UNIT variant) has not been
 flashed; its `reference` is the author's build of that form, made by
 tools/build_rec_trig_mute.py with octabam's own oracle recipe.
 """
@@ -50,12 +53,10 @@ _HERE = os.path.relpath(os.path.dirname(os.path.realpath(__file__)))
 # replays the move, then jmp 0x4009da16 (no recorder trig) or 0x4009d9ae (go on).
 GATE = 0x4009d9a4
 GATE_STOCK = bytes.fromhex("4a83676e243c0000091a")
-# edge renderer: `lea 0x400c0cb8,%a0` -- rtm_glyph folds the mute into a4 and redoes it
-GLYPH = 0x4004bee2
-GLYPH_STOCK = bytes.fromhex("41f9400c0cb8")
-# edge renderer: `moveq #3,%d0 ; cmpl %a4,%d0 ; bnes 0x4004c02a` -- rtm_draw adds 8 / 9
-DRAW = 0x4004c00c
-DRAW_STOCK = bytes.fromhex("7003b08c6618")
+# tab letter renderer: `moveq #4,%d0 ; cmpl %a4,%d0 ; bnes 0x400401c6` -- rtm_dots replays
+# the PICKUP test and draws the dots for a muted track
+DOTS = 0x40040146
+DOTS_STOCK = bytes.fromhex("7004b08c667a")
 # CC handler fall-through: `moveq #119,%d6 ; cmp.l %d1,%d6 ; bge 0x4000f274`
 CC = 0x4000f210
 CC_STOCK = bytes.fromhex("7c77bc816c5e")
@@ -72,7 +73,7 @@ REC_STOCK = 0x40048774              # stock [REC]: GRID REC toggle, "REC held"
 # tools/build_rec_trig_mute.py builds this on every run, with octabam's own DRAM-unit oracle
 # recipe (m68k-elf-as -mcpu=54455 --defsym OCTABAM_UNIT=0x1; ld -Ttext=0x40000000 + the same
 # defsym; objcopy -O binary), and refuses if this line no longer matches.
-REFERENCE = (0x40000000, "aa2d1ae35bcdef288cabd1958185036341a00c7ecc6eb719e136d86e7c042f19")
+REFERENCE = (0x40000000, "db6105972abe1b7c2accdb8b6af836f3ffe0f6237271aa6043fecb651b56bc23")
 
 
 MODULE = Module(
@@ -80,7 +81,7 @@ MODULE = Module(
     key="REC_TRIG_MUTE",
     kind=Kind.CF_PATCH,
     doc="[TRACK]+[REC] mutes/unmutes the held tracks' recorder trigs; MIDI CC 80; "
-        "'..' beside a muted track's status icon.",
+        "'..' beside a muted track's tab letter.",
     linked=(
         Linked("rtm", os.path.join(_HERE, "patch_rec_trig_mute.s"), dram=True,
                defsyms=(("OCTABAM_UNIT", 1),), reference=REFERENCE),
@@ -88,10 +89,8 @@ MODULE = Module(
     detours=(
         Detour(GATE, GATE_STOCK, "rtm", "rtm_gate",
                "step handler: a muted track's step has no recorder trig", pad_to=10),
-        Detour(GLYPH, GLYPH_STOCK, "rtm", "rtm_glyph",
-               "edge renderer: fold the mute into the cached state", kind="jsr"),
-        Detour(DRAW, DRAW_STOCK, "rtm", "rtm_draw",
-               "edge renderer: draw '..[]' / '..>' for states 8 / 9"),
+        Detour(DOTS, DOTS_STOCK, "rtm", "rtm_dots",
+               "tab letter renderer: two dots beside a muted track's letter"),
         Detour(CC, CC_STOCK, "rtm", "rtm_cc",
                "CC handler fall-through: CC 80, else stock's compare replayed"),
         Detour(TREL, TREL_STOCK, "rtm", "rtm_trel",

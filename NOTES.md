@@ -37705,3 +37705,28 @@ Now 936 / 932 (<= 945): the pair fits, SC's donor becomes PLATE REV.
   the main checkout's out/BLACKPYRAMIDS_303_FINAL_88d49307/ (SHA256SUMS).
 - octabam-modules/blackpyramids-303 regenerated (bp_dsp_data.py, bp_dsp_A/B.asm; runtime a6c4efba
   unchanged).
+
+## 2026-11-06 (`rec-trig-mute`) — REC_TRIG_MUTE: the mute dots move beside the tab's machine letter (re-pinned, NOT flashed)
+
+- **Request (user):** instead of `..■` / `..▶` in the status-icon cell, two dots stacked vertically beside
+  the tab's machine letter, on the inner side (right of the letter on T1–T4, left on T5–T8), one blank pixel
+  from the letter, the first dot level with its top row, one blank row, the second dot.
+- **Mechanism (C, own disassembly):** the letter is drawn by `0x4003fed8`, whose audio branch has no cache: it
+  clears, redraws and (active track) inverts every tab's letter cell on every UI poll (`0x40052232`, right
+  after the status-icon renderer). One 6-B detour at its PICKUP test `0x40040146` → `rtm_dots` (`.draw`,
+  88/108 B): PICKUP → stock `0x4004014c` (no dots, as before); muted → `SETPIX` at letter x+4 (T1–4) / x−2
+  (T5–8), y `a2+4` / `a2+2`; then `0x400401c6` (the inversion). Both status-icon detours (`0x4004bee2`,
+  `0x4004c00c`), `rtm_glyph` and the `..` glyphs are gone: that renderer is stock, so a muted track that is
+  still recording shows stock `+` and the dots. Scope §20.
+- **Checks:** `emu_rec_trig_mute.py` section 4 is now LCD pixel checks per tab (dots, gap, inverted active tab,
+  none unmuted / PICKUP, status cache stock): ALL PASS 56/56 on the standalone and on KYOTI V1.7 (the test now
+  reads the map named after the image; it had picked a stale `kyoti_v1.6_map.json`). Render shown to the
+  user in the browser: "The render is correct." KYOTI V1.7 and BUG_RTM differ from their previous pins only
+  inside REC_TRIG_MUTE's spans (147 B each). Octabam oracle 458 B `db610597…` (was 556 B `aa2d1ae3…`).
+- **Re-pinned FINAL on the user's instruction (push + redo standalone / Bugbuild / KYOTI + octabam pin), not
+  flashed:** `build_rec_trig_mute.py` mainos `fe4008da…` (syx `bd219007…`), BUG_RTM mainos `4e6fa225…`
+  (syx `71176b70…`), KYOTI V1.7 mainos `2f79d0c6…` (syx `1030bfaa…`, OS VERSION still `KYOTI V1.7`).
+  Hardware to check: FLASHING §4 REC_TRIG_MUTE.
+- **octabam:** since #977, octabam's HOOKS bridges `status_icon` / `icon_draw` (and FREE LOOP's `fl_draw`, which
+  jumped to `rtm_draw`) were built on our two status-icon sites, so the pin PR also retires `icon_draw`, takes
+  REC_TRIG_MUTE out of `status_icon` and reworks `verify_hooks.py` around REC THRESHOLD + FREE LOOP.

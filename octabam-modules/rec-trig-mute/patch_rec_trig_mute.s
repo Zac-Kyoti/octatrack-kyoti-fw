@@ -7,8 +7,10 @@
 | track key is held, [REC] does not switch GRID REC; without one, [REC] is stock.  MIDI CC RTM_CC: value 0 =
 | unmute, 1-127 = mute, received on the track's channel (AUTO channel = active track) and sent
 | 1/0 on each held track's channel when the keys are used -- both gated by the project's
-| AUDIO CC IN/OUT exactly like stock's CC 52/53.  Track-edge status glyph: "..[]" / "..>" on
-| every muted track that is not recording.  [TRACK]+[YES]/[NO] are stock (ARM / DISARM REC TRK).
+| AUDIO CC IN/OUT exactly like stock's CC 52/53.  Track tab: two dots stacked beside a muted
+| track's machine letter, on its inner side (right of it on T1-4, left of it on T5-8), one blank
+| pixel from the letter, the first level with its top row.  The status icon below is stock.
+| [TRACK]+[YES]/[NO] are stock (ARM / DISARM REC TRK).
 |
 | No cave: the code reuses three stock routines nothing can reach (strict reference scan,
 | stock + KYOTI, done by the builder on every build):
@@ -17,7 +19,7 @@
 |   .ccrx   0x4009e7dc  an orphaned arranger-row resolver ("ARR PARSE ERROR")
 | The only runtime-written byte, RTM_MASK, lives in the proven-writable classic cave.
 
-    .globl rtm_rec, rtm_trel, rtm_gate, rtm_glyph, rtm_draw, rtm_cc
+    .globl rtm_rec, rtm_trel, rtm_gate, rtm_dots, rtm_cc
 
 | OCTABAM_UNIT (--defsym; the octabam module octabam-modules/rec-trig-mute): one linked unit
 | octabam places itself -- a single section, RTM_MASK inside it, the step-handler hook a plain
@@ -48,12 +50,10 @@
     .equ CC_IN,     0x80000049      | project AUDIO CC IN
     .equ CC_EXIT,   0x4000f274      | CC handler epilogue
     .equ CC_NEXT,   0x4000f216      | CC 120-127 path
-    .equ CACHE,     0x400c0cb8      | the edge renderer's per-track state cache
     .equ PLANE,     0x400bf10a
-    .equ MASK7,     0x400c514e      | stock "+>" glyph's 7-column opaque mask
-    .equ R_GO,      0x4004c012      | renderer: a4 == 3 ("+>") draw
-    .equ R_BLIT,    0x4004c024      | renderer: jsr (a5) + lea 16(sp)
-    .equ R_SKIP,    0x4004c02a      | renderer: nothing to draw
+    .equ SETPIX,    0x40011830      | FUN_40011830(plane, x, y, value)
+    .equ L_PICKUP,  0x4004014c      | letter renderer: PICKUP's own marks
+    .equ L_JOIN,    0x400401c6      | letter renderer: active-tab inversion, then the next track
 
 | ------------------------------------------------------------------ .main @ 0x40032bd4
 | handler(keycode@4, event@8): the base keymaps' [REC] records (T1 0x400bfc3a, T2 0x400c061e,
@@ -141,54 +141,39 @@ rtm_tx:
     lea     12(%sp),%sp
     rts
 
-| renderer 0x4004bee2: `jsr rtm_glyph` replaces `lea CACHE,%a0`.  d3 = track, a4 = state
-| (d2 + 2*d1 + 4*d0; bit 0 = playing, bit 1 = recorder live).  A muted track that is not
-| recording -> a4 = 8 | playing, shown as "..[]" / "..>" whether or not it has recorder trigs
-| (user, 2026-10-02).  Folding it into a4 lets the stock cache redraw on every toggle.
-rtm_glyph:
-    mvz.b   RTM_MASK,%d0
-    btst    %d3,%d0
-    beq.s   8f
-    move.l  %a4,%d0
-    btst    #1,%d0                  | recorder live: the true "+" wins until it ends
-    bne.s   8f
-    moveq   #1,%d1
-    and.l   %d1,%d0
-    addq.l  #8,%d0
-    move.l  %d0,%a4
-8:  lea     CACHE,%a0
-    rts
-
-    .balign 4
-G_DOTSS: .long 0x20000000,0,0x20000000,0,0x70000000,0x70000000,0x70000000 | . . []
-G_DOTSP: .long 0x20000000,0,0x20000000,0,0xf8000000,0x70000000,0x20000000 | . . >
-
 | ------------------------------------------------------------------ .draw @ 0x4005a0e0
-| renderer 0x4004c00c: `jmp rtm_draw` replaces `moveq #3,%d0 ; cmpl %a4,%d0 ; bnes R_SKIP`
-| a3 = box x, a2 = row offset, a5 = the blit 0x400128a8(desc, plane, x, y)
+| letter renderer 0x4003fed8 (audio mode; it redraws every tab's letter cell on every UI poll, so
+| the dots are cleared, redrawn and inverted with the letter): `jmp rtm_dots` replaces `moveq #4,%d0
+| ; cmpl %a4,%d0 ; bnes L_JOIN`.  d3 = letter x (2 / 123, one pixel inward on the active tab),
+| d4 = track, a2 = cell y (the 3x4 letter spans a2+1 .. a2+4, top row a2+4; y counts upward),
+| a4 = machine.  d2 is free here (stock's PICKUP path reloads it).  PICKUP keeps its own marks.
     SECT .draw
-rtm_draw:
-    move.l  %a4,%d0
-    moveq   #3,%d1
-    cmp.l   %d0,%d1
+rtm_dots:
+    moveq   #4,%d0
+    cmp.l   %a4,%d0
     bne.s   1f
-    jmp     R_GO
-1:  lea     D_DOTSS,%a0             | 8: muted, idle    "..[]"
-    subq.l  #8,%d0
-    beq.s   2f
-    lea     D_DOTSP,%a0             | 9: muted, playing "..>"
-    subq.l  #1,%d0
-    beq.s   2f
-    jmp     R_SKIP
-2:  pea     49(%a2)
-    move.l  %a3,-(%sp)              | 7 wide, at x like stock's "+>"
+    jmp     L_PICKUP
+1:  mvz.b   RTM_MASK,%d0
+    btst    %d4,%d0
+    beq.s   9f
+    moveq   #4,%d2                  | T1-4: x+3 blank, dots at x+4
+    moveq   #3,%d0
+    cmp.l   %d4,%d0
+    bge.s   2f
+    moveq   #-2,%d2                 | T5-8: x-1 blank, dots at x-2
+2:  add.l   %d3,%d2
+    pea     1.w
+    pea     4(%a2)                  | level with the letter's top row
+    move.l  %d2,-(%sp)
     pea     PLANE
-    move.l  %a0,-(%sp)
-    jmp     R_BLIT
-
-    .balign 4
-D_DOTSS: .long 7,5,1,G_DOTSS,MASK7
-D_DOTSP: .long 7,5,1,G_DOTSP,MASK7
+    jsr     SETPIX
+    pea     1.w
+    pea     2(%a2)                  | one blank row, then the second dot
+    move.l  %d2,-(%sp)
+    pea     PLANE
+    jsr     SETPIX
+    lea     32(%sp),%sp
+9:  jmp     L_JOIN
 
 | ------------------------------------------------------------------ .ccrx @ 0x4009e7dc
 | CC handler 0x4000f210: `jmp rtm_cc` replaces `moveq #119,%d6 ; cmp.l %d1,%d6 ; bge CC_EXIT`

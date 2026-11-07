@@ -677,3 +677,35 @@ The user flashed §18's KYOTI V1.6 (syx `a78205e7…`), after §17's: all good. 
 user's instruction: standalone mainos `72260bfd…`, `BUG_RTM` `9691e449…`, KYOTI V1.6
 `05460b97…` (the standalone and `BUG_RTM` were not flashed on their own). MIDI CC 80 is still
 untested on hardware. octabam pin move: NOTES 2026-10-29.
+
+## 20. The dots move beside the machine letter (2026-11-06)
+
+**User request:** instead of `..■` / `..▶` in the status-icon cell, two dots stacked vertically
+beside the tab's machine letter (F, S, T, N, …), on the inner side of the screen: right of the
+letter on T1–T4, left of it on T5–T8; one blank pixel between letter and dots; the first dot
+level with the letter's top row, one blank row, the second dot.
+
+**Where the letter is drawn (C, own disassembly).** `0x4003fed8`, polled by the UI frame right
+after the status-icon renderer (`0x4005222e` → `0x4004bd48`, `0x40052232` → `0x4003fed8`) and
+from `0x4004d870` before it. Its audio-mode branch (`0x40040088`) has **no cache**: every call
+clears each tab's letter cell (`0x40012254`, x−3..x+5, y a2..a2+7), blits the 3×4 letter at
+`(x, a2+1)` from the table copied from `0x400a81a4` (all six letters 3×4; T8's `M` at
+`0x400bb3a6` is 3×4 too), draws PICKUP's own marks at x−2 with `0x40011830(plane, x, y, 1)`, then
+inverts the cell for the active track. `x = 2` (T1–4) / `123` (T5–8), one pixel inward on the
+active tab; `a2 = 54 − 15·(t & 3)`; y counts upward (screen row = 63 − y), so the letter's top
+row is `a2 + 4`.
+
+**Change.** One 6-B detour at `0x40040146` (`moveq #4,%d0 ; cmpl %a4,%d0 ; bnes 0x400401c6`,
+the PICKUP test) → `jmp rtm_dots` (`.draw`, 88/108 B): PICKUP → `jmp 0x4004014c` (stock marks, no
+dots, as before); otherwise, if `RTM_MASK` bit t, two `SETPIX` at x+4 (T1–4) / x−2 (T5–8), y
+`a2+4` and `a2+2`; then `jmp 0x400401c6` (the active-tab inversion). The dots live and die with
+the letter cell, so muting, unmuting, track changes and active-tab inversion need nothing
+else. Both status-icon detours (`0x4004bee2`, `0x4004c00c`) and `rtm_glyph` / the `..` glyphs
+are gone: that renderer is stock again, so a muted track mid-recording now shows stock `+`
+**and** the dots (before, `+` replaced them). MIDI mode: no dots, as before.
+
+**Checks.** `emu_rec_trig_mute.py` section 4 rewritten as LCD pixel checks on every tab
+(dot column, gap column, inverted active tab, unmuted/PICKUP blank, status cache stock), on the
+standalone and on KYOTI V1.7. Screen render shown to the user: "The render is correct."
+KYOTI V1.7 and BUG_RTM differ from their previous pins only inside REC_TRIG_MUTE's spans
+(147 B each). Octabam oracle: 458 B, `db610597…`. **Not flashed.**

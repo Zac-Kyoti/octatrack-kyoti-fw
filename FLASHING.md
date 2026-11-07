@@ -167,10 +167,12 @@ quick check for each:
 - **ERASE_EMPTY_TRIGLESS_LOCKS** — make a trigless lock with one p-lock, erase that lock
   in live record: the step goes dark.
 - **REC_TRIG_MUTE** — a track with recorder trigs on every pattern cycle: hold its
-  `[TRACK]`, press `[REC]` → toast `REC TRIGS MUTED`, the edge icon shows `..▶`, GRID REC
+  `[TRACK]`, press `[REC]` → toast `REC TRIGS MUTED`, two dots appear beside the track's machine letter
+  (one above the other, the top one level with the letter's top row, one blank pixel from the
+  letter, on the inner side: right of it on T1–T4, left on T5–T8; inverted on the active
+  track's tab), the play/stop icon below stays stock, GRID REC
   does not switch, the current recording finishes and the next cycle does not record.
-  `[TRACK]` + `[REC]` again → `REC TRIGS UNMUTED`, recording resumes. Stopped, a muted track
-  shows `..■`. Mute T1 alone, then hold T1 + T3 and press `[REC]` → `REC TRIGS TOGGLED`, T1
+  `[TRACK]` + `[REC]` again → `REC TRIGS UNMUTED`, recording resumes. Stopped, the dots stay; unmuted, they go. Mute T1 alone, then hold T1 + T3 and press `[REC]` → `REC TRIGS TOGGLED`, T1
   unmuted and T3 muted. The toast lasts 1 s while the track key stays held (also after
   `[REC]` is let go), and closes the moment the track key is released. `[REC]` with no track
   key held still switches GRID REC; `[TRACK]` +

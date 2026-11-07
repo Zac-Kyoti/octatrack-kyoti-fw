@@ -339,7 +339,11 @@ are lowercase-hyphen, because octabam requires a module's name to equal its fold
   BUG_RTM were not flashed on their own. MIDI CC 80 not tried on hardware yet. Not done on
   purpose: MIDI echo / CC 80 state at power-up. octabam: #566 merged `fa24fb53`; pin move to
   `553d8d2` is **sambanks/octabam#977** (open, waiting on Sam; this DRAM form not flashed). `reference/handoffs/REC_TRIG_MUTE_SCOPE.md` §17, `NOTES.md`
-  Sessions 122–123 and 2026-10-29.
+  Sessions 122–123 and 2026-10-29. **2026-11-06:** the mute indicator moved — two dots stacked
+  beside the tab's machine letter on its inner side (letter renderer `0x40040146`; the status
+  icon renderer is stock again); emulator pixel-checked, user OK'd the render, NOT flashed;
+  re-pinned on the user's instruction: standalone `fe4008da…` (syx `bd219007…`), BUG_RTM `4e6fa225…`
+  (syx `71176b70…`), KYOTI V1.7 `2f79d0c6…` (syx `1030bfaa…`) (scope §20).
 - **KYOTI load audit** (Session 125) — `reference/handoffs/KYOTI_LOAD_AUDIT.md`: ranked DSP/ColdFire
   costs of every feature, the hardware test plan (HW-A first, no flash), and **a KYOTI V1.0 crash on
   the MASTER track's PLAYBACK/LFO page** (emulator; section 8), not fixed yet.

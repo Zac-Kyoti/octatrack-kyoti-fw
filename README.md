@@ -265,7 +265,8 @@ Each track keeps its own state: with several track keys held, each one flips
 key, up to 1 second, as QUANTIZE_LIVE_REC_TOGGLE's does, and closes when you let go. While a
 track key is held, `[REC]` does not switch grid recording; on its own `[REC]` works as on stock. It works on any screen and holds
 across pattern changes until you unmute; every track starts unmuted at power-on. A muted
-track shows two dots beside its play/stop icon at the screen edge (`..■` / `..▶`).
+track's tab at the screen edge shows two dots, one above the other, beside its machine letter
+on the inner side (right of the letter on T1–T4, left of it on T5–T8).
 
 MIDI: **CC 80** on a track's channel mutes it (1–127) or unmutes it (0); on the AUTO
 channel it acts on the active track. The keys send CC 80 (1 muted / 0 unmuted) on each held
