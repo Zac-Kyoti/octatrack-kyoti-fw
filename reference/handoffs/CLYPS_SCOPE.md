@@ -1313,6 +1313,26 @@ the chord reads `PTN LOAD:`, a group `MULTI LOAD:` ("ORIGS FULL"'s box to x 86).
   ~17 K instructions of memcpy in the landing tick (the 42.8 KB copy) + the UI side's diff and redraw. Route A runs
   no UI pass of its own: "per tick" peaks there include UI-task work between ticks.
 
+### 1.26 Persistent arrows; stock picks keep Clyps open; a project load closes it (the user, 2026-11-07; KYOTI CL22, not flashed)
+
+- **Arrows**: no execution hides them any more (`cl_pexec` removed: it cleared `cl_pmoved` and the targets'
+  `cl_pre` records on every load / restore / temp save). The load confirmation flashes `cl_fcode` (bank << 8 | slot)
+  instead of moving the cursor; shown arrows stay, a HIDDEN cursor still follows the load (`ex2_cur`: the next arrow
+  starts there). A card reload homes the box only when no arrows show. They hide while the [PTN]+[BANK] chord is held
+  (cl_draw, hdrst bit 1) and come back after. Gone only on a project load (records cleared) -- they otherwise persist
+  for the session, per track.
+- **Stock picks inside Clyps** ([PTN] + trig, SELECT PATTERN, [BANK] + bank + pattern) no longer close it (supersedes
+  §1.0 step 2's close): the PTN_CONSUMED / BANK_SEL test in `cl_uitail` is gone; a pattern change refreshes the view, a
+  bank change moves the view to the new bank (`cl_bank`; the box home when no arrows show). `cl_lastp` is set at the
+  open, so only changes made while open move the view.
+- **A project load** (`cl_projload`, >= 8 banks) sets `cl_pclose`; the UI tail closes Clyps.
+- **Pattern changes leave the arrows where they were** (the user, 2026-11-07: asked for them to follow every pattern
+  load, then withdrew it -- "the arrows should remain wherever they were left last"). A bank change by a stock pick
+  moves the view, not the arrows (they show again on their bank).
+- Gates: K (all three picks stay open, on top, no stock window), S (LOAD PROJECT with Clyps open closes it), V (arrows
+  through [PAGE] / a trig / a track swap / the chord); I and F updated (the arrows stay where a load or reload left
+  them); V starts from no arrows (they persist across scenarios now).
+
 ## 2. Decisions
 
 ### Settled (2026-10-26, the user)

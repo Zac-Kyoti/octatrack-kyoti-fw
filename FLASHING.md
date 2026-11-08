@@ -210,6 +210,18 @@ quick check for each:
   responsive.
 - **PART_CHANGE_CARRYOVER_FIX** — a track that is PICKUP on one Part and FLEX on
   another: switching patterns across the Parts plays the FLEX sample, not the old loop.
+- **KYOTI CL22 walk-through** (WIP; `out/KYOTI_WIP/KYOTI_V1.7_WITH_CLYPS/OCTATRACK_OS1.40C_KYOTI_V1.7_WITH_CLYPS.syx`)
+  = CL21 (its list below still applies) + persistent arrows, stock picks keep Clyps, a project load closes it:
+  1. Move the arrows to a slot, then load anything (a trig, [YES], [FUNC]+trig, [PAGE], a group load, a temp
+     reload, a card reload): the arrows stay where they were; the loaded slot still flashes.
+  2. Hold [PTN]+[BANK] (the ORIG PTN+PRT header): the arrows hide while held; after [PAGE]/[YES] or release they
+     are back where they were.
+  3. In Clyps: [PTN] + trig, a [PTN] tap then a trig (SELECT PATTERN), or [BANK] + bank trig + pattern trig:
+     the pattern changes and Clyps stays open on top; another bank: the view goes to it.
+  4. With Clyps open, LOAD PROJECT or RELOAD PROJECT: Clyps closes.
+  5. Arrows on some slot, then a pattern change of any kind (a stock pick, the card's pattern reload, ORIG
+     PTN+PRT): the arrows stay where you left them.
+
 - **KYOTI CL21 walk-through** (WIP; `out/KYOTI_WIP/KYOTI_V1.7_WITH_CLYPS/OCTATRACK_OS1.40C_KYOTI_V1.7_WITH_CLYPS.syx`)
   = CL20 (its list below still applies) + lean ORIG PTN+PRT while playing + REC_TRIG_MUTE's top-dot fix:
   1. Playing, edit one track, [PTN]+[BANK]+[PAGE]: the pattern comes back as loaded at the switch, as before

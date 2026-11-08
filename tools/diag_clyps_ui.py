@@ -774,8 +774,15 @@ def main(argv):
         # harness runs posters on -- emu_rtos.load_project_live's warning; it crashed this gate)
         worker(0x40022CFC, 8000, args=(0,))
         check(nm(2) == b"TEMP", "renamed 'TEMP' (and synced to clyps01.work)")
+        key(PTN, 1)
+        key(BANK, 1)
+        key(BANK, 0)
+        key(PTN, 0)
+        check(state()["open"] == 1, "Clyps open before LOAD PROJECT")
         rt.load_project_live("OCTABAM", staged, run_ms=6000)
         rt.run(ms=2000)
+        tailmsg()
+        closed_ok("LOAD PROJECT with Clyps open: Clyps closes (the user, 2026-11-07)")
         check(nm(2) == b"TEMP", f"LOAD PROJECT after the sync reads 'TEMP': clyps01.work was written ({nm(2)})")
         n0 = rd(syms["cl_nproj"], 1)
         worker(0x400227C8, 8000)          # RELOAD PROJECT (op 19: .strd -> .work), then its op-4 load
@@ -1191,7 +1198,9 @@ def main(argv):
         key(FUNC, 1)
         tap(sq)
         key(FUNC, 0)
-        check(pslice(t, dst) == ssl and pled() == 0, "[FUNC]+trig again: ALL; the box left ORIG: page LEDs stock's")
+        check(pslice(t, dst) == ssl and state()["cur"] == act and rd(syms["cl_pmoved"], 1) and pled() != 1,
+              f"[FUNC]+trig again: ALL; the arrows stay on ORIG (the user, 2026-11-07); the page LEDs no longer "
+              f"'original' (cl_pled {pled()})")
         tap(PAGE)
         check(rec(act, 0) == oslot(act, 0) and pslice(t, dst) == ssl, "[PAGE] = ORIG SEQ: the sequence only")
         key(FUNC, 1)
@@ -1553,8 +1562,8 @@ def main(argv):
             print(f"      {kind}: record diffs {e2[0]}, eff {e2[1]} vs {e2[2]}, mode {e2[3]} vs {e2[4]}; box "
                   f"{state()['cur'] + 1}; home 0x{rd(syms['cl_home'], 2):04x}", flush=True)
             check(not e2[0] and e2[1] == e2[2], f"{kind}: T1 equals its original (no edited mark)")
-            check(state()["cur"] == act and rd(syms["cl_home"], 2) == 0xFFFF,
-                  f"... the box back on your pattern {act + 1}, no Clyps source left (box {state()['cur'] + 1})")
+            check(state()["cur"] == q and rd(syms["cl_pmoved"], 1) and rd(syms["cl_home"], 2) == 0xFFFF,
+                  f"... no Clyps source left; the arrows stay on {q + 1} (the user, 2026-11-07; cur {state()['cur'] + 1})")
             whole = keys_ is None
             check(nm(0) == b"SAVEDNM" and (nm(1) == (b"" if whole else b"T2NAME")),
                   f"... T1's name as saved ({nm(0)}); T2's {'gone (never saved)' if whole else 'untouched'} ({nm(1)})")
@@ -1583,6 +1592,7 @@ def main(argv):
             key(src, 0)
             e1 = edited()
             print(f"      NORMAL pattern {act + 1}, T1 from {src + 1}: mode {e1[3]} (saved {e1[4]}), eff {e1[1]} vs {e1[2]}", flush=True)
+            cur0, pm0 = state()["cur"], rd(syms["cl_pmoved"], 1)
             key(PTN, 1)
             key(0x10, 1)
             rt.run(ms=6000)
@@ -1596,7 +1606,8 @@ def main(argv):
                   f"{state()['cur'] + 1}; mirror diffs {md}", flush=True)
             check(not e2[0] and e2[1] == e2[2] and e2[3] == e2[4] and slab(act)[:0x8E5C] == oslab(act)[:0x8E5C],
                   "NORMAL pattern: the card's TRK SEQ undoes the conversion (no edited mark, the slab as loaded)")
-            check(state()["cur"] == act and not md, "... the box on your pattern; the NVRAM mirror follows the whole slab")
+            check((state()["cur"] == cur0 if pm0 else state()["cur"] == act) and not md,
+                  f"... the arrows where they were (shown {pm0}) / else the box home; the NVRAM mirror follows the whole slab")
             tap(NO)
 
     if "V" in a.only:
@@ -1620,6 +1631,8 @@ def main(argv):
             rt.call_as_main(0x4007E998, args=(0,), budget=600000)
         tap(0x10)
         act = rd(0x800065BE, 1)
+        u.mem_write(syms["cl_pre"], bytes(32))      # a fresh start: no arrows left by the scenarios before
+        u.mem_write(syms["cl_pmoved"], b"\x00")      # (they persist through loads since CL22)
         key(PTN, 1)
         key(BANK, 1)
         key(BANK, 0)
@@ -1663,9 +1676,30 @@ def main(argv):
         tap(0x10)
         check(state()["cur"] == q, f"back to T1: its arrows where they were left ({q + 1}); cur {state()['cur'] + 1}")
         tap(PAGE)
+        check(state()["cur"] == q and pm() == 1, f"[PAGE] (T1's original): the arrows stay on {q + 1} (the user, "
+              f"2026-11-07: no execution hides them; cur {state()['cur'] + 1}, shown {pm()})")
         tap(0x11)
         tap(0x10)
-        check(state()["cur"] == act, f"[PAGE] (T1's original), T2, back: the box on your pattern {act + 1}")
+        check(state()["cur"] == q and pm() == 1, f"... T2, back: T1's arrows still on {q + 1} (cur {state()['cur'] + 1})")
+        tap(r)
+        check(state()["cur"] == q and pm() == 1, f"trig {r + 1} (a load): the arrows stay on {q + 1} "
+              f"(cur {state()['cur'] + 1})")
+        key(PTN, 1)
+        key(BANK, 1)
+        tailmsg()                          # V's keys post no UI tail of their own (posttail off)
+        hid = rd(syms["cl_hdrst"], 1) & 2
+        key(BANK, 0)
+        key(PTN, 0)
+        check(hid and state()["cur"] == q and pm() == 1,
+              f"the [PTN]+[BANK] chord hides them while held; released: back on {q + 1} (header bits while held "
+              f"{hid}, cur {state()['cur'] + 1}, shown {pm()})")
+        key(PTN, 1)                        # a pattern load leaves them where they were (the user, 2026-11-07)
+        key(BANK, 1)
+        tap(PAGE)
+        key(BANK, 0)
+        key(PTN, 0)
+        tailmsg()
+        check(state()["cur"] == q and pm() == 1, f"ORIG PTN+PRT: the arrows stay on {q + 1} (cur {state()['cur'] + 1})")
         # running: a cue flashes yellow
         rt.run(until=lambda x: x.pc == er.MAIN_SPIN)
         rt.internal_clock()
@@ -2153,7 +2187,7 @@ def main(argv):
         # it runs last and puts the pattern back.
         posttail[0] = True
         print("K: [BANK] in Clyps: box while held, SELECT BANK on a tap's release, bank pick stays, "
-              "bank + pattern closes; [PTN] tap / [PTN] + trig")
+              "bank + pattern stays (CL22); [PTN] tap / [PTN] + trig stays")
         BANK_LAYER, WIN_ONCLOSE = 0x400CFF14, 0x460D1E60
         tap(0x10)
         act = rd(0x800065BE, 1)
@@ -2200,12 +2234,17 @@ def main(argv):
               f"[BANK] + trig {nb + 1}: bank pending (stock), Clyps stays, the bank has not changed")
         tap(2)
         rt.run(ms=300)
-        check(state()["open"] == 0, "... then trig 3: a bank + pattern selection, Clyps closes")
+        check(state()["open"] == 1, "... then trig 3: a bank + pattern selection, Clyps stays (the user, 2026-11-07)")
         key(BANK, 0)
         rt.run(ms=300)
-        closed_ok("[BANK] released after the pick")
-        check((rd(0x800065BD, 1), rd(0x800065BE, 1)) == (nb, 2), f"now on bank {nb}, pattern 3 "
-              f"(read {rd(0x800065BD, 1)}, {rd(0x800065BE, 1)})")
+        tailmsg()
+        s = state()
+        check((rd(0x800065BD, 1), rd(0x800065BE, 1)) == (nb, 2) and s["open"] == 1 and s["showwin"] == 0
+              and s["bank"] == nb and s["layers"] == s0["layers"],
+              f"now on bank {nb}, pattern 3, Clyps on top showing bank {nb} (read {rd(0x800065BD, 1)}, "
+              f"{rd(0x800065BE, 1)}; view bank {s['bank']})")
+        tap(NO)
+        closed_ok("[NO]")
         rt.run(until=lambda x: x.pc == er.MAIN_SPIN)
         rt.seq_select_live(pbank, act)
         rt.run(ms=300)
@@ -2216,8 +2255,13 @@ def main(argv):
         check(state()["open"] == 1 and state()["showwin"] != 0, "latched SELECT BANK, trig picks the bank: Clyps stays")
         tap((act + 1) % 16)
         rt.run(ms=300)
-        closed_ok("... and a trig picks the pattern: Clyps closes")
+        tailmsg()
+        s = state()
+        check(s["open"] == 1 and s["showwin"] == 0 and s["layers"] == s0["layers"],
+              "... and a trig picks the pattern: SELECT BANK goes, Clyps stays on top")
         check(rd(0x800065BE, 1) == (act + 1) % 16, f"now on pattern {(act + 1) % 16 + 1}")
+        tap(NO)
+        closed_ok("[NO]")
         rt.run(until=lambda x: x.pc == er.MAIN_SPIN)
         rt.seq_select_live(pbank, act)
         rt.run(ms=300)
@@ -2234,10 +2278,15 @@ def main(argv):
         key(PTN, 1)
         tap((act + 2) % 16)
         rt.run(ms=300)
-        check(state()["open"] == 0, "[PTN] + trig: a pattern selection, Clyps closes")
+        check(state()["open"] == 1, "[PTN] + trig: a pattern selection, Clyps stays")
         key(PTN, 0)
-        closed_ok("[PTN] released")
+        tailmsg()
+        s = state()
+        check(s["open"] == 1 and s["showwin"] == 0 and s["layers"] == s0["layers"],
+              "[PTN] released: no SELECT PATTERN, Clyps on top")
         check(rd(0x800065BE, 1) == (act + 2) % 16, f"now on pattern {(act + 2) % 16 + 1}")
+        tap(NO)
+        closed_ok("[NO]")
         rt.run(until=lambda x: x.pc == er.MAIN_SPIN)
         rt.seq_select_live(pbank, act)
         rt.run(ms=300)

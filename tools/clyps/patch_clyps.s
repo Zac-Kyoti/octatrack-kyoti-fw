@@ -406,6 +406,11 @@ ce_noundo:
 ce_ph:
     move.l  (%sp)+,%d0
     move.b  %d0,cl_lastt
+    moveq   #0,%d0                      | the pattern you are on at the open (cl_uitail: a later change
+    move.b  PLAY_BANK,%d0               | moves the view, not one made while Clyps was closed)
+    lsl.l   #8,%d0
+    move.b  ACT_PAT,%d0
+    move.w  %d0,cl_lastp
     pea     cl_close                    | close_cb: eviction lands in the same teardown
     pea     PRIO
     clr.l   -(%sp)                      | dy
@@ -900,7 +905,6 @@ cl_k_page:
     cmpi.l  #1,%d0
     bne.w   kn_out
     clr.b   cl_flash
-    jsr     cl_pexec                    | a restore: its tracks' pre-select arrows go
     jsr     cl_hstate
     btst    #1,%d0
     bne.b   kp_pat
@@ -1198,7 +1202,6 @@ kf_out:
 | for 0.5 s (cl_draw: cl_fph); the ORIG header box likewise. An arrow, bank paging, a TRACK key or
 | closing stops it at once; a new pick restarts it on the new slot.
 cl_flhdr:                               | the header's label flashes (ORIG / ORIG PTN+PART)
-    jsr     cl_pexec                    | an execution: its tracks' pre-select arrows go
     moveq   #1,%d0
     move.b  %d0,cl_ftgt
     bra.b   cl_fls
@@ -1206,7 +1209,6 @@ cl_flstart:                             | the select box flashes
     jsr     cl_targets                  | nothing loaded ([CUE] held, no member: the user, 2026-11-06):
     tst.l   %d0                         | no confirmation, the arrows stay
     beq.b   fs_out
-    jsr     cl_pexec                    | an execution: its tracks' pre-select arrows go
     clr.b   cl_ftgt
 cl_fls:
     moveq   #FL_TICKS,%d0
@@ -1941,20 +1943,26 @@ ex2_n:
     move.b  ACT_PAT,%d1
     cmp.l   %d1,%d0
     beq.b   ex2_hdr
-    move.b  %d0,%d1
-    andi.l  #15,%d1
-    move.b  %d1,cl_cur
-    lsr.l   #8,%d0
-    move.b  %d0,cl_sbank
+    move.w  %d0,cl_fcode                | the flash on the loaded slot; shown arrows stay where they are,
+    bsr.b   ex2_cur                     | the hidden cursor follows the load (the next arrow starts there)
     jsr     cl_flstart
     bra.b   ex2_out
 ex2_hdr:
-    move.b  %d0,%d1                     | its own slot (the box goes there, the ORIG entry)
+    move.w  %d0,cl_fcode                | its own slot: the header's ORIG flash
+    bsr.b   ex2_cur
+    jsr     cl_flhdr
+    bra.b   ex2_out
+ex2_cur:
+    tst.b   cl_pmoved
+    bne.b   ec_out
+    move.b  %d0,%d1
     andi.l  #15,%d1
     move.b  %d1,cl_cur
-    lsr.l   #8,%d0
-    move.b  %d0,cl_sbank
-    jsr     cl_flhdr
+    move.l  %d0,%d1
+    lsr.l   #8,%d1
+    move.b  %d1,cl_sbank
+ec_out:
+    rts
 ex2_out:
     movem.l (%sp),%d2-%d7/%a2
     lea     28(%sp),%sp
@@ -2235,8 +2243,6 @@ ty_ours:
     lea     -16(%sp),%sp
     movem.l %d2-%d5,(%sp)
     move.l  %d1,%d4                     | d4 = 0 save, 1 reload
-    jsr     cl_pexec                    | a temp save / reload: the pre-select arrows go (after d1 is kept:
-                                        | it uses d0-d1)
     move.l  HELD_TRK,%d3
     andi.l  #0xff,%d3                   | d3 = the held tracks
     move.l  %d3,%d0
@@ -2357,6 +2363,7 @@ pl_n:
     bne.b   pl_n
     moveq   #1,%d0
     move.b  %d0,cl_namesok
+    move.b  %d0,cl_pclose               | ... Clyps closes (the user, 2026-11-07), at the UI tail
     lea     cl_pre,%a0                  | ... no pre-select arrows (the slots are another project's)
     moveq   #8,%d0
 pl_tp:
@@ -3607,22 +3614,8 @@ cl_pload:
 pl2_no:
     moveq   #0,%d0
     rts
-| cl_pexec: an execution -- the screen's arrows go, and the records of the tracks it acts on (cl_targets: the
-| group's members, or the active track). Uses d0-d1/a0.
-cl_pexec:
-    clr.b   cl_pmoved
-    jsr     cl_targets
-    lea     cl_pre,%a0
-    moveq   #16,%d1
-px_l:
-    lsr.l   #1,%d0
-    bcc.b   px_n
-    bclr    #7,(%a0)
-px_n:
-    addq.l  #2,%a0
-    subq.l  #1,%d1
-    bne.b   px_l
-    rts
+| The pre-select arrows stay through every execution (the user, 2026-11-07): only the [PTN]+[BANK] chord hides
+| them while it is held (cl_draw), a track change swaps them (cl_psave / cl_pload), a project load clears them.
 
 | cl_bbeg / cl_bend: a batch of loads (a group, ORIG, ORIG PTN+PART, a temp chord on several tracks):
 | the immediate (stopped) loads inside it note their tracks (cl_batm) and cl_bend serves them in one
@@ -4324,23 +4317,18 @@ ut_ng:
     clr.b   cl_self                     | stopped before it landed: ORIG PTN+PART's request goes
 ut_run:
     tst.b   cl_open
-    beq.w   ut_post
-|   a pattern picked the stock way inside Clyps (scope §1.0 step 2) closes it: [PTN] + trig / a
-|   trig on SELECT PATTERN (0x40056b2c sets PTN_CONSUMED -1; Clyps' entry leaves it 1, stock's press
-|   0), or the pattern after a [BANK] + trig bank pick (BANK_SEL 2, armed by cl_k_chord's [BANK]
-|   press; Clyps' entry writes 2 itself and disarms)
-    moveq   #-1,%d0
-    cmp.l   PTN_CONSUMED,%d0
-    beq.b   ut_pick
-    tst.b   cl_bkarm
+    bne.b   ut_op
+    clr.b   cl_pclose
+    bra.w   ut_post
+ut_op:
+|   a project load closes Clyps (the user, 2026-11-07; cl_projload asks). A pattern picked the stock way inside
+|   Clyps -- [PTN] + trig, SELECT PATTERN, a [BANK] + trig bank then a trig -- no longer closes it (the user,
+|   2026-11-07; scope §1.0 step 2 superseded): the view follows the pattern change (ut_pm)
+    tst.b   cl_pclose
     beq.b   ut_box
-    moveq   #2,%d0
-    cmp.l   BANK_SEL,%d0
-    bne.b   ut_box
-ut_pick:
-    clr.b   cl_bkarm
+    clr.b   cl_pclose
     jsr     cl_close
-    bra.b   ut_post
+    bra.w   ut_post
 ut_box:
     jsr     cl_hstate                   | [BANK] / [PTN] held flags change after their handlers: the
     cmp.b   cl_hdrst,%d0                | header (BANK box, ORIG PTN/PART) and page LED follow here
@@ -4368,7 +4356,17 @@ ut_pm:
     move.b  ACT_PAT,%d0
     cmp.w   cl_lastp,%d0
     beq.b   ut_post
+    moveq   #0,%d1
+    move.w  cl_lastp,%d1
     move.w  %d0,cl_lastp
+    eor.l   %d0,%d1                     | another bank (a stock pick inside Clyps; the user, 2026-11-07):
+    andi.l  #0xff00,%d1                 | the view goes to it; the arrows keep their own bank (they show
+    beq.b   ut_refr                     | again on it), without arrows the box goes home
+    lsr.l   #8,%d0
+    move.b  %d0,cl_bank
+    tst.b   cl_pmoved
+    bne.b   ut_refr
+    jsr     cl_boxhome
 ut_refr:
     jsr     cl_refresh
 ut_post:
@@ -4380,9 +4378,11 @@ ut_post:
     addq.l  #4,%sp
     tst.b   cl_open
     beq.b   ut_out
-    tst.b   cl_boxreq                   | a card reload: the box / LEDs go to the active track's sequence
-    beq.b   ut_rf
+    tst.b   cl_boxreq                   | a card reload: the box / LEDs go to the active track's sequence --
+    beq.b   ut_rf                       | not while the arrows show: they stay (the user, 2026-11-07)
     clr.b   cl_boxreq
+    tst.b   cl_pmoved
+    bne.b   ut_rf
     jsr     cl_boxhome
 ut_rf:
     jsr     cl_refresh                  | a landing: the slot labels and the grid follow
@@ -5236,10 +5236,11 @@ cd_next:
     tst.b   cl_fph
     beq.b   cd_nlf
     move.b  cl_bank,%d0
-    cmp.b   cl_sbank,%d0
+    cmp.b   cl_fcode,%d0                | the loaded slot's bank (cl_fcode: bank << 8 | slot)
     bne.b   cd_nlf
     moveq   #0,%d2
-    move.b  cl_cur,%d2
+    move.b  cl_fcode+1,%d2
+    andi.l  #15,%d2
     bsr.w   cl_cell
     moveq   #0,%d5
     move.w  2(%a3),%d5
@@ -6406,6 +6407,9 @@ cl_ledrec:  .long 0, cl_paint, cl_blink
 cl_win:     .long 0
 cl_gmask:   .long 0                     | the painters' group test (cl_gupd): 0 = none, else 0x10000 | members
 cl_tabsig:  .long 0                     | the tabs' last group / active / side (cl_tabhook)
+cl_fcode:   .short 0                    | the load confirmation's slot: bank << 8 | slot (cl_exec -> cl_draw)
+cl_pclose:  .byte 0                     | a project load: close Clyps at the UI tail
+            .byte 0
 cl_grp:     .short 0                    | the group's members: bit t, MIDI 8..15 (scope §1.9)
 cl_cuh:     .byte 0                     | [CUE] held (our own press / release record)
 cl_gn:      .byte 0                     | cl_gord's entries
@@ -6429,7 +6433,7 @@ cl_chordout:.byte 0                     | Clyps was opened by the chord, still h
 cl_pled:    .byte 0                     | the 4th page LED: 0 stock's, 1 red, 2 yellow, 3 flashing red
 cl_ptfwd:   .byte 0                     | a [PTN] pressed in Clyps: its events go to stock's handler
 cl_bkfwd:   .byte 0                     | a [BANK] pressed in Clyps: stock's gesture, ours to finish
-cl_bkarm:   .byte 0                     | ... BANK_SEL 2 from now on is a pick (closes Clyps)
+cl_bkarm:   .byte 0                     | ... BANK_SEL 2 from now on is a pick (it closed Clyps until CL22; unused)
 cl_bkused:  .byte 0                     | ... the arrows paged during it: no SELECT BANK on release
 cl_nproj:   .byte 0                     | project loads seen (the emulator gate reads it)
             .align 2

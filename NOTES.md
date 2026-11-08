@@ -38132,3 +38132,13 @@ Now 936 / 932 (<= 945): the pair fits, SC's donor becomes PLATE REV.
   (gate Z: 6,322 / 0 B, was 42,890 / 42,890). `cl_nlocks` skips rows a lock trig counts. main merged (9dd4287:
   REC_TRIG_MUTE top dot on T1-T4, `0x400448ba`). New `tools/clyps_profile.py` (Clyps' instructions per state, per
   call). Gates on CL21: full 116, T 21, F+Q 27, L 17, J 8, M+U 38, X+O+W 15, V+Z+I 31, H 3. syx 3e3fd75b….
+- **KYOTI CL22** (2026-11-07, NOT flashed; CL16 on the unit; CL21 not flashed): (1) persistent pre-select arrows:
+  `cl_pexec` removed (every load / restore / temp save cleared them); the confirmation flashes `cl_fcode` instead of
+  moving the cursor; a hidden cursor still follows a load (`ex2_cur`); a card reload homes the box only without
+  arrows; the [PTN]+[BANK] chord hides them while held. Pattern changes leave them too (the user asked for them to
+  follow pattern loads, then withdrew it; the withdrawn build was never gated to the end). Audit of every write: arrow
+  keys, a track swap (cl_psave / cl_pload), [CUE]-held arrows (every member), paths reached only without arrows
+  (cl_boxhome), a project load (clears the records; Clyps closes). (2) Stock pattern picks inside Clyps keep it open
+  (PTN_CONSUMED / BANK_SEL close removed); a bank change moves the view; `cl_lastp` set at the open. (3) A project
+  load closes Clyps (`cl_pclose`). TRAP: gate V posts no UI tail after keys (posttail off) -- a header-state check
+  needs tailmsg(). Gates on CL22: full 120, T 21, F+Q 27, L 17, J 8, M+U 38, X+O+W 15, V+Z+I 35, H 3. syx df2d4a1d….
