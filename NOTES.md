@@ -37794,3 +37794,41 @@ Now 936 / 932 (<= 945): the pair fits, SC's donor becomes PLATE REV.
   `modules/reload-from-project/upstream` off `6a2da8d`, plus octabam's own wrapper docstring / proof_note,
   `modules/reload-from-project/README.md` and `docs/site/usage/reload-from-project.md` ("re-apply the track's saved
   Part" is wrong now).
+
+## 2026-11-08 cont. (`reload-slice`) — RELOAD_FROM_PROJECT: [PTN] + [BANK] + trig N reloads a whole pattern from the card, as Clyps does (WIP, NOT flashed)
+
+- **The user's ask:** keep the name RELOAD FROM PROJECT by bringing Clyps' pattern reload along: the same gesture
+  ([PTN] + [BANK] + trig N), the OT switches to that pattern after the load, and no stray toast / window from the
+  stock [PTN] / [BANK] press and release behaviour during the chord ("the same system as Clyps").
+- **Measured keymaps (stock):** [PTN] layer (struct `0x400bf0f2`, records `0x400bef04`): trigs → `0x40056b2c` (pattern
+  pick; octabam KITS detours it), NO, YES. [BANK] layer (`0x400cff14`, records `0x400cff34`): trigs → `0x4007b2fc`
+  (bank pick; release `0x4007b434` acts only at BANK_SEL 2), NO, YES. Neither maps the other key, so the chord's second
+  key reaches its own base handler and pushes its layer on top. [PTN] press (`0x4005a044`) pushes its keymap + LED layer
+  via `0x4004346c`; its release shows SELECT PATTERN unless PTN_CONSUMED (`0x4005a0be`: teardown `0x40043418` only).
+  LED layers: `0x4007e760` APPENDS at the tail of the list at `0x460e7624` -- the tail is the top, the head
+  (`0x400d0a1c`, pushed at boot by `0x4007e930`) the base.
+- **Design:** the chord is one state in either order. [PTN] press with [BANK] held (new detour `0x4005a044`
+  `rl3_ptn_key`, 6 B) runs stock's press as a call, then LAYER_POP + LAYER_PUSH puts [BANK]'s keymap layer back on top;
+  [BANK] press with [PTN] held (the existing `rl3_bank_show` press path) is already on top. `rl3_chord` then sets
+  PTN_CONSUMED = -1 and `rl3_bank_used` (both releases silent: no SELECT PATTERN, no SELECT BANK), and moves [PTN]'s LED
+  layer to the top (the grid shows patterns, as Clyps' chord). The [BANK]-layer trig press (new detour `0x4007b2fc`
+  `rl3_bank_trig`, 8 B) with both held and BANK_SEL 0 → `rl3_do_pat` (gated: no arranger, no dialog, no request of ours
+  still waiting). With both held a [TRACK] key reloads nothing (Clyps' exclusive modifiers). KITS' `0x40056b2c` is not
+  touched.
+- **Worker** (kind `RQ_PTN` 5, `rl_ptnjob`): the whole slab (the live +0x899 bytes and the slab tail kept, as Clyps),
+  its saved Part link, then that whole working Part from the card (`rl_rdpart`, the read split out of `rl_full`);
+  applied (`0x40009094`) when sounding (N playing → it becomes CUR_PART, or N shares the playing Part); the master
+  scale cache follows for the playing pattern; edited mark (`rl_pmark`, split out too). `rl_done` toasts `PATTERN A05`
+  / `RELOADED FROM PROJ` (`PART NOT READ!` on line 2 if the Part chunk failed), redraws when applied, then the cue as
+  Clyps' `cl_ptnswitch` (`0x4009a404`, `0x400a1030(bank, N)`, stock's refreshes). Also: `rl_varm` cleared at every
+  job start (Clyps does it; a failed track job could have left it set).
+- **Emulator:** `tools/diag_reload_ptn.py` (new; OT DEMO, stopped): both key orders route the trigs to [BANK]'s layer;
+  pattern 5 (Part 2) and its Part from the card, the OT goes to it; reloading the playing pattern applies its Part and
+  redraws; no SELECT window / dialog at any step; the dispatch table and LED layers come back exactly; the chord with
+  no trig and the chord + [TRACK] reload nothing; a plain [PTN] tap still opens SELECT PATTERN. ALL PASS.
+  `diag_reload_full.py` re-run on this build: PASS (OT DEMO audio, JAM2 MIDI). Not run in the emulator: the switch
+  while the transport runs (the cue is stock's), the KYOTI (DRAM) form.
+- **Builds (all WIP, NOT flashed; supersede the 140C_RLSL1 set above):** standalone mainos `20beb3a4…`, syx
+  `73f127a9…` (OS VERSION `140C_RLSL2`, 4124 B unit); BUG_RL3 mainos `f9c12a45…`, syx `9079b2e7…`; KYOTI V1.7 mainos
+  `94b3f362…`, syx `42a4bc78…` (2 arena pages, unchanged). build_reload_from_project.py and build_kyoti.py's B2 now
+  require the [PTN] handler to be stock or exactly RELOAD's jmp. octabam REFERENCE `6e2e80f4…`, 8 detours.

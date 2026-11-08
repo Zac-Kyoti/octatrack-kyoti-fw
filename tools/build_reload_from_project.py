@@ -204,7 +204,10 @@ PATCHES = [
       # Session 83, carried over: doneFn's SUCCESS path, 6 B, immediately before
       # the `bsr.w 0x40023b68` that re-reads all 16 patterns. This is the
       # suppression that cut a reload from 6852 card reads to 354.
-      (0x40023c62, "rl_done", "71f9460bd910", 6, "jmp")]),
+      (0x40023c62, "rl_done", "71f9460bd910", 6, "jmp"),
+      # 2026-11-08 (2): [PTN] + [BANK] + trig = the pattern reload from the card
+      (0x4005a044, "rl3_ptn_key", "202f00087201", 6, "jmp"),      # [PTN] press with [BANK] held
+      (0x4007b2fc, "rl3_bank_trig", "2f0a2f02242f000c", 8, "jmp")]),  # [BANK]-layer trig press
 ]
 
 # Session 80 continued (2): the [BANK]-held keymap overlay layer.
@@ -306,9 +309,13 @@ def main():
     # several routing bugs. The chord design reaches both gestures by detouring
     # ordinary key handlers instead, so assert every overlay record is untouched.
     print("\n=== keymap overlays must be byte-for-byte stock ===")
+    # 2026-11-08 (2): the [PTN] key handler carries exactly our jmp (rl3_ptn_key), nothing else
+    a = o(0x4005a044)
+    if bytes(img[a:a + 6]) != jmp(syms["patch_reload3"]["rl3_ptn_key"]) or \
+            bytes(img[a + 6:a + 8]) != bytes(stock[a + 6:a + 8]):
+        sys.exit("[PTN] key handler 0x4005a044 holds something other than the jmp to rl3_ptn_key")
     for addr, what in ((0x400d00ee, "[BANK]-layer YES record"),
                        (0x400d00d4, "[BANK]-layer NO record"),
-                       (0x4005a044, "[PTN] key handler"),
                        (0x400bf0be, "[PTN]-layer YES record"),
                        (0x400bf0a4, "[PTN]-layer NO record"),
                        (0x4007af80, "[BANK] key handler")):
@@ -319,7 +326,7 @@ def main():
         a = o(addr)
         if bytes(img[a:a + 8]) != bytes(stock[a:a + 8]):
             sys.exit(f"{what} 0x{addr:08x} was modified -- this build must poke no layer records")
-    print("  all [PTN]/[BANK] handlers and overlay records verified untouched")
+    print("  all [PTN]/[BANK] overlay records and the [BANK] handler untouched; [PTN] handler = our jmp only")
     # the 8 TRACK slots of [CUE]'s held sub-map (0x400bf2a0 -> 0x400bf122; Session 85
     # called them the [PTN] overlay's, wrongly) must still point at the handler we
     # detour, not at us -- we detour the handler, we do not repoint the records.
@@ -397,6 +404,8 @@ def main():
     print("                          was saved (machine, FX, pages, scene locks, LFO designer);")
     print("                          every other track and the rest of the Part untouched.")
     print("                          toast: TRK FULL / RELOADED FROM PROJ")
+    print("  [PTN] + [BANK] + trig N  ->  pattern N of the playing bank from the card (the whole pattern")
+    print("                          and its Part), then the OT goes to it. toast: PATTERN A05 / RELOADED FROM PROJ")
     print("  SELECT BANK now opens on the [BANK] RELEASE, not the press, so neither")
     print("    chord flashes a window. A plain [BANK] tap still toggles it as stock does.")
     print("  Reloads NEVER touch the transport: the playhead and the internal metronome")

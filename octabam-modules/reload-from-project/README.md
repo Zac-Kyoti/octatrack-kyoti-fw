@@ -1,6 +1,6 @@
 # RELOAD_FROM_PROJECT
 
-Reload **one track's** sequence from the CF card **without stopping the transport**.
+Reload **one track**, or **one pattern**, from the CF card **without stopping the transport**.
 
 Stock can only reload a whole bank, and doing so stops the sequencer. Two direct
 chords, no modal window and no timeout:
@@ -9,6 +9,10 @@ chords, no modal window and no timeout:
 - **`[BANK]` + `[TRACK n]`** — the same, and that track's slice of the Part as the
   project was saved: machine, FX, levels, every page, scene locks and LFO designer.
   Every other track, and the rest of the Part, is left alone.
+- **`[PTN]` + `[BANK]` + trig N** — pattern N of the playing bank, all its tracks and its
+  Part, as the project was saved; then the OT goes to it (at once when stopped; while
+  playing, where stock's own pattern change would land). Hold the two keys in either order.
+  With both held, a `[TRACK]` key reloads nothing.
 
 `[CUE]` + `[TRACK n]` is stock cue behaviour, not a reload. The eight stock refs to
 the `0x40083dc4` detour are CUE's held-modifier TRACK slots (`0x400bf122`); without a
@@ -18,13 +22,13 @@ It reloads the pattern that is *playing*, on an audio or a MIDI track, and never
 restarts the sequence or the internal metronome. A stock-style toast confirms when
 the reload has **finished** — and says so if the trigs did not land.
 
-Deferred by the author's own scoping: all-tracks and whole-bank reload.
+Deferred by the author's own scoping: whole-bank reload.
 
 ## Contents
 
 | file | what it is |
 |---|---|
-| `manifest.py` | the octabam module declaration — one DRAM unit, six `jmp` detours |
+| `manifest.py` | the octabam module declaration — one DRAM unit, eight `jmp` detours |
 | `patch_reload3.s` | the m68k source; the only truth for the unit's bytes |
 
 Standalone image: `tools/build_reload_from_project.py` → `RELOAD_FROM_PROJECT`.
@@ -39,8 +43,10 @@ Standalone image: `tools/build_reload_from_project.py` → `RELOAD_FROM_PROJECT`
 | `0x4007b3e0` | `rl3_bank_rel` | `[BANK]` release (8-byte span) |
 | `0x40023c62` | `rl_done` | the FINISHED toast |
 | `0x40085864` | `rl_job` | stock's own message case `0x14` worker |
+| `0x4005a044` | `rl3_ptn_key` | `[PTN]` press with `[BANK]` held: stock's press, then `[BANK]`'s layer on top |
+| `0x4007b2fc` | `rl3_bank_trig` | `[BANK]`-layer trig press: with `[PTN]` held, the pattern reload (8-byte span) |
 
-All six are `jmp`. Two displace eight bytes, so the six-byte jump is followed by a
+All eight are `jmp`. Three displace eight bytes, so the six-byte jump is followed by a
 nop — otherwise the span would be left half-rewritten.
 
 The worker is **stock's own**; this module hooks it rather than reimplementing it.
@@ -58,9 +64,20 @@ task (message `0x2b`): the PICKUP setup after a new machine, then the tail of st
 Part-reload shortcut (`0x4005e0a8`), so the knobs show the reloaded values at once.
 Toasts: `TRK SEQ` / `RELOADED FROM PROJ` and `TRK FULL` / `RELOADED FROM PROJ`.
 
+**`[PTN]` + `[BANK]` + trig N, the pattern reload** (8 Nov 2026, CLYPS' as well). Neither the
+`[PTN]` nor the `[BANK]` keymap layer has a record for the other key, so the chord's second key
+pushes its own layer on top and a trig goes to whichever came last. Two more detours make the
+chord one state in either order: `[PTN]`'s press with `[BANK]` held (`0x4005a044`) runs stock's
+press, then puts `[BANK]`'s keymap layer back on top; `[BANK]`'s trig press (`0x4007b2fc`) is ours
+while both keys are held. The `[PTN]` layer's own trig handler is left alone (KITS detours it).
+Both releases are silent: no SELECT PATTERN, no SELECT BANK. The grid shows `[PTN]`'s LED layer.
+The worker lands the whole slab with its saved Part link and the whole working Part it links to,
+and applies that Part when it is sounding. doneFn then cues the pattern as stock's `[PTN]` +
+trig does (`0x4009a404`, `0x400a1030`). Toast: `PATTERN A05` / `RELOADED FROM PROJ`.
+
 **In DRAM.** In octabam the code is a `Linked(dram=True)` unit: octabam's loader
 unpacks it into the platform reserve at the bottom of the audio page arena at every
-boot, and the six detours jump there. It left the ROM cave so that every KYOTI module
+boot, and the eight detours jump there. It left the ROM cave so that every KYOTI module
 fits one remix, and it is the one that moved because it runs from key chords and the
 message worker, never on the per-step tick. The standalone image keeps it in the ROM
 cave at `0x400d6500`; the bytes are the same, linked at a different address.
@@ -103,9 +120,9 @@ confirmed from the ROM cave (the standalone image and KYOTI V1.0), and from DRAM
 octabam-built image with all six KYOTI modules (2026-10-01): both chords, the FINISHED
 toast, the transport kept running, and the knob repaint. Nothing tested on an MKII.
 
-3226 bytes, sha256 `143aeeca1721bcfb…` linked at `0x400d6500` (`-mcpu=5407` or `54455`, identical); octabam re-links it there on every build and compares.
+4124 bytes, sha256 `6e2e80f4283ae69e…` linked at `0x400d6500` (`-mcpu=5407` or `54455`, identical); octabam re-links it there on every build and compares.
 
-The `[BANK]` + `[TRACK n]` Part-slice reload (8 Nov 2026) is emulator-checked; it is not yet hardware-confirmed.
+The `[BANK]` + `[TRACK n]` Part-slice reload and the `[PTN]` + `[BANK]` + trig pattern reload (8 Nov 2026) are emulator-checked; they are not yet hardware-confirmed.
 
 ## Licence
 

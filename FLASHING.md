@@ -111,7 +111,7 @@ unit that boots; if it doesn't, use §3b.
 |---|---|
 | MUTE_MODES, SIDECHAIN_COMPRESSOR, RELOAD_FROM_PROJECT, QUANTIZE_LIVE_REC_TOGGLE | `140C_KYOTI` |
 | SIDECHAIN_COMPRESSOR light (the earlier version, WIP) | `140C_SCLT` |
-| RELOAD_FROM_PROJECT Part-slice test build (WIP, 2026-11-08) | `140C_RLSL1` |
+| RELOAD_FROM_PROJECT Part-slice + pattern-reload test build (WIP, 2026-11-08) | `140C_RLSL2` |
 | KYOTI V1.7 (the features in one image) | `KYOTI V1.7` |
 | KYOTI V1.6 (the previous one) | `KYOTI V1.6` |
 | KYOTI V1.5 (the previous one) | `KYOTI V1.5` |
@@ -161,8 +161,8 @@ quick check for each:
   (`[MIDI]`), `[PTN]` + `[TRACK 2]` → `TRK SEQ` / `RELOADED FROM PROJ`: M2 is back to its saved
   trigs, and audio T2 (back on the audio side) still has your unsaved change. On the audio side
   `[PTN]` + `[TRACK 2]` still reloads T2 only.
-  **Part-slice walk-through (WIP 2026-11-08; standalone `140C_RLSL1`, `BUG_RL3`, `KYOTI V1.7`
-  rebuilt — none flashed yet).** `[BANK]` + `[TRACK n]` now brings back track n's sequence AND
+  **Part-slice + pattern-reload walk-through (WIP 2026-11-08; standalone `140C_RLSL2`, `BUG_RL3`,
+  `KYOTI V1.7` rebuilt — none flashed yet).** `[BANK]` + `[TRACK n]` now brings back track n's sequence AND
   track n's machine / FX / pages / scene locks / LFO designer *as the project was saved*; no
   other track changes. Start each step from a SAVE PROJECT, on a pattern whose Part T1 and T2
   share, with the transport running.
@@ -181,6 +181,20 @@ quick check for each:
      `[BANK]` + `[TRACK 2]` → `TRK FULL` / `RELOADED FROM PROJ`: M2 is back, M1 keeps its
      change.
   6. `[PTN]` + `[TRACK n]` still brings back only the trigs (`TRK SEQ` / `RELOADED FROM PROJ`).
+  7. **Pattern reload, stopped.** Edit pattern A05 (trigs on several tracks, a Part setting of
+     its Part) while on A01. Hold `[PTN]`, then `[BANK]`, tap trig 5 → `PATTERN A05` /
+     `RELOADED FROM PROJ`, and the OT is on A05 with its saved trigs and settings. While the two
+     keys are held the trigs show the patterns, not the banks; neither SELECT PATTERN nor
+     SELECT BANK appears, on any press or release.
+  8. **The other order, running.** Edit A05 again, then while A01 plays hold `[BANK]`, then
+     `[PTN]`, tap trig 5: A05 is cued and starts where a stock pattern change would (with
+     DIRECT JUMP on, at its landing point). The transport never stops.
+  9. **The playing pattern.** While A05 plays, edit it, then `[PTN]` + `[BANK]` + trig 5: its
+     trigs and its Part come back in place, and the knobs show the saved values.
+  10. **No trig.** Hold `[PTN]` + `[BANK]` and let go of both: nothing happens, no window. Then a
+      plain `[PTN]` tap still opens SELECT PATTERN, a plain `[BANK]` tap SELECT BANK, and
+      `[PTN]` + trig / `[BANK]` + trig pick a pattern / bank as usual.
+  11. With `[PTN]` + `[BANK]` held, a `[TRACK]` key only changes the track (no reload).
 - **QUANTIZE_LIVE_REC_TOGGLE** — hold `[REC]`, tap `[PLAY]` → toast `LIVE REC: QUANTIZED` or
   `LIVE REC: UNQUANTIZED`; tap `[PLAY]` again while it is up → the setting inverts. With
   PROJECT → PERSONALIZE open, the QUANTIZE LIVE REC check mark changes at the same moment.

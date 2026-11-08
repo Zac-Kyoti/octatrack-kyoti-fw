@@ -126,7 +126,7 @@ def main(argv):
         u.hook_add(er.eb.UC_HOOK_CODE, lambda uc, ad_, sz, ud, k=k: calls.__setitem__(k, calls[k] + 1),
                    begin=ad, end=ad)
     path = []
-    for n in ("rl_job", "rl_full", "rf_seq", "rf_parsed", "rf_fail0", "rf_out", "rlj_setflag", "rl_done", "rld_epi"):
+    for n in ("rl_job", "rl_full", "rf_seq", "rr_parsed", "rf_fail0", "rf_out", "rlj_setflag", "rl_done", "rld_epi"):
         if n in syms:
             u.hook_add(er.eb.UC_HOOK_CODE, lambda uc, ad_, sz, ud, n=n: path.append(n),
                        begin=syms[n], end=syms[n])
@@ -165,7 +165,7 @@ def main(argv):
     check(set(diffs) <= set(sl[t2]), f"the Part differs from the card only in T2's edit ({[hex(i) for i in diffs][:8]})")
     check(calls["part_reload"] == 0, "stock's PART RELOAD (0x4004aab4) never ran")
     check(calls["rfrsh"] >= 1, "the Part-reload page redraw (0x4005e0a8) ran")
-    check("rf_parsed" in path and "rf_seq" not in path, "the direct seek read the Part chunk")
+    check("rr_parsed" in path and "rf_seq" not in path, "the direct seek read the Part chunk")
     check(rd(0x460D1E70, 4) != 0, "a toast is up")
     saved = rd(bb + PSAVED + link, 1)
     eq = saved and bytes(u.mem_read(bb + PSAVECPY + link * PARTSZ, PARTSZ)) == pbytes()
@@ -190,7 +190,7 @@ def main(argv):
                    begin=0x8000184C, end=0x8000184C)
         key(BANK, 1); key(tk, 1); rt.run(ms=6000); key(tk, 0); key(BANK, 0)
         print(f"      path {path}; calls {calls}; writes to 0x8000184c {[hex(v) for v in restarts][:6]}", flush=True)
-        check("rf_seq" in path and "rf_parsed" in path, "the seek failed and the chunk-by-chunk fallback read the Part")
+        check("rf_seq" in path and "rr_parsed" in path, "the seek failed and the chunk-by-chunk fallback read the Part")
         check(same_rec(rec(t1), pre[t1]) and pslice(t1) == psl[t1], "T1's sequence and slice from the card")
         check(rd(mach, 1) == m0, f"T1's machine back to the card's ({m0})")
         check(any(v & 1 for v in restarts), "T1's voice restart bit was set (0x8000184c bit 0)")

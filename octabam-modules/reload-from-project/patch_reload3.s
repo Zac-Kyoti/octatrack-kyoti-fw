@@ -435,6 +435,25 @@
     .equ MZERO,      0x8000664e         | long[8], cleared by stock's apply
     .equ RQ_TRKSEQ,  3                  | G_KIND: the track's sequence
     .equ RQ_TRKFULL, 4                  | G_KIND: the track's sequence + its Part slice
+    .equ RQ_PTN,     5                  | G_KIND: a whole pattern + its whole Part (G_PAT = it)
+|   ---- 2026-11-08 (2): [PTN] + [BANK] + trig N = pattern N of the playing bank from the card ----
+|   CLYPS' pattern reload (scope §1.8, built CLYPP; "the OT goes to it", 2026-11-06), outside Clyps.
+|   MEASURED keymaps (stock 1.40C): the [PTN] layer (struct 0x400bf0f2, records 0x400bef04) maps
+|   trigs 0..15 -> 0x40056b2c (pattern pick; octabam's KITS detours it), NO, YES; the [BANK] layer
+|   (0x400cff14, records 0x400cff34) maps trigs 0..15 -> 0x4007b2fc (bank pick), NO, YES. Neither has
+|   a record for the other key, so the chord's second key reaches its own base handler and pushes
+|   its layer ON TOP -- the trig then goes to whichever was pressed last. This patch makes the chord
+|   one state in either order: [BANK]'s keymap layer on top (its trig press is ours while both are
+|   held), [PTN]'s LED layer on top (the grid shows the patterns, as Clyps' chord does), and both
+|   releases silent (PTN_CONSUMED: [PTN]'s release only tears down, 0x4005a0be; rl3_bank_used:
+|   ours tears [BANK] down, no SELECT BANK).
+    .equ PTN_KEY_RES,  0x4005a04a       | [PTN] handler after `move.l 8(sp),d0 ; moveq #1,d1`
+    .equ BANK_TRIG_RES,0x4007b304       | [BANK]-layer trig press after its 8-byte prologue
+    .equ PTN_LEDL,     0x400bebfe       | [PTN]'s LED layer (0x4004346c pushes it with its keymap)
+    .equ LED_POP,      0x4007e81c       | (layer): unlink it, wherever it is in the list
+    .equ PAT_MSCALE,   0x8e52           | the MASTER scale (PER TRACK mode's source of SCALE_IX)
+    .equ CHAIN_OFF,    0x4009a404       | stock [PTN] + trig's steps (0x40056b2c..): chain off,
+    .equ PAT_CUE,      0x400a1030       | (bank, pattern): the cue (running: pending; stopped: at once)
 
     .equ N_ITEMS,     3
 
@@ -627,6 +646,113 @@ r3p_stock:
     move.l  8(%sp),%d2                 | displaced original (reads the pre-push 4(sp))
     jmp     PTN_TRK_RES
 
+| ============ 2026-11-08 (2): the [PTN] + [BANK] chord ============
+| [PTN] key handler 0x4005a044 (press, release, hold), replaces 6 B: move.l 8(sp),%d0 ; moveq #1,%d1.
+| Only a PRESS with [BANK] already held (and nothing picked under it, BANK_SEL 0) is ours: stock's
+| press runs as usual (it pushes [PTN]'s layers ON TOP), then [BANK]'s keymap layer goes back on top
+| and rl3_chord marks the gesture. Everything else is stock, byte for byte.
+    .global rl3_ptn_key
+rl3_ptn_key:
+    moveq   #1,%d0
+    cmp.l   8(%sp),%d0
+    bne.b   r3k_stock                  | release / hold: stock
+    tst.l   BANK_HELD_FLAG
+    beq.b   r3k_stock
+    tst.l   BANK_SEL
+    bne.b   r3k_stock                  | a bank picked under [BANK]: stock's state, leave it
+    move.l  8(%sp),-(%sp)              | event
+    move.l  8(%sp),-(%sp)              | code
+    bsr.b   r3k_stock                  | stock's own press (it ends in jmp 0x40027de4 -> rts here)
+    addq.l  #8,%sp
+    pea     BANK_LAYER
+    jsr     LAYER_POP
+    addq.l  #4,%sp
+    pea     BANK_LAYER
+    jsr     LAYER_PUSH                 | [BANK]'s trigs on top again
+    addq.l  #4,%sp
+    bsr.w   rl3_chord
+    rts
+r3k_stock:
+    move.l  8(%sp),%d0                 | displaced
+    moveq   #1,%d1                     | displaced
+    jmp     PTN_KEY_RES
+
+| rl3_chord: the chord is complete (its second key's press). Both releases silent, the grid on the
+| patterns. UI task; d0/d1/a0/a1 only.
+rl3_chord:
+    moveq   #-1,%d0
+    move.l  %d0,PTN_CONSUMED           | [PTN]'s release: teardown only (stock's -1, 0x40056b44)
+    moveq   #1,%d0
+    move.b  %d0,rl3_bank_used          | [BANK]'s release: ours, teardown only
+    clr.l   BANK_COMMIT
+    pea     PTN_LEDL
+    jsr     LED_POP
+    addq.l  #4,%sp
+    pea     PTN_LEDL
+    jsr     BANK_UI_A                  | 0x4007e760: [PTN]'s LED layer on top
+    addq.l  #4,%sp
+    clr.l   -(%sp)
+    jsr     BANK_UI_B                  | 0x4007e998(0): repaint the grid
+    addq.l  #4,%sp
+    rts
+
+| [BANK]-layer trig press 0x4007b2fc, replaces 8 B: move.l %a2,-(%sp) ; move.l %d2,-(%sp) ;
+| move.l 12(%sp),%d2. With [PTN] held too (and no bank picked): reload pattern N, swallow. Its
+| release 0x4007b434 does nothing while BANK_SEL != 2, so swallowing the press is the whole of it.
+    .global rl3_bank_trig
+rl3_bank_trig:
+    tst.l   PTN_HELD_FLAG
+    beq.b   r3t_stock
+    tst.l   BANK_HELD_FLAG
+    beq.b   r3t_stock
+    tst.l   BANK_SEL
+    bne.b   r3t_stock
+    moveq   #0,%d0
+    move.b  7(%sp),%d0
+    andi.l  #15,%d0
+    bsr.w   rl3_do_pat
+    rts
+r3t_stock:
+    move.l  %a2,-(%sp)                 | displaced
+    move.l  %d2,-(%sp)                 | displaced
+    move.l  12(%sp),%d2                | displaced
+    jmp     BANK_TRIG_RES
+
+| rl3_do_pat (d0 = N): arm the pattern reload and post the job (Session 93: the message first).
+| Not with the arranger running, nor over a blocking dialog (CLYPS' gate), nor while a request of
+| ours is still waiting for the worker (G_KIND != 0: a second post would overwrite it).
+rl3_do_pat:
+    tst.l   ARR_ACT
+    bne.w   r3d_out
+    tst.l   POPUP
+    bne.w   r3d_out
+    tst.b   G_KIND
+    bne.w   r3d_out
+    move.b  %d0,G_PAT
+    addq.l  #1,%d0
+    move.l  %d0,-(%sp)                 | pattern 1..16
+    moveq   #0,%d0
+    move.b  PLAY_BANK,%d0
+    addi.l  #'A',%d0
+    move.l  %d0,-(%sp)                 | the playing bank's letter
+    pea     rl3_fmt_ptn
+    pea     rl3_pline
+    jsr     SPRINTF                    | "PATTERN A05"
+    lea     16(%sp),%sp
+    moveq   #6,%d0
+    move.b  %d0,rl_msg                 | "PATTERN A05" / "RELOADED FROM PROJ", on SUCCESS
+    moveq   #RQ_PTN,%d0
+    move.b  %d0,G_KIND
+    moveq   #0,%d0
+    move.b  PLAY_BANK,%d0
+    moveq   #1,%d1
+    lsl.l   %d0,%d1
+    move.l  %d1,-(%sp)
+    jsr     JOB_POST                   | FUN_40022778(1 << the playing bank)
+    addq.l  #4,%sp
+r3d_out:
+    rts
+
 | ============ [BANK] + [TRACK n] -- the sequence PLUS the track's Part slice, from the card ============
 | Toast "TRK FULL" / "RELOADED FROM PROJ" (2026-11-08; see r3b_try_bank).
 | Displaces 6 B: move.l %d2,-(%sp) ; move.l 8(%sp),%d1
@@ -641,6 +767,10 @@ rl3_bank_trk:
 |   (16 Oct 2026); it reloads only when [PTN] is held too, through the same body.
     tst.l   PTN_HELD_FLAG
     beq.b   r3b_try_bank
+|   2026-11-08 (2): with BOTH modifiers held a TRACK key reloads nothing -- it changes the track, as
+|   stock (CLYPS' exclusive modifiers, the user 2026-10-30)
+    tst.l   BANK_HELD_FLAG
+    bne.w   r3b_stock
     moveq   #0,%d0
     move.b  7(%sp),%d0
     bsr.w   rl3_do_ptn
@@ -906,6 +1036,11 @@ rl3_bank_show:
     clr.l   -(%sp)
     jsr     BANK_UI_B
     addq.l  #4,%sp
+|   2026-11-08 (2): [PTN] already held -> the chord ([BANK]'s layer is on top already)
+    tst.l   PTN_HELD_FLAG
+    beq.b   r3s_out
+    bsr.w   rl3_chord
+r3s_out:
     rts
 r3s_do:
     clr.b   rl3_showing                | one-shot -- re-close behind us immediately
@@ -1034,6 +1169,15 @@ rl3_lines_lost:
 rl3_lines_nopart:
     .long   rl3_s_seqonly              | 5
     .long   rl3_s_nopart
+rl3_lines_ptn:
+    .long   rl3_pline                  | 6 = "PATTERN A05" / "RELOADED FROM PROJ"
+    .long   rl3_s_proj
+rl3_lines_ptnnp:
+    .long   rl3_pline                  | 7 = "PATTERN A05" / "PART NOT READ!"
+    .long   rl3_s_nopart
+rl3_msgtab:
+    .long   rl3_lines_seq, rl3_lines_full, rl3_lines_lost, rl3_lines_lost
+    .long   rl3_lines_nopart, rl3_lines_ptn, rl3_lines_ptnnp
 rl3_s_seq:
     .asciz  "TRK SEQ"
 rl3_s_full:
@@ -1048,7 +1192,11 @@ rl3_s_seqonly:
     .asciz  "TRK SEQ RELOADED"
 rl3_s_nopart:
     .asciz  "PART NOT READ!"
+rl3_fmt_ptn:
+    .asciz  "PATTERN %c%02d"
     .align 2
+rl3_pline:
+    .space  24
 
 | ---- rl_arm_trk: arm a TRK SEQ reload of the currently-addressed track ----
 | Reads CUR_TRACK (0x80000000) + MIDI_MODE (0x80000012), sets G_TRK / G_TMIDI /
@@ -1292,16 +1440,9 @@ rld_noverify:
     bsr.w   rl3_diag_show              | ... and show the bytes instead, every time
     bra.b   rld_nomsg
     .endif
-    lea     rl3_lines_seq,%a0          | 1 = "TRK SEQ"  / "RELOADED FROM PROJ"
-    subq.l  #1,%d0
-    beq.b   rld_show
-    lea     rl3_lines_full,%a0         | 2 = "TRK FULL" / "RELOADED FROM PROJ"
-    subq.l  #1,%d0
-    beq.b   rld_show
-    lea     rl3_lines_nopart,%a0       | 5 = "TRK SEQ RELOADED" / "PART NOT READ!"
-    subq.l  #3,%d0
-    beq.b   rld_show
-    lea     rl3_lines_lost,%a0         | 4 = the verify above FAILED
+    lea     rl3_msgtab-4,%a0           | 1..7 -> its two lines
+    lsl.l   #2,%d0
+    movea.l (%a0,%d0.l),%a0
 rld_show:
     bsr.w   rl3_show2
 rld_nomsg:
@@ -1327,6 +1468,32 @@ rld_nomsg:
 rld_ref:
     bsr.w   rl3_part_refresh
 rld_epi:
+|   2026-11-08 (2): a pattern reload -- the OT goes to that pattern, as CLYPS' cl_ptnswitch (and stock's
+|   [PTN] + trig, 0x40056b2c..0x40056b8c, without its window teardown): the chain off, the cue
+|   (running: a pending change; stopped: at once), then stock's refreshes. Its own pattern: nothing.
+    move.b  rl_ptngo,%d0
+    beq.b   rld_out
+    clr.b   rl_ptngo
+    andi.l  #15,%d0
+    moveq   #0,%d1
+    move.b  ACT_PAT,%d1
+    cmp.l   %d0,%d1
+    beq.b   rld_out
+    move.l  %d0,-(%sp)                 | N (the cue's second argument)
+    jsr     CHAIN_OFF
+    moveq   #0,%d0
+    move.b  PLAY_BANK,%d0
+    move.l  %d0,-(%sp)
+    jsr     PAT_CUE                    | 0x400a1030(bank, N)
+    jsr     0x400418e0                 | stock's refreshes after it (0x40056b6e..0x40056b8c)
+    pea     -1
+    jsr     0x40083bc0
+    jsr     0x40032208
+    jsr     0x400486cc
+    jsr     0x4004b528
+    jsr     0x4004b08c
+    lea     12(%sp),%sp
+rld_out:
     jmp     DONE_EPILOG                | skip the whole-bank reload entirely
     .endif
 
@@ -1356,8 +1523,8 @@ rl_job:
     beq.b   rlj_notours                | 0 = genuinely not ours
     cmpi.l  #RQ_TRKSEQ,%d0
     bcs.b   rlj_drop
-    cmpi.l  #RQ_TRKFULL,%d0
-    bls.b   rlj_isours                 | 3..4 = a request we made
+    cmpi.l  #RQ_PTN,%d0
+    bls.b   rlj_isours                 | 3..5 = a request we made
 rlj_drop:
     clr.b   G_KIND                     | garbage -> drop it, let stock have the job
 rlj_notours:
@@ -1424,6 +1591,8 @@ rlj_ours:
     .ifdef RL_DONE
     clr.b   rl_own
     .endif
+    clr.b   rl_varm                    | 2026-11-08 (2): a stale verify of a failed track job must not
+                                       | judge this one (CLYPS clears rq_varm here too)
     move.w  CKSUM,%d0
     move.w  %d0,rl_cksum
 
@@ -1466,7 +1635,7 @@ rlj_ploop:
 
     move.l  rl_kind,%d7                | d7 = kind (RQ_TRKSEQ / RQ_TRKFULL)
     cmpi.l  #RQ_TRKFULL,%d7
-    beq.b   rlj_keep                   | FULL reads on, to the Part chunk (rl_full closes)
+    bcc.b   rlj_keep                   | FULL / PTN read on, to the Part chunk (rl_rdpart closes)
     pea     rl_fh
     jsr     FCLOSE
     addq.l  #4,%sp
@@ -1485,6 +1654,15 @@ rlj_keep:
     move.l  #PATSTRIDE,%d1
     muls.l  %d1,%d0
     add.l   %d0,%a4                    | a4 = live slab for P
+
+    cmpi.l  #RQ_PTN,%d7
+    bne.b   rlj_trk
+    bsr.w   rl_ptnjob                  | the whole pattern + its Part (2026-11-08 (2))
+    tst.l   %d0
+    bpl.w   rlj_setflag
+    moveq   #7,%d0
+    move.b  %d0,rl_msg                 | the pattern landed, its Part did not
+    bra.w   rlj_setflag
 
 rlj_trk:
 |   --- kind 3 = TRK SEQ: copy just the selected track's region ---
@@ -1795,78 +1973,9 @@ rl_full:
     move.l  #SCRATCH+PAT_PART,%a0
     move.b  (%a0),%d3
     andi.l  #3,%d3                     | d3 = the Part the SAVED pattern links to
-|   straight to that PART chunk (CLYPS' direct path, 2026-11-04). Fixed offsets per version, checked
-|   there on 816 real bank files (.strd + .work, versions 0x14..0x17): PTRN n at 0x16 + st * n,
-|   st = 0x8eec from version 0x17 on, 0x8ee8 before; working PART p at 0x16 + 16 * st + 0x18bb * p.
-|   The parser checks the chunk's tag (PART, 0x400d1690), so a wrong offset fails -> rf_seq.
-    cmpi.l  #0x14,%d6
-    bcs.b   rf_seq                     | an older format: chunk by chunk
-    move.l  #0x8ee8,%d4
-    cmpi.l  #0x17,%d6
-    bcs.b   rf_st
-    move.l  #0x8eec,%d4                | d4 = the pattern chunk stride
-rf_st:
-    move.l  #0x18bb,%d0
-    muls.l  %d3,%d0
-    lsl.l   #4,%d4
-    add.l   %d4,%d0
-    addi.l  #0x16,%d0
-    move.l  %d0,-(%sp)
-    bsr.w   rl_seek
-    addq.l  #4,%sp
+    bsr.w   rl_rdpart                  | -> SCRATCH = that working Part; the file closed
     tst.l   %d0
-    bmi.b   rf_seq
-    move.l  %d3,%d0
-    bsr.w   rf_parse
-    tst.l   %d0
-    bpl.w   rf_parsed
-|   anything unexpected on the direct path: the file again, chunk by chunk from the top -- stock's
-|   own reading order: the 16 PTRN chunks, then the working PART chunks up to d3
-rf_seq:
-    pea     rl_fh
-    jsr     FCLOSE
-    addq.l  #4,%sp
-    jsr     rl_openstrd
-    tst.l   %d0
-    bmi.w   rf_fail0                   | not open: nothing to close
-    move.l  #22,-(%sp)
-    pea     rl_hdrbuf
-    pea     rl_fh
-    jsr     FREAD
-    lea     12(%sp),%sp
-    tst.l   %d0
-    ble.b   rf_fail
-    moveq   #16,%d4
-rf_pl:
-    move.l  %d6,-(%sp)
-    pea     SCRATCH
-    pea     rl_fh
-    jsr     PARSEPAT
-    lea     12(%sp),%sp
-    tst.l   %d0
-    bmi.b   rf_fail
-    subq.l  #1,%d4
-    bne.b   rf_pl
-rf_prl:
-    move.l  %d4,%d0
-    bsr.w   rf_parse
-    tst.l   %d0
-    bmi.b   rf_fail
-    cmp.l   %d3,%d4
-    beq.b   rf_parsed
-    addq.l  #1,%d4
-    bra.b   rf_prl
-rf_fail:
-    pea     rl_fh
-    jsr     FCLOSE
-    addq.l  #4,%sp
-rf_fail0:
-    moveq   #-1,%d0
-    bra.w   rf_out
-rf_parsed:
-    pea     rl_fh
-    jsr     FCLOSE
-    addq.l  #4,%sp
+    bmi.w   rf_out
 |   the Part P links to NOW (a3, index d2), in the playing bank (a5)
     moveq   #0,%d0
     move.b  PLAY_BANK,%d0
@@ -1929,16 +2038,220 @@ rf_m:
     bsr.w   rl_mapply
 rf_pub:
     lea     12(%sp),%sp
+    bsr.w   rl_pmark
+    moveq   #1,%d0
+    move.b  %d0,rl_pfull               | rl_done: the UI half
+    moveq   #0,%d0
+rf_out:
+    movem.l (%sp),%d2-%d4/%a2-%a3/%a5
+    lea     24(%sp),%sp
+    rts
+
+| ================= 2026-11-08 (2): [PTN] + [BANK] + trig N -- pattern N from the card =================
+| CLYPS' pattern reload (clyps_reload.s rj_ptn), worker task. In: d5 = N (playing bank), d6 = the
+| version word, a4 = N's live slab; rl_fh open just past PTRN chunk N, SCRATCH = the saved N.
+| The whole slab lands (sequences, length / scale / mode, and the SAVED Part link), then the whole
+| working Part it links to, from the card. That Part is applied (stock's whole-Part apply
+| 0x40009094, as the old PART + PTN SEQ did) when it is sounding: N is the playing pattern (its Part
+| becomes the current one, 0x80000003) or N shares the playing pattern's Part. Its edited mark
+| follows its SAVE PART copy. rl_done then sends the OT to N (rl_ptngo) -- running: at the pattern
+| end / CHAIN AFTER (DIRECT JUMP on: its landing point); stopped: at once.
+| -> d0 = 0, or -1 when the Part chunk could not be read (the slab has landed). Keeps d2-d7/a2-a6.
+rl_ptnjob:
+    lea     -24(%sp),%sp
+    movem.l %d2-%d4/%a2-%a3/%a5,(%sp)
+|   the bytes the bank file never holds keep their live values (stock parses into the live slab):
+|   each audio record's +0x899 and the slab tail +0x8e5c.. (CLYPS gate X)
+    movea.l #SCRATCH,%a0
+    move.l  #0x899,%d0
+rp_ns:
+    move.b  (%a4,%d0.l),%d1
+    move.b  %d1,(%a0,%d0.l)
+    addi.l  #TRAC_A,%d0
+    cmpi.l  #8*TRAC_A,%d0
+    bcs.b   rp_ns
+    move.l  #0x8e5c,%d0
+rp_nt:
+    move.b  (%a4,%d0.l),%d1
+    move.b  %d1,(%a0,%d0.l)
+    addq.l  #1,%d0
+    cmpi.l  #PATSTRIDE,%d0
+    bcs.b   rp_nt
+    move.l  #PATSTRIDE,-(%sp)
+    pea     SCRATCH
+    move.l  %a4,-(%sp)
+    jsr     FWMEMCPY                   | the whole slab, its saved Part link included
+    lea     12(%sp),%sp
+    movea.l %a4,%a0
+    adda.l  #PAT_PART,%a0
+    moveq   #0,%d3
+    move.b  (%a0),%d3
+    andi.l  #3,%d3                     | d3 = its (saved) Part
+    move.l  %d3,%d2
+    moveq   #0,%d0
+    move.b  PLAY_BANK,%d0
+    move.l  #BANKSTRIDE,%d1
+    muls.l  %d1,%d0
+    movea.l #BLOB,%a5
+    adda.l  %d0,%a5                    | a5 = the bank
+    move.l  #PARTSZ,%d0
+    muls.l  %d3,%d0
+    movea.l %a5,%a3
+    adda.l  #PART_OFF,%a3
+    adda.l  %d0,%a3                    | a3 = that Part
+|   the playing pattern: the live master scale cache, as the track reload does (Session 89)
+    moveq   #0,%d0
+    move.b  ACT_PAT,%d0
+    cmp.l   %d5,%d0
+    bne.b   rp_rd
+    movea.l %a4,%a0
+    adda.l  #PAT_SCALE,%a0
+    movea.l %a4,%a1
+    adda.l  #PAT_SMODE,%a1
+    tst.b   (%a1)
+    beq.b   rp_sc
+    movea.l %a4,%a0
+    adda.l  #PAT_MSCALE,%a0            | PER TRACK: the master scale
+rp_sc:
+    move.b  (%a0),%d0
+    cmp.b   SCALE_IX,%d0
+    beq.b   rp_rd
+    move.b  %d0,SCALE_IX
+rp_rd:
+    bsr.w   rl_rdpart                  | SCRATCH = that working Part; the file closed
+    tst.l   %d0
+    bmi.b   rp_go
+    move.l  #PARTSZ,-(%sp)
+    pea     SCRATCH
+    move.l  %a3,-(%sp)
+    jsr     FWMEMCPY
+    lea     12(%sp),%sp
+    moveq   #0,%d0
+    move.b  ACT_PAT,%d0
+    cmp.l   %d5,%d0
+    bne.b   rp_share
+    move.b  %d3,CUR_PART               | the playing pattern: its Part is the sounding one now
+    bra.b   rp_apply
+rp_share:
+    moveq   #0,%d0
+    move.b  CUR_PART,%d0
+    cmp.l   %d3,%d0
+    bne.b   rp_mark                    | another Part than the sounding one: nothing to apply
+rp_apply:
+    move.l  %d3,-(%sp)
+    moveq   #0,%d0
+    move.b  PLAY_BANK,%d0
+    move.l  %d0,-(%sp)
+    jsr     PARTAPPLY                  | FUN_40009094(bank, part)
+    addq.l  #8,%sp
+    moveq   #1,%d0
+    move.b  %d0,rl_pfull               | rl_done: the page redraw
+rp_mark:
+    bsr.w   rl_pmark
+    moveq   #0,%d0
+rp_go:
+    move.l  %d5,%d1
+    ori.l   #0x80,%d1
+    move.b  %d1,rl_ptngo               | rl_done: the OT goes to N
+    movem.l (%sp),%d2-%d4/%a2-%a3/%a5
+    lea     24(%sp),%sp
+    rts
+
+| rl_rdpart (d3 = the working Part to read, d6 = the version word; rl_fh open): that PART chunk ->
+| SCRATCH -- a direct seek, else the file again chunk by chunk. rl_fh is closed on every path.
+| -> d0 = 0 read, -1 not. Keeps d2-d7/a2-a6.
+rl_rdpart:
+    move.l  %d4,-(%sp)
+|   straight to that PART chunk (CLYPS' direct path, 2026-11-04). Fixed offsets per version, checked
+|   there on 816 real bank files (.strd + .work, versions 0x14..0x17): PTRN n at 0x16 + st * n,
+|   st = 0x8eec from version 0x17 on, 0x8ee8 before; working PART p at 0x16 + 16 * st + 0x18bb * p.
+|   The parser checks the chunk's tag (PART, 0x400d1690), so a wrong offset fails -> rf_seq.
+    cmpi.l  #0x14,%d6
+    bcs.b   rf_seq                     | an older format: chunk by chunk
+    move.l  #0x8ee8,%d4
+    cmpi.l  #0x17,%d6
+    bcs.b   rf_st
+    move.l  #0x8eec,%d4                | d4 = the pattern chunk stride
+rf_st:
+    move.l  #0x18bb,%d0
+    muls.l  %d3,%d0
+    lsl.l   #4,%d4
+    add.l   %d4,%d0
+    addi.l  #0x16,%d0
+    move.l  %d0,-(%sp)
+    bsr.w   rl_seek
+    addq.l  #4,%sp
+    tst.l   %d0
+    bmi.b   rf_seq
+    move.l  %d3,%d0
+    bsr.w   rf_parse
+    tst.l   %d0
+    bpl.w   rr_parsed
+|   anything unexpected on the direct path: the file again, chunk by chunk from the top -- stock's
+|   own reading order: the 16 PTRN chunks, then the working PART chunks up to d3
+rf_seq:
+    pea     rl_fh
+    jsr     FCLOSE
+    addq.l  #4,%sp
+    jsr     rl_openstrd
+    tst.l   %d0
+    bmi.w   rf_fail0                   | not open: nothing to close
+    move.l  #22,-(%sp)
+    pea     rl_hdrbuf
+    pea     rl_fh
+    jsr     FREAD
+    lea     12(%sp),%sp
+    tst.l   %d0
+    ble.b   rf_fail
+    moveq   #16,%d4
+rf_pl:
+    move.l  %d6,-(%sp)
+    pea     SCRATCH
+    pea     rl_fh
+    jsr     PARSEPAT
+    lea     12(%sp),%sp
+    tst.l   %d0
+    bmi.b   rf_fail
+    subq.l  #1,%d4
+    bne.b   rf_pl
+rf_prl:
+    move.l  %d4,%d0
+    bsr.w   rf_parse
+    tst.l   %d0
+    bmi.b   rf_fail
+    cmp.l   %d3,%d4
+    beq.b   rr_parsed
+    addq.l  #1,%d4
+    bra.b   rf_prl
+rf_fail:
+    pea     rl_fh
+    jsr     FCLOSE
+    addq.l  #4,%sp
+rf_fail0:
+    moveq   #-1,%d0
+    bra.b   rr_out
+rr_parsed:
+    pea     rl_fh
+    jsr     FCLOSE
+    addq.l  #4,%sp
+    moveq   #0,%d0
+rr_out:
+    move.l  (%sp)+,%d4
+    rts
+
+| rl_pmark (a5 = the playing bank, a3 = a Part of it, d2 = its index), after that Part changed:
 |   stock's Part-edited mark: set, unless the Part now equals its SAVE PART copy (bank +0x9504a +
 |   part * PARTSZ, valid when +0x9b312 + part != 0 -- the test stock's PART RELOAD makes), as after
 |   stock's own PART RELOAD; the bank changed. A byte: bset / bclr, never or.l (S119).
+rl_pmark:
+    move.l  %a2,-(%sp)
     movea.l %a5,%a2
     adda.l  #PEDIT,%a2                 | a2 = the edited byte
     bset    %d2,(%a2)
     movea.l %a5,%a0
     adda.l  #PSAVED,%a0
     tst.b   (%a0,%d2.l)
-    beq.b   rf_dirty
+    beq.b   pm_dirty
     move.l  #PARTSZ,%d0
     muls.l  %d2,%d0
     movea.l %a5,%a1
@@ -1946,24 +2259,20 @@ rf_pub:
     adda.l  %d0,%a1                    | a1 = its SAVE PART copy
     movea.l %a3,%a0
     move.l  #PARTSZ/2,%d1
-rf_cmp:
+pm_cmp:
     move.w  (%a0)+,%d0
     cmp.w   (%a1)+,%d0
-    bne.b   rf_dirty
+    bne.b   pm_dirty
     subq.l  #1,%d1
-    bne.b   rf_cmp
+    bne.b   pm_cmp
     bclr    %d2,(%a2)                  | equal: not edited
-rf_dirty:
+pm_dirty:
     movea.l %a5,%a0
     adda.l  #BDIRTY,%a0
     moveq   #1,%d0
     move.l  %d0,(%a0)
     move.l  %d0,DIRTY2
-    move.b  %d0,rl_pfull               | rl_done: the UI half
-    moveq   #0,%d0
-rf_out:
-    movem.l (%sp),%d2-%d4/%a2-%a3/%a5
-    lea     24(%sp),%sp
+    move.l  (%sp)+,%a2
     rts
 
 | rf_parse (d0 = Part index): PARSEPRT(rl_fh, SCRATCH, d0, d6) -> d0 < 0: failed
@@ -2221,6 +2530,9 @@ rl_pfull:
     .space 1
 rl_mch:
     .space 1
+rl_ptngo:
+    .space 1                           | 0x80 | N: rl_done sends the OT to pattern N
+    .align 2
 rl_cksum:
     .space 4
 rl_pathbuf:
