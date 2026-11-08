@@ -706,10 +706,16 @@ def main():
         # B2: the keymap overlays -- DJ's YES press field is the only change
         ptn_yes = 0x400bf0be
         for addr, what in ((0x400d00ee, "[BANK]-layer YES record"), (0x400d00d4, "[BANK]-layer NO record"),
-                           (0x4005a044, "[PTN] key handler"), (0x400bf0a4, "[PTN]-layer NO record"),
-                           (0x4007af80, "[BANK] key handler")):
+                           (0x400bf0a4, "[PTN]-layer NO record"), (0x4007af80, "[BANK] key handler")):
             if comp[o(addr):o(addr) + 8] != stock[o(addr):o(addr) + 8]:
                 flag(f"B2: {what} 0x{addr:08x} is not stock")
+        # the [PTN] key handler: stock, or (RELOAD_FROM_PROJECT's pattern reload, 2026-11-08) exactly its
+        # jmp to rl3_ptn_key with the rest of the handler stock
+        k = o(0x4005a044)
+        rl = syms.get("patch_reload3", {}).get("rl3_ptn_key") if "RELOAD_FROM_PROJECT" in FEATURES else None
+        want = (b"\x4e\xf9" + rl.to_bytes(4, "big")) if rl else stock[k:k + 6]
+        if comp[k:k + 6] != want or comp[k + 6:k + 8] != stock[k + 6:k + 8]:
+            flag("B2: [PTN] key handler 0x4005a044 is neither stock nor RELOAD_FROM_PROJECT's jmp")
         for i in range(8):
             rec = 0x400bf122 + i * 26
             if int.from_bytes(comp[o(rec) + 2:o(rec) + 6], "big") != 0x40083dc4:
@@ -721,8 +727,8 @@ def main():
         if not (djlo <= press < djhi):
             flag(f"B2: [PTN]-overlay YES press field 0x{press:08x} is not in DIRECT JUMP's cave")
         else:
-            print(f"  B2: [PTN]+[YES] -> 0x{press:08x} (DIRECT JUMP); RELOAD_FROM_PROJECT's records, handlers and "
-                  f"8 TRACK slots stock")
+            print(f"  B2: [PTN]+[YES] -> 0x{press:08x} (DIRECT JUMP); the overlay records, the [BANK] handler and "
+                  f"8 TRACK slots stock; [PTN] handler {'-> rl3_ptn_key' if rl else 'stock'}")
 
     # reclaim: nothing but our own pieces may point into a reclaimed zone
     ours = [(place[k], place[k] + size[k]) for k in place]
