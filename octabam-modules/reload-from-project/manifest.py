@@ -5,7 +5,9 @@ Stock can only reload a whole bank, and doing so stops the sequencer. Two direct
 chords, no modal window and no timeout:
 
     [PTN]  + [TRACK n]   reload that track's card-saved sequence, Part untouched
-    [BANK] + [TRACK n]   the same, and re-apply the saved Part
+    [BANK] + [TRACK n]   the same, and that track's slice of the Part as the project
+                         was saved (machine, FX, every page, scene locks, LFO designer);
+                         every other track and the rest of the Part are left alone
 
 It reloads the pattern that is PLAYING, on an audio or a MIDI track, and never
 restarts the sequence or the internal metronome. A stock-style toast confirms when
@@ -29,6 +31,15 @@ standalone builder refuses any reference into 0x80006a40..0x80006abf.
 
 The worker itself (message case 0x14, rl_job) is stock's own; this module hooks it
 rather than reimplementing it.
+
+THE PART SLICE (2026-11-08). [BANK] + [TRACK n] used to run stock's PART RELOAD: the
+WHOLE Part, from its SAVE PART copy in RAM, so every other track on that Part reverted
+too. It now does what the author's CLYPS card reload does: the worker reads the bank
+file's working PART chunk (a direct seek, chunk-by-chunk as the fallback), copies track
+n's slice into the Part the pattern links to now, and publishes it for that track alone
+(audio: stock's per-track apply 0x40001f18; MIDI: one track of stock's Part apply). The
+UI half -- PICKUP setup after a new machine, the page redraw -- runs in the job's doneFn,
+which stock calls on the UI task.
 
 IN DRAM. In octabam this is a Linked(dram=True) unit: octabam's loader unpacks it
 into the platform reserve at the bottom of the audio page arena at every boot, and
@@ -65,27 +76,28 @@ HOOKS = (
 
 # ---- the author's oracle -------------------------------------------------------
 # patch_reload3.s, m68k-elf-as -mcpu=5407 or 54455 (identical bytes; RL_DONE is the
-# source's default), linked at 0x400d6500 -- the address the standalone,
-# hardware-confirmed image uses: 2100 bytes (2102 before the 25 Oct 2026 MIDI-tracks fix:
-# MIDI_MODE is a long, read with move.l). octabam re-links it there on every build and
-# compares.
-REFERENCE = (0x400d6500, "0d784ccd58d02f490e729a4a49b18bf7b9b159343c1bd75bc1ef70a8de99bb19")
+# source's default), linked at 0x400d6500 -- the address the standalone image uses:
+# 3226 bytes (2100 before the 8 Nov 2026 Part-slice reload). octabam re-links it there on
+# every build and compares.
+REFERENCE = (0x400d6500, "143aeeca1721bcfb1651ed3931d749c20ce39eb5e658b4b336d3757a89adf998")
 
 MODULE = Module(
     name="reload-from-project",
     key="RELOAD_FROM_PROJECT",
     kind=Kind.CF_PATCH,
     doc="Reload one track's sequence from the card without stopping the "
-        "transport: [PTN]+[TRACK n], or [BANK]+[TRACK n] to re-apply the Part.",
-    # [BANK]+[TRACK n] calls stock Part RELOAD (0x4004aab4) from this unit. Octakit
+        "transport: [PTN]+[TRACK n], or [BANK]+[TRACK n] to bring back that "
+        "track's machine and effects too.",
+    # Until 2026-11-08 [BANK]+[TRACK n] called stock Part RELOAD (0x4004aab4). Octakit
     # replaces that routine and traps (`illegal`) unless the caller is the menu Part
-    # Reload (0x4002dd5c) or FUNC+CUE (0x4005e060), so the pair crashes on the first use.
-    # The ledger cannot see it: the call is not a detour. Refused until a bridge exists
-    # (reference/handoffs/DIRECTJUMP_OCTAKIT_SCOPE.md).
+    # Reload (0x4002dd5c) or FUNC+CUE (0x4005e060), so the pair crashed on the first use.
+    # That call is gone, but the slice reload now calls stock's per-track apply
+    # 0x40001f18, which Octakit's runtime also names, and the pair has never been run
+    # together. Still refused (reference/handoffs/DIRECTJUMP_OCTAKIT_SCOPE.md).
     conflicts=(("OCTAKIT",
-                "[BANK]+[TRACK n] calls the stock Part reload, which Octakit replaces and "
-                "traps on for any caller but its own two; refused until a bridge exists -- "
-                "take one"),),
+                "never run together: [BANK]+[TRACK n] calls stock's per-track Part apply, "
+                "which Octakit's runtime also uses (until 2026-11-08 it called the stock "
+                "Part reload, which Octakit traps on) -- take one"),),
     linked=(
         Linked("rl3", os.path.join(_HERE, "patch_reload3.s"), dram=True,
                reference=REFERENCE),

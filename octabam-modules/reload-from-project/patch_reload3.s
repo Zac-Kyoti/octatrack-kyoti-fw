@@ -11,7 +11,9 @@
 | sharing, no walk-away detection, no arrows, and no BUSY state.
 |
 |   [PTN]  + [TRACK n] -> reload that track's CF-saved sequence. Part untouched.
-|   [BANK] + [TRACK n] -> the same, PLUS re-apply the saved Part from RAM.
+|   [BANK] + [TRACK n] -> the same, PLUS that track's slice of the Part as the project
+|                         was saved on the card (2026-11-08, CLYPS' card reload; it used
+|                         to re-apply the WHOLE Part from its SAVE PART copy in RAM).
 |
 | Carried over unchanged because it is proven: rl_job's per-track slice, rl_arm_trk,
 | rl_openstrd, and the whole-bank suppression (rl_done + the FUN_4000faf0 live
@@ -405,6 +407,35 @@
 |   mode it is sourced from +0x8e54, in PER TRACK mode from the MASTER scale +0x8e52.
     .equ SCALE_IX,   0x8000663d         | live MASTER scale index (byte)
 
+|   ---- 2026-11-08: [BANK] + [TRACK n] = the track's sequence + ITS Part slice, from the card ----
+|   The same reload CLYPS does (tools/clyps/clyps_reload.s in the trkseq worktree, scope §1.8, the
+|   user 2026-10-30): never the whole Part (that reverted every other track on it), and never the
+|   SAVE PART copy in RAM, but the bank file's WORKING Part chunk -- the Part as the project was
+|   saved. Stock's bank reader 0x4008e0c0..0x4008e2c0 reads the 16 PTRN chunks, then the 4 working
+|   PART chunks (0x4008be2c) into bank +0x8ed80, then the 4 SAVE PART copies (+0x9504a).
+    .equ PARSEPRT,   0x4008be2c         | (fh, part, i, ver): parse one PART chunk
+    .equ LLSEEK,     0x46c8243e         | -> the card filesystem's seek (id, byte offset)
+    .equ PART_OFF,   0x8ed80            | a bank's 4 working Parts, after its 16 slabs
+    .equ PARTSZ,     0x18b2
+    .equ PEDIT,      0x95048            | bank + : byte, bit p = Part p edited
+    .equ PSAVECPY,   0x9504a            | bank + part * PARTSZ: the SAVE PART copies
+    .equ PSAVED,     0x9b312            | bank + part: != 0 = the Part has a SAVE PART copy
+    .equ BDIRTY,     0x9b332            | bank + : long 1 = the bank has changed
+    .equ DIRTY2,     0x100f8598         | long 1 (stock's TRACK PASTE sets it with the two above)
+    .equ UI_BANK,    0x80000002         | the bank the SRAM mirror and the screen show
+    .equ TRK_APPLY,  0x40001f18         | (bank, part, t): one audio track's Part values -> the engine
+                                        | (C, our reading: a5 = bank, fp = part, d6 = t)
+    .equ ENG_RESTART,0x8000184c         | byte, bit t: restart the voice (stock's machine edit 0x400973b4)
+    .equ PICKUP_SET, 0x40097290         | stock's PICKUP setup after a machine change (UI context;
+                                        | stock's machine edit calls it first, 0x400973b0)
+    .equ MENG,       0x46c76dc0         | 8 x 68 B: a MIDI track's page values (32) + setup (36)
+    .equ MDES,       0x46c7738c         | 24 x 16 B: the MIDI LFOs' designer waves
+    .equ MSLP,       0x46c7750c         | 24 x u16: ... their slopes
+    .equ MBANK,      0x8000666e         | byte[8] bank / [8+m] Part the MIDI track's values came from
+    .equ MZERO,      0x8000664e         | long[8], cleared by stock's apply
+    .equ RQ_TRKSEQ,  3                  | G_KIND: the track's sequence
+    .equ RQ_TRKFULL, 4                  | G_KIND: the track's sequence + its Part slice
+
     .equ N_ITEMS,     3
 
 |   ---- merged-firmware [YES] chaining (build_merged.py only) ----
@@ -596,10 +627,8 @@ r3p_stock:
     move.l  8(%sp),%d2                 | displaced original (reads the pre-push 4(sp))
     jmp     PTN_TRK_RES
 
-| ============ [BANK] + [TRACK n] -- sequence PLUS the saved Part, from RAM ============
-| Toast "TRK SEQ + PART RELOADED", or stock's "SAVE PART FIRST!" when the Part has
-| never been saved -- which PART_RELOAD itself reports, so we need no dirty-flag
-| logic of our own. A saved Part DOES replace a dirty Part: that is the point.
+| ============ [BANK] + [TRACK n] -- the sequence PLUS the track's Part slice, from the card ============
+| Toast "TRK FULL" / "RELOADED FROM PROJ" (2026-11-08; see r3b_try_bank).
 | Displaces 6 B: move.l %d2,-(%sp) ; move.l 8(%sp),%d1
     .global rl3_bank_trk
 rl3_bank_trk:
@@ -619,56 +648,27 @@ rl3_bank_trk:
 r3b_try_bank:
     tst.l   BANK_HELD_FLAG
     beq.w   r3b_stock                  | neither modifier -> ordinary track select
-|   ===== Session 93 (2nd pass): rl_msg MUST be armed BEFORE the job is posted. =====
-|   ** A race I introduced when the message moved to completion, caught by
-|   diag_reload3_honest.py. ** The old order was:
-|       jsr rl3_arm_n     <- POSTS the storage job
-|       jsr PART_RELOAD   <- stock routine; can block, so the scheduler can run
-|       move.b %d0,rl_msg <- armed only here
-|   If the job drains and doneFn reaches rl_done while PART_RELOAD is still in progress,
-|   rl_done reads rl_msg == 0, draws NOTHING, and the write above then strands rl_msg at 2
-|   for the rest of time. Measured exactly that: settled=True, rl_done entered=1,
-|   rl_msg=2 left uncleared, 0 messages drawn.
-|   So do the PART half FIRST -- it needs no job -- arm the message from its verdict, and
-|   post the sequence job last. The track index is stashed on the stack because
-|   PART_RELOAD returns its verdict in d0 and d2 still belongs to stock's caller on this
-|   path (we rts, we do not fall through to r3b_stock).
-    moveq   #0,%d0
-    move.b  7(%sp),%d0                 | read the keycode BEFORE pushing anything
-    subi.l  #0x10,%d0
-    move.l  %d0,-(%sp)                 | stash the track index across PART_RELOAD
-|   --- the PART half: stock's own routine, from RAM (the per-Part SAVED copy) ---
-    moveq   #0,%d0
-    move.b  CUR_PART,%d0               | the Part the sounding pattern is assigned to
-    move.l  %d0,-(%sp)
-    jsr     PART_RELOAD
-    addq.l  #4,%sp
-    tst.l   %d0
-    beq.b   r3b_unsaved
-|   Part reloaded to its saved version. TWO lines, at the user's request (hardware
-|   report #9 item 1): the split is "TRK SEQ + PART" / "RELOADED", which also buys
-|   back the spaces around the + that the 21-char single-line width budget had
-|   forced out -- each line is now well inside the box width.
-    moveq   #2,%d0
-    move.b  %d0,rl_msg                 | "TRK SEQ + PART" / "RELOADED", shown on SUCCESS
-    bsr.w   rl3_part_refresh           | Session 120: repaint the knobs as stock does
-    bra.b   r3b_armed
-r3b_unsaved:
-|   Never saved: the SEQUENCE still reloaded, so saying only "SAVE PART FIRST!"
-|   (stock's wording) would wrongly imply nothing happened. Two lines instead, so
-|   both facts are visible at once.
-    moveq   #3,%d0
-    move.b  %d0,rl_msg                 | "TRK SEQ RELOADED" / "SAVE PART FIRST!"
-r3b_armed:
+|   ===== 2026-11-08: the sequence AND this track's Part slice, from the CARD, in one job. =====
+|   Until now this chord ran stock's PART RELOAD (0x4004aab4) here and then a sequence job: that
+|   put back the WHOLE Part, from its SAVE PART copy in RAM ("SAVE PART FIRST!" when there was
+|   none), so every other track on the Part reverted too. The user asked for what CLYPS' card
+|   reload does (scope §1.8, 2026-10-30): track n's sequence + track n's slice of the Part (machine,
+|   FX, levels, every page, scene locks, LFO designer) as the PROJECT was saved -- the working Part
+|   chunk of the bank file. Every other track, and the rest of the Part, untouched. The whole job
+|   runs in the worker (rl_full); the UI half (PICKUP setup, the page redraw) in rl_done.
+|   Session 93's rule still holds: the message is armed BEFORE the job is posted, the post LAST.
+|   d2 belongs to stock's caller on this path (we rts): only d0/d1.
     moveq   #1,%d0
     move.b  %d0,rl3_bank_used          | claim the [BANK] release: rl3_bank_rel swallows
                                        | it AND runs the overlay teardown there, so the
                                        | teardown happens exactly once, on the release.
-|   Session 86: no BANK_WIN_CLOSE here any more. With the window deferred, the chord has
-|   no window up at all -- which is also why MLNOTIFY below can draw: it bails out
-|   entirely while 0x460e5cd0 is non-zero, and now that flag is clear.
-    move.l  (%sp)+,%d0                 | the stashed track index
-    jsr     rl3_arm_n                  | --- the SEQUENCE half: posts the job LAST ---
+    moveq   #2,%d0
+    move.b  %d0,rl_msg                 | "TRK FULL" / "RELOADED FROM PROJ", shown on SUCCESS
+    moveq   #0,%d0
+    move.b  7(%sp),%d0
+    subi.l  #0x10,%d0                  | TRACK keycodes 0x10..0x17 -> index 0..7
+    moveq   #RQ_TRKFULL,%d1
+    jsr     rl3_arm_n                  | the job: posted LAST
 r3b_done:
 |   Belt and braces for the release. rl3_bank_used above is what actually swallows it;
 |   clearing BANK_COMMIT means that even if that flag were somehow missed, the release
@@ -694,8 +694,9 @@ rl3_do_ptn:
 |   trusting: the window is real either way.
     move.l  %d0,-(%sp)                 | stash the track index
     moveq   #1,%d0
-    move.b  %d0,rl_msg                 | "TRK SEQ RELOADED", shown on SUCCESS
+    move.b  %d0,rl_msg                 | "TRK SEQ" / "RELOADED FROM PROJ", shown on SUCCESS
     move.l  (%sp)+,%d0
+    moveq   #RQ_TRKSEQ,%d1
     jsr     rl3_arm_n                  | arm TRK SEQ for that track and post the job
     move.l  #-1,%d0
     move.l  %d0,PTN_CONSUMED           | same value stock writes at 0x40056b44
@@ -703,17 +704,6 @@ rl3_do_ptn:
 |   the same card as the [BANK] message, at the user's request, so both reload
 |   messages look alike.
     rts                            | rl_msg was armed above, before the post
-
-| ---- rl3_toast(text) -- stock's own single-line BLOCK toast, unchanged ----
-| Report #11 reverted the card: "I want them to be in the form of the previously used
-| larger block toasts." For a one-line message that is literally stock's own call, so
-| use it directly rather than reimplementing it.
-rl3_toast:
-    pea     TOAST_DUR
-    move.l  %a0,-(%sp)
-    jsr     TOAST                      | FUN_4005a2b8(text, dur)
-    addq.l  #8,%sp
-    rts
 
 | ---- rl3_toast2(lines[], nlines) -- the SAME block toast, but taller, multi-line ----
 | Stock has no multi-line block toast (checked: the only other 0x4005a2b8-alike at
@@ -876,9 +866,9 @@ rl3_show2:
 | FUN_4004d640, FUN_400486cc, FUN_4006dbe8, FUN_40077b00, FUN_4002f2f8; lea 12(sp),sp;
 | unlk fp; rts. We run THAT code, not a copy: `link fp,#-8` gives it the frame it expects
 | (its lea 12 pops its own -1 plus our 8 bytes, so sp is back at fp before unlk, with
-| nothing below sp at any point), and its unlk/rts return here. Only after a SUCCESSFUL
-| Part reload: on "SAVE PART FIRST!" nothing changed. The calls are C functions: d2-d7 and
-| a2-a6 survive; the caller needs none of d0/d1/a0/a1 afterwards.
+| nothing below sp at any point), and its unlk/rts return here. 2026-11-08: called from rl_done
+| (the UI task, after a [BANK] + [TRACK n] slice landed), no longer from the chord. The calls are C
+| functions: d2-d7 and a2-a6 survive; the caller needs none of d0/d1/a0/a1 afterwards.
 rl3_part_refresh:
     link.w  %fp,#-8
     jmp     PART_RFRSH
@@ -1024,43 +1014,40 @@ r3r_stock:
     jmp     BANK_REL_RES
 
     .align 2
-rl3_msg_trk:
-    .asciz "TRK SEQ RELOADED"
-    .align 2
-|   21 chars -- inside the ~21 that stock's longest single-line toasts use
-|   ("RELOADING SAVED FILES"). The toast box auto-sizes to the measured text width
-|   (0x40012f30 then `addil #15,%d0`), so over-long text is clipped at the screen
-|   edge rather than wrapped. The spec's "TRK SEQ + PART RELOADED" was 23; this
-|   drops the spaces around the + to fit.
-|   Session 86: split across two lines, so the spaces around the + come back.
-rl3_msg_trkpart_1:
-    .asciz "TRK SEQ + PART"
-    .align 2
-    .equ rl3_msg_trkpart_2, rl3_msg_trk + 8   | "RELOADED": the tail of "TRK SEQ RELOADED"
-|   Session 89: the card is gone, so its title bar string and the split
-|   "TRK SEQ"/"RELOADED" pair go with it -- that message is a one-line toast again.
-|   MLNOTIFY's line array. Stock's own groups carry an empty-string terminator
-|   after the lines (0x400b44b5), so mirror that shape.
-|   rl3_card takes an explicit line count, so these no longer need stock's
-|   empty-string terminator. Every line is centred by the drawing code.
+|   2026-11-08: CLYPS' card-reload toasts (the user, 2026-10-30 / 11-02: two lines, no track
+|   number; "RELOADED FROM PROJECT" is 123 px, wider than a toast line holds, so PROJ). The old
+|   "TRK SEQ RELOADED" / "TRK SEQ + PART" / "RELOADED" / "SAVE PART FIRST!" set is gone with the
+|   RAM Part reload.
+rl3_lines_seq:
+    .long   rl3_s_seq                  | 1 = [PTN]  + [TRACK n]
+    .long   rl3_s_proj
+rl3_lines_full:
+    .long   rl3_s_full                 | 2 = [BANK] + [TRACK n]
+    .long   rl3_s_proj
 |   Session 93: shown when the verify in rld_skip finds the copy did not hold. Two lines
 |   so it cannot be mistaken for the success message at a glance.
 rl3_lines_lost:
-    .long   rl3_msg_lost1
+    .long   rl3_msg_lost1              | 4
     .long   rl3_msg_lost2
+|   2026-11-08: [BANK] + [TRACK n] read the sequence but not the Part chunk (a card error after
+|   the sequence had landed): say exactly that.
+rl3_lines_nopart:
+    .long   rl3_s_seqonly              | 5
+    .long   rl3_s_nopart
+rl3_s_seq:
+    .asciz  "TRK SEQ"
+rl3_s_full:
+    .asciz  "TRK FULL"
+rl3_s_proj:
+    .asciz  "RELOADED FROM PROJ"
 rl3_msg_lost1:
     .asciz  "SEQ RELOAD LOST"
-    .align 2
 rl3_msg_lost2:
     .asciz  "NOT RESTORED!"
-    .align 2
-rl3_lines_unsaved:
-    .long   rl3_msg_trk                | "TRK SEQ RELOADED"   -- what DID happen
-    .long   STOCK_SAVEFIRST            | "SAVE PART FIRST!"   -- stock's own wording
-    .align 2
-rl3_lines_trkpart:
-    .long   rl3_msg_trkpart_1          | "TRK SEQ + PART"
-    .long   rl3_msg_trkpart_2          | "RELOADED"
+rl3_s_seqonly:
+    .asciz  "TRK SEQ RELOADED"
+rl3_s_nopart:
+    .asciz  "PART NOT READ!"
     .align 2
 
 | ---- rl_arm_trk: arm a TRK SEQ reload of the currently-addressed track ----
@@ -1072,11 +1059,14 @@ rl3_lines_trkpart:
 rl_arm_trk:
     moveq   #0,%d0
     move.b  CUR_TRACK,%d0
+    moveq   #RQ_TRKSEQ,%d1
 |   Session 85: the chord design knows WHICH track from the keycode, so it enters
 |   here with the index already in d0 instead of reading the UI-selected track.
-|   Everything below is the proven rl_arm_trk tail, unchanged.
+|   Everything below is the proven rl_arm_trk tail; 2026-11-08: d1 = the kind (RQ_TRKSEQ /
+|   RQ_TRKFULL), written to G_KIND below exactly where the fixed 3 used to be.
     .global rl3_arm_n
 rl3_arm_n:
+    move.b  %d1,G_KIND                 | the kind; d1 is free again until the post below
     andi.l  #7,%d0
     move.b  %d0,G_TRK
     .ifdef RL_DIAG
@@ -1099,8 +1089,6 @@ rat_aud:
     .ifdef RL_DIAG
     move.b  %d0,rl_dc+1                | DIAG: pattern, as armed
     .endif
-    moveq   #3,%d0
-    move.b  %d0,G_KIND
     moveq   #0,%d0
     move.b  PLAY_BANK,%d0              | the bank ACT_PAT above belongs to, not CUR_BANK
     .ifdef RL_DIAG
@@ -1304,36 +1292,52 @@ rld_noverify:
     bsr.w   rl3_diag_show              | ... and show the bytes instead, every time
     bra.b   rld_nomsg
     .endif
+    lea     rl3_lines_seq,%a0          | 1 = "TRK SEQ"  / "RELOADED FROM PROJ"
     subq.l  #1,%d0
-    beq.b   rld_m_trk
+    beq.b   rld_show
+    lea     rl3_lines_full,%a0         | 2 = "TRK FULL" / "RELOADED FROM PROJ"
     subq.l  #1,%d0
-    beq.b   rld_m_trkpart
-    subq.l  #1,%d0
-    beq.b   rld_m_unsaved
+    beq.b   rld_show
+    lea     rl3_lines_nopart,%a0       | 5 = "TRK SEQ RELOADED" / "PART NOT READ!"
+    subq.l  #3,%d0
+    beq.b   rld_show
     lea     rl3_lines_lost,%a0         | 4 = the verify above FAILED
+rld_show:
     bsr.w   rl3_show2
-    bra.b   rld_nomsg
-rld_m_unsaved:
-    lea     rl3_lines_unsaved,%a0      | 3 = "TRK SEQ RELOADED" / "SAVE PART FIRST!"
-    bsr.w   rl3_show2
-    bra.b   rld_nomsg
-rld_m_trkpart:
-    lea     rl3_lines_trkpart,%a0      | 2 = "TRK SEQ + PART" / "RELOADED"
-    bsr.w   rl3_show2
-    bra.b   rld_nomsg
-rld_m_trk:
-    lea     rl3_msg_trk,%a0            | 1 = "TRK SEQ RELOADED" (one line)
-    jsr     rl3_toast
 rld_nomsg:
+|   ===== 2026-11-08: the UI half of a [BANK] + [TRACK n] Part slice (rl_full set rl_pfull). =====
+|   MEASURED: this doneFn runs on the UI TASK -- the storage loop posts it to the UI queue
+|   0x460d17ae as message 0x2b (0x40084110) and the UI loop's case 0x2b (0x40062454) calls it.
+|   So what stock's own machine edit (0x400973b0) and CLYPS' UI tail do after a slice landed is
+|   legal here: the PICKUP setup for a new audio machine, then the Part-reload page redraw
+|   (rl3_part_refresh, Session 120) so the knobs show the reloaded values at once. Both read the
+|   UI bank, so only when the reloaded bank is the one on screen (CLYPS' cl_postpart rule).
+|   The data (the slice, the engine, the edited mark, the SRAM mirror) is already done.
+    tst.b   rl_pfull
+    beq.b   rld_epi
+    clr.b   rl_pfull
+    move.b  rl_mch,%d0
+    clr.b   rl_mch
+    move.b  PLAY_BANK,%d1
+    cmp.b   UI_BANK,%d1
+    bne.b   rld_epi                    | another bank than the UI's: nothing on screen
+    tst.b   %d0
+    beq.b   rld_ref
+    jsr     PICKUP_SET                 | a new machine: stock's PICKUP setup, once
+rld_ref:
+    bsr.w   rl3_part_refresh
+rld_epi:
     jmp     DONE_EPILOG                | skip the whole-bank reload entirely
     .endif
 
 | ================= the SEQ worker -- jmp detour @ the type-0x14 case 0x40085864 =================
 | replaces 8 bytes: move.l %a2,%fp@(-650) ; move.l %a2@(4),%sp@-
 |
-| G_KIND on entry:  1 = PTN SEQ (whole slab, Part link preserved)
-|                   2 = PART + PTN SEQ (whole slab incl. Part link, then apply it)
-|                   3 = TRK SEQ (one track's region only)
+| G_KIND on entry:  3 = TRK SEQ  (RQ_TRKSEQ: one track's region only)
+|                   4 = TRK FULL (RQ_TRKFULL: the same, then that track's slice of the card's
+|                       working Part -- rl_full)
+| 2026-11-08: the picker-era kinds 1 (PTN SEQ) and 2 (PART + PTN SEQ) are gone; no chord has armed
+| them since Session 85.
 
     .global rl_job
 rl_job:
@@ -1350,8 +1354,11 @@ rl_job:
     moveq   #0,%d0
     move.b  G_KIND,%d0
     beq.b   rlj_notours                | 0 = genuinely not ours
-    cmpi.l  #3,%d0
-    bls.b   rlj_isours                 | 1..3 = a request we made
+    cmpi.l  #RQ_TRKSEQ,%d0
+    bcs.b   rlj_drop
+    cmpi.l  #RQ_TRKFULL,%d0
+    bls.b   rlj_isours                 | 3..4 = a request we made
+rlj_drop:
     clr.b   G_KIND                     | garbage -> drop it, let stock have the job
 rlj_notours:
     move.l  (%sp)+,%d0
@@ -1457,9 +1464,13 @@ rlj_ploop:
     cmp.l   %d5,%d4
     ble.b   rlj_ploop                  | parse patterns 0..P (0..P-1 discarded)
 
+    move.l  rl_kind,%d7                | d7 = kind (RQ_TRKSEQ / RQ_TRKFULL)
+    cmpi.l  #RQ_TRKFULL,%d7
+    beq.b   rlj_keep                   | FULL reads on, to the Part chunk (rl_full closes)
     pea     rl_fh
     jsr     FCLOSE
     addq.l  #4,%sp
+rlj_keep:
 
     moveq   #0,%d0
     move.b  PLAY_BANK,%d0              | must be the same bank d5's pattern belongs to
@@ -1474,56 +1485,6 @@ rlj_ploop:
     move.l  #PATSTRIDE,%d1
     muls.l  %d1,%d0
     add.l   %d0,%a4                    | a4 = live slab for P
-
-    move.l  rl_kind,%d7                | d7 = kind (1 / 2 / 3)
-    moveq   #3,%d0
-    cmp.l   %d7,%d0
-    beq.w   rlj_trk
-
-|   --- kind 1 / 2: copy the whole 0x8ed8 slab ---
-|   Stash the CURRENT Part-link byte in a cave word (don't trust d3/a5 across the
-|   FWMEMCPY call -- the ABI says d2-d7/a2-a6 are preserved, but this one byte is
-|   the whole point of the "mask", so be explicit).
-    move.l  %a4,%a5
-    add.l   #PAT_PART,%a5              | a5 -> the live pattern->Part link byte
-    moveq   #0,%d0
-    move.b  (%a5),%d0
-    move.l  %d0,rl_asgn                | current assignment (may be a reassignment)
-
-    move.l  #PATSTRIDE,-(%sp)
-    pea     SCRATCH
-    move.l  %a4,-(%sp)
-    jsr     FWMEMCPY                   | memcpy(liveslab, SCRATCH, 0x8ed8)
-    lea     12(%sp),%sp
-
-    move.l  %a4,%a5                    | recompute -- a4 is preserved, be safe on a5
-    add.l   #PAT_PART,%a5
-
-    moveq   #1,%d0
-    cmp.l   %d7,%d0
-    bne.b   rlj_faithful
-|   kind 1 = PTN SEQ: put the current assignment back (a sequence reload must not
-|   silently re-point the pattern at a different Part)
-    move.l  rl_asgn,%d0
-    move.b  %d0,(%a5)
-    bra.w   rlj_setflag
-
-rlj_faithful:
-|   kind 2 = PART + PTN SEQ: the assignment is now the SAVED one (from the memcpy).
-|   Read it, mirror it to 0x80000003, and apply that Part to the engine.
-    moveq   #0,%d3
-    move.b  (%a5),%d3
-    andi.l  #3,%d3                     | saved Part 0..3
-    move.b  %d3,CUR_PART               | 0x80000003 = current-part mirror
-    moveq   #0,%d0
-    move.b  PLAY_BANK,%d0              | the Part belongs to the PLAYING bank's pattern
-    move.l  %d3,-(%sp)                 | part  (rightmost arg)
-    move.l  %d0,-(%sp)                 | bank
-    jsr     PARTAPPLY                  | FUN_40009094(bank, savedPart)
-    addq.l  #8,%sp
-    moveq   #1,%d0
-    move.l  %d0,RDRAW                  | refresh the Part display
-    bra.w   rlj_setflag
 
 rlj_trk:
 |   --- kind 3 = TRK SEQ: copy just the selected track's region ---
@@ -1542,6 +1503,14 @@ rlj_trk:
     muls.l  %d1,%d0                    | d0 = t * 0x91a
     move.l  %d0,%d2
     move.l  #TRAC_A,%d3
+|   2026-11-08 (CLYPS, gate X/L): an audio record's +0x899 is not in the bank file -- the parser
+|   leaves the buffer's byte there, and stock's own reload (which parses into the live slab) keeps
+|   the live one. So does this copy: the live byte goes into SCRATCH first.
+    move.l  #SCRATCH+0x899,%a0
+    add.l   %d2,%a0
+    move.l  %a4,%a1
+    add.l   %d2,%a1
+    move.b  0x899(%a1),(%a0)
     bra.b   rlj_trk_copy
 rlj_trk_midi:
     move.l  #TRAC_M,%d1
@@ -1651,6 +1620,16 @@ rlj_snap:
     beq.b   rlj_trk_done
     move.b  %d0,SCALE_IX               | the saved rate genuinely differs -> apply it
 rlj_trk_done:
+|   2026-11-08: [BANK] + [TRACK n] -- now that track's slice of the card's Part (rl_full closes the
+|   file on every path). The sequence has landed whatever happens next, so a Part chunk that cannot
+|   be read is still a success, with its own message: "TRK SEQ RELOADED" / "PART NOT READ!".
+    cmpi.l  #RQ_TRKFULL,%d7
+    bne.b   rlj_setflag
+    bsr.w   rl_full
+    tst.l   %d0
+    bpl.b   rlj_setflag
+    moveq   #5,%d0
+    move.b  %d0,rl_msg
 
     .global rlj_setflag        | exported so tests can hook the real success point
 rlj_setflag:
@@ -1793,6 +1772,407 @@ rlo_zero:
     lea     40(%sp),%sp
     rts
 
+| ================= 2026-11-08: [BANK] + [TRACK n] -- the track's Part slice from the card =================
+| CLYPS' card FULL reload (tools/clyps/clyps_reload.s rj_tfull + patch_clyps.s cl_slice / cl_mapply /
+| cl_pmark, trkseq worktree), for the standalone. Worker task, after the track's record has landed.
+| In:  d5 = pattern P, d6 = the version word, d7 = kind, a4 = P's live slab; rl_fh open just past
+|      PTRN chunk P; SCRATCH = the SAVED pattern P (its Part link is the Part chunk to read).
+| Out: d0 = 0 the slice has landed; -1 the Part chunk could not be read (no Part byte changed).
+|      rl_fh is closed on every path. Keeps d2-d7/a2-a5.
+|
+| What lands, for track t only (audio 0..7, MIDI 8..15): its slice of the card's WORKING Part (the
+| .strd's PART chunk -- the Part as the project was saved, not its SAVE PART copy), written into the
+| Part P links to NOW, then published for t alone (audio: stock's TRK_APPLY, as its machine edit
+| does; MIDI: rl_mapply, stock's whole-Part apply cut down to one track). A new audio machine also
+| restarts the voice (ENG_RESTART, stock's machine edit) and owes the PICKUP setup (rl_done). Stock's
+| Part-edited mark follows "differs from its SAVE PART copy" (CLYPS §1.8b). The SRAM mirror (Part +
+| edited byte) follows at rlj_setflag: LIVE_REFRESH copies both (0x4000faf0: bank +0x8ed80, 0x62c8 B
+| -> 0x100a4ece; +0x95048 -> 0x100b145e).
+rl_full:
+    lea     -24(%sp),%sp
+    movem.l %d2-%d4/%a2-%a3/%a5,(%sp)
+    moveq   #0,%d3
+    move.l  #SCRATCH+PAT_PART,%a0
+    move.b  (%a0),%d3
+    andi.l  #3,%d3                     | d3 = the Part the SAVED pattern links to
+|   straight to that PART chunk (CLYPS' direct path, 2026-11-04). Fixed offsets per version, checked
+|   there on 816 real bank files (.strd + .work, versions 0x14..0x17): PTRN n at 0x16 + st * n,
+|   st = 0x8eec from version 0x17 on, 0x8ee8 before; working PART p at 0x16 + 16 * st + 0x18bb * p.
+|   The parser checks the chunk's tag (PART, 0x400d1690), so a wrong offset fails -> rf_seq.
+    cmpi.l  #0x14,%d6
+    bcs.b   rf_seq                     | an older format: chunk by chunk
+    move.l  #0x8ee8,%d4
+    cmpi.l  #0x17,%d6
+    bcs.b   rf_st
+    move.l  #0x8eec,%d4                | d4 = the pattern chunk stride
+rf_st:
+    move.l  #0x18bb,%d0
+    muls.l  %d3,%d0
+    lsl.l   #4,%d4
+    add.l   %d4,%d0
+    addi.l  #0x16,%d0
+    move.l  %d0,-(%sp)
+    bsr.w   rl_seek
+    addq.l  #4,%sp
+    tst.l   %d0
+    bmi.b   rf_seq
+    move.l  %d3,%d0
+    bsr.w   rf_parse
+    tst.l   %d0
+    bpl.w   rf_parsed
+|   anything unexpected on the direct path: the file again, chunk by chunk from the top -- stock's
+|   own reading order: the 16 PTRN chunks, then the working PART chunks up to d3
+rf_seq:
+    pea     rl_fh
+    jsr     FCLOSE
+    addq.l  #4,%sp
+    jsr     rl_openstrd
+    tst.l   %d0
+    bmi.w   rf_fail0                   | not open: nothing to close
+    move.l  #22,-(%sp)
+    pea     rl_hdrbuf
+    pea     rl_fh
+    jsr     FREAD
+    lea     12(%sp),%sp
+    tst.l   %d0
+    ble.b   rf_fail
+    moveq   #16,%d4
+rf_pl:
+    move.l  %d6,-(%sp)
+    pea     SCRATCH
+    pea     rl_fh
+    jsr     PARSEPAT
+    lea     12(%sp),%sp
+    tst.l   %d0
+    bmi.b   rf_fail
+    subq.l  #1,%d4
+    bne.b   rf_pl
+rf_prl:
+    move.l  %d4,%d0
+    bsr.w   rf_parse
+    tst.l   %d0
+    bmi.b   rf_fail
+    cmp.l   %d3,%d4
+    beq.b   rf_parsed
+    addq.l  #1,%d4
+    bra.b   rf_prl
+rf_fail:
+    pea     rl_fh
+    jsr     FCLOSE
+    addq.l  #4,%sp
+rf_fail0:
+    moveq   #-1,%d0
+    bra.w   rf_out
+rf_parsed:
+    pea     rl_fh
+    jsr     FCLOSE
+    addq.l  #4,%sp
+|   the Part P links to NOW (a3, index d2), in the playing bank (a5)
+    moveq   #0,%d0
+    move.b  PLAY_BANK,%d0
+    move.l  #BANKSTRIDE,%d1
+    muls.l  %d1,%d0
+    movea.l #BLOB,%a5
+    adda.l  %d0,%a5
+    movea.l %a4,%a0
+    adda.l  #PAT_PART,%a0
+    moveq   #0,%d2
+    move.b  (%a0),%d2
+    andi.l  #3,%d2
+    move.l  #PARTSZ,%d0
+    muls.l  %d2,%d0
+    movea.l %a5,%a3
+    adda.l  #PART_OFF,%a3
+    adda.l  %d0,%a3
+    moveq   #0,%d4
+    move.b  G_TRK,%d4
+    andi.l  #7,%d4
+    tst.b   G_TMIDI
+    beq.b   rf_aud
+    addq.l  #8,%d4                     | d4 = t 0..15 (MIDI 8..15)
+    bra.b   rf_copy
+rf_aud:
+|   a new machine: restart the voice, as stock's machine edit does (0x400973b4), and owe the PICKUP
+|   setup to rl_done
+    movea.l #SCRATCH,%a0
+    move.b  0x22(%a0,%d4.l),%d0
+    cmp.b   0x22(%a3,%d4.l),%d0
+    beq.b   rf_copy
+    moveq   #1,%d0
+    lsl.l   %d4,%d0
+    move.b  ENG_RESTART,%d1
+    or.l    %d1,%d0
+    move.b  %d0,ENG_RESTART
+    moveq   #1,%d0
+    move.b  %d0,rl_mch
+rf_copy:
+    pea     SCRATCH
+    move.l  %a3,-(%sp)
+    move.l  %d4,-(%sp)
+    bsr.w   rl_slice
+    lea     12(%sp),%sp
+    move.l  %d4,%d0                    | publish it: this track only
+    cmpi.l  #8,%d0
+    bcs.b   rf_t
+    subq.l  #8,%d0
+rf_t:
+    move.l  %d0,-(%sp)                 | t / m
+    move.l  %d2,-(%sp)                 | part
+    moveq   #0,%d0
+    move.b  PLAY_BANK,%d0
+    move.l  %d0,-(%sp)                 | bank
+    cmpi.l  #8,%d4
+    bcc.b   rf_m
+    jsr     TRK_APPLY
+    bra.b   rf_pub
+rf_m:
+    bsr.w   rl_mapply
+rf_pub:
+    lea     12(%sp),%sp
+|   stock's Part-edited mark: set, unless the Part now equals its SAVE PART copy (bank +0x9504a +
+|   part * PARTSZ, valid when +0x9b312 + part != 0 -- the test stock's PART RELOAD makes), as after
+|   stock's own PART RELOAD; the bank changed. A byte: bset / bclr, never or.l (S119).
+    movea.l %a5,%a2
+    adda.l  #PEDIT,%a2                 | a2 = the edited byte
+    bset    %d2,(%a2)
+    movea.l %a5,%a0
+    adda.l  #PSAVED,%a0
+    tst.b   (%a0,%d2.l)
+    beq.b   rf_dirty
+    move.l  #PARTSZ,%d0
+    muls.l  %d2,%d0
+    movea.l %a5,%a1
+    adda.l  #PSAVECPY,%a1
+    adda.l  %d0,%a1                    | a1 = its SAVE PART copy
+    movea.l %a3,%a0
+    move.l  #PARTSZ/2,%d1
+rf_cmp:
+    move.w  (%a0)+,%d0
+    cmp.w   (%a1)+,%d0
+    bne.b   rf_dirty
+    subq.l  #1,%d1
+    bne.b   rf_cmp
+    bclr    %d2,(%a2)                  | equal: not edited
+rf_dirty:
+    movea.l %a5,%a0
+    adda.l  #BDIRTY,%a0
+    moveq   #1,%d0
+    move.l  %d0,(%a0)
+    move.l  %d0,DIRTY2
+    move.b  %d0,rl_pfull               | rl_done: the UI half
+    moveq   #0,%d0
+rf_out:
+    movem.l (%sp),%d2-%d4/%a2-%a3/%a5
+    lea     24(%sp),%sp
+    rts
+
+| rf_parse (d0 = Part index): PARSEPRT(rl_fh, SCRATCH, d0, d6) -> d0 < 0: failed
+rf_parse:
+    move.l  %d6,-(%sp)
+    move.l  %d0,-(%sp)
+    pea     SCRATCH
+    pea     rl_fh
+    jsr     PARSEPRT
+    lea     16(%sp),%sp
+    rts
+
+| rl_seek(off) -> d0 < 0: error. rl_fh's read position = off, as if read up to there (CLYPS' rq_seek):
+| the backend seek (0x46c8243e: the card filesystem's, installed at 0x400145de / 0x400146f0 /
+| 0x40014806) to off's 512 B block, the buffer marked empty (+12, the read index: 0 = refill), then
+| off mod 512 read and dropped. Not stock's buffered seek 0x4001660c: it keeps a partly read buffer
+| and then re-seeks the backend to the exact offset -- measured there: the parse after it saw no tag.
+rl_seek:
+    move.l  4(%sp),%d0
+    andi.l  #-512,%d0
+    move.l  %d0,-(%sp)
+    move.l  rl_fh,-(%sp)               | the backend's file id (+0)
+    movea.l LLSEEK,%a0
+    jsr     (%a0)
+    addq.l  #8,%sp
+    tst.l   %d0
+    bmi.b   rs_out
+    clr.l   rl_fh+12                   | the buffer empty: the next read refills from that block
+    move.l  4(%sp),%d0
+    andi.l  #511,%d0
+    beq.b   rs_ok
+    move.l  %d0,-(%sp)
+    clr.l   -(%sp)                     | dst 0: read and drop (0x400165ce)
+    pea     rl_fh
+    jsr     FREAD
+    lea     12(%sp),%sp
+    tst.l   %d0
+    bgt.b   rs_ok
+    moveq   #-1,%d0
+    rts
+rs_ok:
+    moveq   #0,%d0
+rs_out:
+    rts
+
+| rl_slice(t, dst Part, src Part): track t's slice (rl_slA / rl_slM: off, stride, size, count, step;
+| ends with 0xffff) -- CLYPS' cl_slice, unchanged. Uses d0-d1/a0-a1.
+rl_slice:
+    lea     -20(%sp),%sp
+    movem.l %d2-%d5/%a2,(%sp)
+    move.l  24(%sp),%d2
+    lea     rl_slA,%a2
+    cmpi.l  #8,%d2
+    bcs.b   sl_seg
+    subq.l  #8,%d2
+    lea     rl_slM,%a2
+sl_seg:
+    moveq   #0,%d0
+    move.w  (%a2)+,%d0                 | offset
+    cmpi.l  #0xffff,%d0
+    beq.b   sl_out
+    moveq   #0,%d1
+    move.w  (%a2)+,%d1                 | stride
+    muls.l  %d2,%d1
+    add.l   %d1,%d0                    | d0 = offset + stride * t
+    moveq   #0,%d3
+    move.w  (%a2)+,%d3                 | size
+    moveq   #0,%d4
+    move.w  (%a2)+,%d4                 | count
+    moveq   #0,%d1
+    move.w  (%a2)+,%d1                 | step
+sl_rep:
+    movea.l 28(%sp),%a0
+    adda.l  %d0,%a0
+    movea.l 32(%sp),%a1
+    adda.l  %d0,%a1
+    move.l  %d3,%d5
+sl_b:
+    move.b  (%a1)+,(%a0)+
+    subq.l  #1,%d5
+    bne.b   sl_b
+    add.l   %d1,%d0
+    subq.l  #1,%d4
+    bne.b   sl_rep
+    bra.b   sl_seg
+sl_out:
+    movem.l (%sp),%d2-%d5/%a2
+    lea     20(%sp),%sp
+    rts
+
+| rl_mapply(bank, part, m): one MIDI track's Part values -> the engine -- CLYPS' cl_mapply, unchanged:
+| stock's whole-Part apply 0x40009094 does this for every m (0x400094b0..0x400095e0), RAM writes only.
+rl_mapply:
+    lea     -20(%sp),%sp
+    movem.l %d2-%d4/%a2-%a3,(%sp)
+    move.l  24(%sp),%d0                | bank
+    move.l  28(%sp),%d1                | part
+    move.l  32(%sp),%d2                | m
+    move.l  #BANKSTRIDE,%d3
+    muls.l  %d0,%d3
+    movea.l #BLOB+PART_OFF,%a2
+    adda.l  %d3,%a2
+    move.l  #PARTSZ,%d3
+    muls.l  %d1,%d3
+    adda.l  %d3,%a2                    | a2 = the Part
+    moveq   #68,%d3
+    muls.l  %d2,%d3
+    movea.l #MENG,%a0
+    adda.l  %d3,%a0                    | a0 = the engine's record m
+    move.l  %d2,%d3
+    lsl.l   #5,%d3
+    movea.l %a2,%a1
+    adda.l  #0x3e2,%a1
+    adda.l  %d3,%a1                    | page values, 32 B
+    moveq   #32,%d4
+ma_p:
+    move.b  (%a1)+,(%a0)+
+    subq.l  #1,%d4
+    bne.b   ma_p
+    moveq   #36,%d3
+    muls.l  %d2,%d3
+    movea.l %a2,%a1
+    adda.l  #0x4e2,%a1
+    adda.l  %d3,%a1                    | setup, 36 B
+    movea.l %a1,%a3
+    adda.l  #9,%a3                     | a3 = its 3 LFO waves
+    moveq   #36,%d4
+ma_s:
+    move.b  (%a1)+,(%a0)+
+    subq.l  #1,%d4
+    bne.b   ma_s
+    moveq   #0,%d4                     | each LFO on a designer wave (> 10): its 16 B and slope
+ma_d:
+    move.b  (%a3,%d4.l),%d0
+    extb.l  %d0
+    moveq   #10,%d1
+    cmp.l   %d1,%d0
+    ble.b   ma_dn
+    subi.l  #11,%d0                    | d0 = the designer it uses
+    movea.l %a2,%a1
+    adda.l  #0x1792,%a1
+    move.l  %d0,%d1
+    lsl.l   #4,%d1
+    adda.l  %d1,%a1
+    move.l  %d2,%d1                    | d1 = 3m + i
+    add.l   %d1,%d1
+    add.l   %d2,%d1
+    add.l   %d4,%d1
+    movea.l #MDES,%a0
+    move.l  %d1,%d3
+    lsl.l   #4,%d3
+    adda.l  %d3,%a0
+    moveq   #16,%d3
+ma_w:
+    move.b  (%a1)+,(%a0)+
+    subq.l  #1,%d3
+    bne.b   ma_w
+    movea.l %a2,%a1
+    adda.l  #0x1812,%a1
+    add.l   %d0,%d0
+    adda.l  %d0,%a1
+    movea.l #MSLP,%a0
+    add.l   %d1,%d1
+    adda.l  %d1,%a0
+    move.w  (%a1),(%a0)
+ma_dn:
+    addq.l  #1,%d4
+    cmpi.l  #3,%d4
+    bne.b   ma_d
+    movea.l #MBANK,%a0
+    move.l  24(%sp),%d0
+    move.b  %d0,(%a0,%d2.l)
+    move.l  28(%sp),%d0
+    move.b  %d0,8(%a0,%d2.l)
+    move.l  %d2,%d0
+    lsl.l   #2,%d0
+    movea.l #MZERO,%a0
+    clr.l   (%a0,%d0.l)
+    movem.l (%sp),%d2-%d4/%a2-%a3
+    lea     20(%sp),%sp
+    rts
+
+| the slices (CLYPS scope §1.7, measured there): off, stride, size, count, step. Audio = what stock's
+| TRACK COPY / PASTE carries (machine, FX, levels, every page, slot record, recorder setup) plus its
+| 16 scene-lock rows, per-scene bytes and LFO designer; MIDI = page values, setup, LFO designer.
+    .align 2
+rl_slA:
+    .short 0x000, 1, 1, 1, 0           | FX1
+    .short 0x008, 1, 1, 1, 0           | FX2
+    .short 0x012, 2, 2, 1, 0           | levels
+    .short 0x022, 1, 1, 1, 0           | machine
+    .short 0x02a, 30, 30, 1, 0         | machine page 1 (all 5 machines)
+    .short 0x1da, 30, 30, 1, 0         | machine page 2
+    .short 0x11a, 24, 24, 1, 0         | AMP / LFO / FX1 / FX2 page 1
+    .short 0x2f2, 30, 30, 1, 0         | LFO, AMP / FX page 2, MULT / TRIG
+    .short 0x2ca, 5, 5, 1, 0           | slot record
+    .short 0x602, 12, 12, 1, 0         | recorder setup
+    .short 0x662, 32, 32, 16, 0x100    | 16 scene-lock rows
+    .short 0x1662, 1, 1, 16, 10        | per-scene bytes
+    .short 0x1702, 16, 16, 1, 0        | LFO designer
+    .short 0x1782, 2, 2, 1, 0          | ... its slope
+    .short 0xffff
+rl_slM:
+    .short 0x3e2, 32, 32, 1, 0         | page values
+    .short 0x4e2, 36, 36, 1, 0         | setup: channel, bank, program, ...
+    .short 0x1792, 16, 16, 1, 0        | LFO designer
+    .short 0x1812, 2, 2, 1, 0          | ... its slope
+    .short 0xffff
+
     .align 2
 rl_kind:
     .space 4
@@ -1819,7 +2199,8 @@ rl_own:
 |   rl3_showing  -- open for exactly one pass through stock's show tail
 |   rl3_bank_used -- "our chord consumed this [BANK] gesture, swallow the release"
 |   Session 93: which message the completed job should draw, set by the chord handler
-|   and consumed by rl_done. 0 none / 1 TRK SEQ / 2 TRK SEQ + PART / 3 SAVE PART FIRST.
+|   and consumed by rl_done. 0 none / 1 TRK SEQ / 2 TRK FULL / 4 SEQ RELOAD LOST /
+|   5 the sequence but not the Part chunk (2026-11-08; 3, SAVE PART FIRST, is gone).
 rl_msg:
     .space 2
 |   Session 93: the verify pair -- a copy of the 16 trig-mask bytes we wrote, and where.
@@ -1834,8 +2215,12 @@ rl3_showing:
     .space 2
 rl3_bank_used:
     .space 2
-rl_asgn:
-    .space 4
+|   2026-11-08: rl_full -> rl_done: the UI owes a [BANK] + [TRACK n] slice its PICKUP setup (rl_mch:
+|   an audio machine changed) and its page redraw.
+rl_pfull:
+    .space 1
+rl_mch:
+    .space 1
 rl_cksum:
     .space 4
 rl_pathbuf:

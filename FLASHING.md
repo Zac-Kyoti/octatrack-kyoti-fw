@@ -111,6 +111,7 @@ unit that boots; if it doesn't, use §3b.
 |---|---|
 | MUTE_MODES, SIDECHAIN_COMPRESSOR, RELOAD_FROM_PROJECT, QUANTIZE_LIVE_REC_TOGGLE | `140C_KYOTI` |
 | SIDECHAIN_COMPRESSOR light (the earlier version, WIP) | `140C_SCLT` |
+| RELOAD_FROM_PROJECT Part-slice test build (WIP, 2026-11-08) | `140C_RLSL1` |
 | KYOTI V1.7 (the features in one image) | `KYOTI V1.7` |
 | KYOTI V1.6 (the previous one) | `KYOTI V1.6` |
 | KYOTI V1.5 (the previous one) | `KYOTI V1.5` |
@@ -157,10 +158,29 @@ quick check for each:
   `[TRACK n]` while playing: the saved trigs come back without the transport stopping.
   **MIDI tracks (fix of 2026-10-25):** in a pattern, give MIDI track 2 and audio track 2 a few
   trigs each, SAVE the project, then change both tracks' trigs (unsaved). On the MIDI tracks
-  (`[MIDI]`), `[PTN]` + `[TRACK 2]` → `TRK SEQ RELOADED`: M2 is back to its saved trigs, and
-  audio T2 (back on the audio side) still has your unsaved change. Same with `[BANK]` +
-  `[TRACK 2]` (sequence + the saved Part; change a MIDI track setting after saving the Part to
-  see the Part come back). On the audio side `[PTN]` + `[TRACK 2]` still reloads T2 only.
+  (`[MIDI]`), `[PTN]` + `[TRACK 2]` → `TRK SEQ` / `RELOADED FROM PROJ`: M2 is back to its saved
+  trigs, and audio T2 (back on the audio side) still has your unsaved change. On the audio side
+  `[PTN]` + `[TRACK 2]` still reloads T2 only.
+  **Part-slice walk-through (WIP 2026-11-08; standalone `140C_RLSL1`, `BUG_RL3`, `KYOTI V1.7`
+  rebuilt — none flashed yet).** `[BANK]` + `[TRACK n]` now brings back track n's sequence AND
+  track n's machine / FX / pages / scene locks / LFO designer *as the project was saved*; no
+  other track changes. Start each step from a SAVE PROJECT, on a pattern whose Part T1 and T2
+  share, with the transport running.
+  1. Change T1's trigs, its FX1 type and a few knobs (SRC, AMP, FX), and one knob on T2.
+     `[BANK]` + `[TRACK 1]` → `TRK FULL` / `RELOADED FROM PROJ`. T1's trigs and settings are
+     back, and the knobs on screen show them at once. T2 keeps its change, and the transport
+     never stops.
+  2. Change T1's machine (e.g. Flex → Static) → `[BANK]` + `[TRACK 1]`: the saved machine is
+     back and plays its saved sample. The old machine doesn't hang on.
+  3. Change T1's scene locks (a scene A/B lock) and its LFO designer wave → `[BANK]` +
+     `[TRACK 1]`: both come back.
+  4. A Part never saved with SAVE PART works the same (no `SAVE PART FIRST!` any more). After a
+     SAVE PART *since* the project save, `[BANK]` + `[TRACK n]` brings back the PROJECT's
+     version of the track, not the SAVE PART one.
+  5. `[MIDI]`: change M2's channel / program / a CC value and its trigs, and M1's channel.
+     `[BANK]` + `[TRACK 2]` → `TRK FULL` / `RELOADED FROM PROJ`: M2 is back, M1 keeps its
+     change.
+  6. `[PTN]` + `[TRACK n]` still brings back only the trigs (`TRK SEQ` / `RELOADED FROM PROJ`).
 - **QUANTIZE_LIVE_REC_TOGGLE** — hold `[REC]`, tap `[PLAY]` → toast `LIVE REC: QUANTIZED` or
   `LIVE REC: UNQUANTIZED`; tap `[PLAY]` again while it is up → the setting inverts. With
   PROJECT → PERSONALIZE open, the QUANTIZE LIVE REC check mark changes at the same moment.

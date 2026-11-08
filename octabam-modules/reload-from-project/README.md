@@ -6,7 +6,9 @@ Stock can only reload a whole bank, and doing so stops the sequencer. Two direct
 chords, no modal window and no timeout:
 
 - **`[PTN]` + `[TRACK n]`** — reload that track's card-saved sequence, Part untouched
-- **`[BANK]` + `[TRACK n]`** — the same, and re-apply the saved Part
+- **`[BANK]` + `[TRACK n]`** — the same, and that track's slice of the Part as the
+  project was saved: machine, FX, levels, every page, scene locks and LFO designer.
+  Every other track, and the rest of the Part, is left alone.
 
 `[CUE]` + `[TRACK n]` is stock cue behaviour, not a reload. The eight stock refs to
 the `0x40083dc4` detour are CUE's held-modifier TRACK slots (`0x400bf122`); without a
@@ -43,10 +45,18 @@ nop — otherwise the span would be left half-rewritten.
 
 The worker is **stock's own**; this module hooks it rather than reimplementing it.
 
-After a successful `[BANK]` + `[TRACK n]` Part reload it runs the tail of stock's own
-Part-reload shortcut (`0x4005e0a8`: the redraw flag plus stock's UI refresh), so the knobs
-show the reloaded Part's values at once instead of after a page press. Confirmed on
-hardware.
+**`[BANK]` + `[TRACK n]`, the Part slice.** Until 8 Nov 2026 this chord ran stock's PART
+RELOAD: the *whole* Part, from its SAVE PART copy in RAM, so every other track on that Part
+reverted too. It now does what the author's CLYPS card reload does. The worker reads the
+bank file's **working** PART chunk (the Part as the project was saved; a direct seek, then
+chunk by chunk if anything is unexpected) and copies track n's slice into the Part the
+pattern links to now. It publishes that slice for track n alone: stock's per-track apply
+`0x40001f18` for audio, one track of stock's Part apply for MIDI. A new audio machine
+restarts the voice, as stock's machine edit does. The Part-edited mark follows "differs
+from its SAVE PART copy". The UI half runs in the job's doneFn, which stock calls on the UI
+task (message `0x2b`): the PICKUP setup after a new machine, then the tail of stock's own
+Part-reload shortcut (`0x4005e0a8`), so the knobs show the reloaded values at once.
+Toasts: `TRK SEQ` / `RELOADED FROM PROJ` and `TRK FULL` / `RELOADED FROM PROJ`.
 
 **In DRAM.** In octabam the code is a `Linked(dram=True)` unit: octabam's loader
 unpacks it into the platform reserve at the bottom of the audio page arena at every
@@ -55,11 +65,12 @@ fits one remix, and it is the one that moved because it runs from key chords and
 message worker, never on the per-step tick. The standalone image keeps it in the ROM
 cave at `0x400d6500`; the bytes are the same, linked at a different address.
 
-**Not with `OCTAKIT`** (Em's Octakit), for now. `[BANK]+[TRACK n]` reloads the Part
-with stock's own Part RELOAD, and Octakit replaces that routine with one that halts the
-unit for any caller but the menu's and FUNC+CUE's. The ledger refuses the pair until a
-bridge module exists (`reference/handoffs/DIRECTJUMP_OCTAKIT_SCOPE.md` in
-octatrack-kyoti-fw).
+**Not with `OCTAKIT`** (Em's Octakit), for now. Until 8 Nov 2026 `[BANK]+[TRACK n]`
+called stock's own Part RELOAD, which Octakit replaces with a routine that halts the unit
+for any caller but the menu's and FUNC+CUE's. That call is gone. The slice reload now
+calls stock's per-track apply, which Octakit's runtime also uses, and the two have never
+been run together. The ledger keeps refusing the pair
+(`reference/handoffs/DIRECTJUMP_OCTAKIT_SCOPE.md` in octatrack-kyoti-fw).
 
 ## Why two plain chords and not a picker
 
@@ -92,7 +103,9 @@ confirmed from the ROM cave (the standalone image and KYOTI V1.0), and from DRAM
 octabam-built image with all six KYOTI modules (2026-10-01): both chords, the FINISHED
 toast, the transport kept running, and the knob repaint. Nothing tested on an MKII.
 
-2088 bytes, sha256 `ef22237d38c24966…` linked at `0x400d6500` (`-mcpu=5407` or `54455`, identical); octabam re-links it there on every build and compares.
+3226 bytes, sha256 `143aeeca1721bcfb…` linked at `0x400d6500` (`-mcpu=5407` or `54455`, identical); octabam re-links it there on every build and compares.
+
+The `[BANK]` + `[TRACK n]` Part-slice reload (8 Nov 2026) is emulator-checked; it is not yet hardware-confirmed.
 
 ## Licence
 

@@ -37753,3 +37753,44 @@ Now 936 / 932 (<= 945): the pair fits, SC's donor becomes PLATE REV.
   Branch `Zac-Kyoti/octabam:rec-trig-mute-proof-cl22` (`7b4d50e7`, base `1adbd491`): proof_note,
   docstring, module README (also its stale `553d8d2` pin and edge-icon text, left from #1066), `make docs`;
   verify-docs clean. Opened as sambanks/octabam#1078, waiting on Sam.
+## 2026-11-08 (`reload-slice`) — RELOAD_FROM_PROJECT: [BANK] + [TRACK n] reloads the track's Part slice from the card, as Clyps does (WIP, NOT flashed)
+
+- **The user's ask:** the standalone RELOAD's [BANK] + [TRACK n] should do what Clyps' card reload does (CLYPS_SCOPE
+  §1.8, trkseq worktree): the track's sequence + **that track's slice** of the Part, **as the project was saved on the
+  card** -- not stock's PART RELOAD (the whole Part, from its SAVE PART copy in RAM, which reverted every other track
+  on the Part and needed a SAVE PART). When KYOTI with Clyps is promoted, KYOTI drops this module (the exclusion in
+  the trkseq worktree, `tools/feature_exclusions.py`); until then KYOTI V1.7 carries it.
+- **What changed** (`octabam-modules/reload-from-project/patch_reload3.s`, 2100 → 3226 B):
+  - The chord no longer calls `0x4004aab4`; it posts one job, kind `RQ_TRKFULL` (4). `rl3_arm_n` takes the kind in
+    d1. The picker-era kinds 1/2 (never armed since Session 85) are gone; the worker accepts 3..4.
+  - `rl_full` (worker, after the record has landed): the saved pattern's Part link → a direct seek to that working
+    PART chunk (`0x16 + 16*st + 0x18bb*p`, Clyps' offsets, `rl_seek` = Clyps' `rq_seek`), parsed by stock's
+    `0x4008be2c` into SCRATCH; anything unexpected → reopen and read chunk by chunk (16 PTRN, PART 0..p). Then
+    Clyps' `cl_slice` tables (audio: FX, levels, machine, all pages, slot, recorder setup, 16 scene-lock rows,
+    per-scene bytes, LFO designer; MIDI: page values, setup, designer) into the Part the live pattern links to,
+    published for that track alone: audio `TRK_APPLY 0x40001f18(bank, part, t)` (our reading: a5/fp/d6), MIDI
+    `rl_mapply` (Clyps' `cl_mapply`). A new audio machine sets the `0x8000184c` restart bit (stock's machine edit,
+    `0x400973b4`). The Part-edited bit (bank +0x95048) follows "differs from its SAVE PART copy"; BDIRTY + DIRTY2 set.
+    The SRAM mirror follows through the existing LIVE_REFRESH (`0x4000faf0` copies the Parts and the edited byte).
+  - **doneFn runs on the UI task** (measured: the storage loop posts it as message 0x2b to the UI queue
+    `0x460d17ae`, `0x40084110`; the UI loop's case 0x2b at `0x40062454` calls it), so `rl_done` does the UI half:
+    PICKUP setup `0x40097290` after a new machine, then `rl3_part_refresh` (Session 120's page redraw) -- only when
+    the reloaded bank is the UI bank. No new hook (the UI-tail site `0x40062d1c` is VARISPEED_EMUS'.)
+  - Toasts now Clyps': `TRK SEQ` / `RELOADED FROM PROJ`, `TRK FULL` / `RELOADED FROM PROJ`; a Part chunk that cannot
+    be read after the sequence landed: `TRK SEQ RELOADED` / `PART NOT READ!`. `SAVE PART FIRST!` is gone.
+  - An audio record's +0x899 (not in the bank file) now keeps its live value, as stock's reload and Clyps do.
+- **Emulator** (`tools/diag_reload_full.py`, new; SAVE PROJECT, edit T1/T2 records + slices, real key events):
+  PASS on OT DEMO (audio: [PTN] keeps the slice; [BANK] restores T1's record + slice, T2's record + slice and every
+  other Part byte untouched, no `0x4004aab4` call, page redraw ran, the direct seek read the chunk, edited bit
+  correct; then a changed T1 machine with the seek forced to fail: fallback read the Part, machine back, restart
+  bit set, PICKUP once) and on JAM2 (MIDI side: M1 record + slice back, M2 untouched, the MIDI engine record = the
+  Part values). `diag_reload_midi.py --chord bank` (now expects no Part reload call): PASS. The KYOTI (DRAM) form
+  was not emulator-run; its bytes are the same unit linked at 0x40a955e0.
+- **Builds (all WIP, NOT flashed):** standalone mainos `847226fa…`, `out/OCTATRACK_OS1.40C_RELOAD_FROM_PROJECT.syx`
+  `87b76abf…` (OS VERSION `140C_RLSL1`); BUG_RL3 mainos `0f235ce9…`, syx `c9c9de32…`; KYOTI V1.7 mainos `c139d317…`,
+  syx `3e7aad6f…` (OS VERSION still `KYOTI V1.7`). Hardware walk-through: FLASHING §4 RELOAD_FROM_PROJECT.
+- **octabam:** manifest REFERENCE `143aeeca…` (3226 B, 5407 = 54455); the OCTAKIT conflict stays (no longer the PART
+  RELOAD trap, but never run together; octabam drops that conflict anyway). After promotion: pin PR moving
+  `modules/reload-from-project/upstream` off `6a2da8d`, plus octabam's own wrapper docstring / proof_note,
+  `modules/reload-from-project/README.md` and `docs/site/usage/reload-from-project.md` ("re-apply the track's saved
+  Part" is wrong now).

@@ -132,7 +132,7 @@ FEATURES = {
     "ERASE_EMPTY_TRIGLESS_LOCKS": ("build_erase_empty_trigless_locks.py", "out/mainos_erase_empty_trigless_locks.bin", "BUG_TRIGLK",
                  "A trigless lock whose last param is LIVE-erased clears from the trig row."),
     "RELOAD_FROM_PROJECT": ("build_reload_from_project.py", "out/mainos_reload_from_project.bin", "BUG_RL3",
-                "[PTN]+[TRACK n] reload track n's saved sequence; [BANK]+[TRACK n] also re-applies the Part."),
+                "[PTN]+[TRACK n] reload track n's saved sequence; [BANK]+[TRACK n] also reloads that track's Part slice."),
     "DIRECT_JUMP_KYOTI": ("build_direct_jump_kyoti.py", "out/mainos_direct_jump_kyoti.bin", "BUG_DJV7", "hold [PTN], tap [YES] -> DIRECT JUMP on/off (V7.0.1, clock-locked jumps)."),
     "REC_TRIG_MUTE": ("build_rec_trig_mute.py", "out/mainos_rec_trig_mute.bin", "BUG_RTM",
                       "[TRACK]+[REC] toggles a track's recorder trigs muted; MIDI CC 80; ':' beside the tab letter."),
