@@ -1333,6 +1333,16 @@ the chord reads `PTN LOAD:`, a group `MULTI LOAD:` ("ORIGS FULL"'s box to x 86).
   through [PAGE] / a trig / a track swap / the chord); I and F updated (the arrows stay where a load or reload left
   them); V starts from no arrows (they persist across scenarios now).
 
+### 1.27 Combinations that must never ship (the user, 2026-11-07)
+
+- Clyps + RELOAD_FROM_PROJECT never; Clyps + DIRECT_JUMP_KYOTI only as KYOTI's integrated pair (SUPERSEDE).
+  `tools/feature_exclusions.py` holds the pairs; `build_kyoti.py` (after --with / --without) and `build_bugbuilds.py`
+  (every base) check them. The single-feature builders already refuse each other's images: each checks its hook sites
+  for stock bytes, and these pairs share sites (0x400a1f72; 0x4005a044 / 0x4007af80 / 0x4007b3e0).
+- octabam / Modwerk (when Clyps is ported): Clyps' manifest declares `conflicts=` with DIRECT_JUMP_KYOTI,
+  RELOAD_FROM_PROJECT and Tim Hastie's DIRECT JUMP; octabam's registry rejects a conflicts key naming no module, so the
+  reciprocal entries go in after Clyps exists; Modwerk vendors octabam's schema (ask Jannik for his DJ port's entry).
+
 ## 2. Decisions
 
 ### Settled (2026-10-26, the user)

@@ -38142,3 +38142,8 @@ Now 936 / 932 (<= 945): the pair fits, SC's donor becomes PLATE REV.
   (PTN_CONSUMED / BANK_SEL close removed); a bank change moves the view; `cl_lastp` set at the open. (3) A project
   load closes Clyps (`cl_pclose`). TRAP: gate V posts no UI tail after keys (posttail off) -- a header-state check
   needs tailmsg(). Gates on CL22: full 120, T 21, F+Q 27, L 17, J 8, M+U 38, X+O+W 15, V+Z+I 35, H 3. syx df2d4a1d….
+- **Never-ship pairs** (2026-11-07, the user): `tools/feature_exclusions.py` -- Clyps + RELOAD_FROM_PROJECT never,
+  Clyps + DIRECT_JUMP_KYOTI only as KYOTI's SUPERSEDE pair; checked by build_kyoti.py and build_bugbuilds.py.
+  Rebuilt unchanged: KYOTI CL22 df2d4a1d…, default KYOTI V1.7 mainos e7cadcca… (the pin); Bugbuilds DJV7 / RL3 clean
+  (a full Bugbuild run here stops at BLACKPYRAMIDS_303's dsp_asm, not built in this worktree). octabam / Modwerk:
+  conflicts in Clyps' manifest at port time (scope §1.27).

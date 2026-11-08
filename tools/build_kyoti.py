@@ -125,6 +125,7 @@ import hashlib, json, os, pathlib, shutil, struct, subprocess, sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from kyoti_status import gate, seal
+import feature_exclusions                      # noqa: E402  pairs that never share an image
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "dram"))
 import dram                                    # noqa: E402  (tools/dram/dram.py)
 
@@ -491,6 +492,12 @@ def apply_without(argv):
 def main():
     apply_with(sys.argv)
     apply_without(sys.argv)
+    # pairs that must never share an image (tools/feature_exclusions.py, the user 2026-11-07): Clyps
+    # with RELOAD_FROM_PROJECT never; Clyps with DIRECT_JUMP_KYOTI only as the integrated pair, i.e.
+    # while SUPERSEDE makes the shared site Clyps' and chains dj_land (asserted again after the build)
+    feature_exclusions.check(FEATURES, integrated=[(own, other) for own, other, *_ in SUPERSEDE
+                                                   if own in FEATURES and other in FEATURES],
+                             who="build_kyoti: ")
     # a reclaim zone is zeroed only when this plan puts something in it
     for z in [z for z in RECLAIM_WHOLE if not PLAN.get(z)]:
         del RECLAIM_WHOLE[z]
