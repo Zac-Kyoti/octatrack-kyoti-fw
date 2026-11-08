@@ -1293,6 +1293,26 @@ the chord reads `PTN LOAD:`, a group `MULTI LOAD:` ("ORIGS FULL"'s box to x 86).
 - The real build rendered pixel-identical to the mock-ups for the select box and plain-slot cases (with / without
   "x"); the highlight cases differ only in header / label text (different load history).
 
+### 1.25 CL8's lean rule for the self-switch; Clyps' cost (the user, 2026-11-07; KYOTI CL21, not flashed)
+
+- **Audit** of everything since CL8 against §1.12: executions (batches + the skip of loads already playing),
+  card-reload names (seek to the one name / the 16), the conversion undo (whole slab: required), the pattern
+  reload's switch (stock's cue), the tab marks (repaint on change) were lean. Not: CL9's `cl_selfcopy` (ORIG
+  PTN+PRT while playing) owed the mirror the whole slab + Part (42,890 B of battery NVRAM per restore).
+- **Fix:** `cl_selfcopy` sets `cl_wdiff`: `cl_postmask` compares each record and the trailer with the mirror and
+  writes / marks dirty only what differs; `cl_postpart` compares the Part and passes `cl_pmark` a slice mask with no
+  slices when equal (the edited mark still follows). The tick-side copy stays whole (a compare there reads as much
+  as it saves). Gate Z (new check): 6,322 B (DJ off: the Part differed) / 0 B (DJ on) written, mirror == RAM;
+  CL20: 42,890 B both.
+- `cl_nlocks` skips the rows of steps a lock trig already counts.
+- **Cost, measured** (`tools/clyps_profile.py`, KYOTI CL21, OT DEMO, the emulator's CPU model = 3,990 instructions
+  a sample = ~176 M/s): stopped 0; playing, Clyps closed ~400 instr/s (the phase-D gate, 3-29 a tick); open, idle
+  ~58 K/s (0.03 %: the LED painter's and the redraw's record compares); a full redraw (`cl_draw`) 129,827
+  instructions a call (~0.74 ms; 16 "edited" compares ~75 K of it); `cl_tabhook` 1,760 (stock's mark painter alone
+  1,752) / 2,727 with two outlines; stock's tab painters with Clyps' tests 3,257 / 3,489. ORIG PTN+PRT playing:
+  ~17 K instructions of memcpy in the landing tick (the 42.8 KB copy) + the UI side's diff and redraw. Route A runs
+  no UI pass of its own: "per tick" peaks there include UI-task work between ticks.
+
 ## 2. Decisions
 
 ### Settled (2026-10-26, the user)

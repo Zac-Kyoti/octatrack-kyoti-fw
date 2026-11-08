@@ -1717,6 +1717,21 @@ def main(argv):
                     [hex(i) for i in range(PARTSZ) if lp[i] != op[i] and not scnorm(i)][:6])
         d0_ = restored()
         print(f"      before: differences from the originals {d0_} (earlier scenarios may have loaded)", flush=True)
+        # the NVRAM mirror (the UI bank's live cache) after the landing: equal to RAM wherever it was, and only
+        # what differs written there (the user, 2026-11-07: CL8's lean rule for the self-switch too)
+        def zmirror():
+            if rd(0x80000002, 1) != bank:
+                return None
+            pi = rd(sl + 0x8E57, 1) & 3
+            m_ = bytes(u.mem_read(0x1001614E + act * PATSTRIDE, 0x8E5C))
+            mp = bytes(u.mem_read(0x100A4ECE + pi * PARTSZ, PARTSZ))
+            return ({i for i, (x, y) in enumerate(zip(m_, slab(act)[:0x8E5C])) if x != y},
+                    {i for i, (x, y) in enumerate(zip(mp, bytes(u.mem_read(partbase(bank, act), PARTSZ)))) if x != y})
+        zwr = []
+        def on_zmc(uc, ad, sz, ud):
+            sp_ = uc.reg_read(er.eb.UC_M68K_REG_A7)
+            if 0x10000000 <= rd(sp_ + 4, 4) < 0x10200000:
+                zwr.append(rd(sp_ + 12, 4))
         key(PTN, 1)
         key(BANK, 1)
         key(BANK, 0)
@@ -1735,7 +1750,10 @@ def main(argv):
             rt.exact_clock()
             rt.start_transport_live()
             rt.run(ms=300)
+            zb = zmirror()
             edit()
+            zwr.clear()
+            hz = u.hook_add(er.eb.UC_HOOK_CODE, on_zmc, begin=0x40020898, end=0x40020898)
             hits = {"real": 0, "cond": [], "commit_ms": None}
             h1 = u.hook_add(er.eb.UC_HOOK_CODE, lambda uc, ad, sz, ud: hits.__setitem__("real", hits["real"] + 1),
                             begin=0x400A45BA, end=0x400A45BA)
@@ -1759,6 +1777,14 @@ def main(argv):
             tailmsg()
             u.hook_del(h1)
             u.hook_del(h2)
+            u.hook_del(hz)
+            za = zmirror()
+            if zb is not None and za is not None:
+                ns_, np_ = za[0] - zb[0], za[1] - zb[1]
+                print(f"      DJ {dj}: {sum(zwr):,} B written into the mirror ({zwr[:8]}); new differences slab "
+                      f"{sorted(hex(x) for x in ns_)[:6]} Part {sorted(hex(x) for x in np_)[:6]}", flush=True)
+                check(not ns_ and not np_ and sum(zwr) <= TRAC_A + 136 + PARTSZ,
+                      f"DJ {dj}: the mirror follows, {sum(zwr):,} B written (CL20: the whole slab + Part, ~43 KB)")
             d1_ = restored()
             print(f"      DJ {dj}: request {pend}, edited until the switch {still}; landed after {n * 5} ms (master step "
                   f"{s0} -> {s1}); stock real switch x{hits['real']}, COND_RESET {[hex(x) for x in hits['cond']]}; "

@@ -1373,6 +1373,17 @@ nl_a:
     move.l  12(%a0),%d5                 | d5 = steps 31..0
     moveq   #0,%d2                      | d2 = step
 nl_r:
+    move.l  %d2,%d0                     | a step a lock trig already counts: its row is not read (the
+    cmpi.l  #32,%d0                     | user, 2026-11-07)
+    bcc.b   nl_rh
+    btst    %d0,%d5
+    bne.b   nl_n
+    bra.b   nl_rs
+nl_rh:
+    subi.l  #32,%d0
+    btst    %d0,%d4
+    bne.b   nl_n
+nl_rs:
     moveq   #0,%d0
 nl_b:
     move.b  (%a1,%d0.l),%d1
@@ -3309,7 +3320,9 @@ su_clr:
 
 | cl_selfcopy: the playing pattern and its Part as loaded, back in place (sequencer tick context): the
 | slab (its runtime tail +0x8e5c.. kept), the Part it links to; a changed machine restarts its voice;
-| the UI side owes the whole slab and Part (cl_postmask). Keeps d2-d7 / a2-a6.
+| the UI side owes what DIFFERS (cl_wdiff: cl_postmask / cl_postpart compare with the mirror -- the user,
+| 2026-11-07: CL8's lean rule, which CL9 skipped; the copy itself stays whole: a compare here would read as
+| much as it saves). Keeps d2-d7 / a2-a6.
 cl_selfcopy:
     lea     -24(%sp),%sp
     movem.l %d2-%d4/%a2-%a4,(%sp)
@@ -3375,7 +3388,7 @@ sl_f:
     subq.l  #1,%d0
     bpl.b   sl_f
     moveq   #1,%d0
-    move.b  %d0,cl_wslab
+    move.b  %d0,cl_wdiff
     move.b  %d0,cl_wpart
     move.l  %d0,RDRAW
     moveq   #-1,%d0
@@ -3639,9 +3652,10 @@ be_out:
 | refresh (the undo-restore's own 0x40029b9c) once per audio index (it does t and t + 8); the Part's
 | share once (cl_postpart).
 cl_postmask:
-    lea     -16(%sp),%sp
-    movem.l %d2-%d4/%a2,(%sp)
-    move.l  20(%sp),%d4                 | d4 = the mask
+    lea     -20(%sp),%sp
+    movem.l %d2-%d5/%a2,(%sp)
+    move.l  24(%sp),%d4                 | d4 = the mask
+    move.l  %d4,%d5                     | d5 = the tracks to mark dirty (cl_wdiff: those that differ)
     move.b  PLAY_BANK,%d0
     cmp.b   UI_BANK,%d0
     bne.w   pu_dirty
@@ -3666,7 +3680,7 @@ cl_postmask:
     move.l  %d3,-(%sp)
     jsr     MEMCPY
     lea     12(%sp),%sp
-    bra.b   pu_dirty
+    bra.w   pu_dirty
 pu_recs:
     moveq   #0,%d2
 pu_rl:
@@ -3675,6 +3689,22 @@ pu_rl:
     move.l  %d2,-(%sp)
     jsr     cl_toff                     | d0 = the record's offset, d1 = its length
     addq.l  #4,%sp
+    tst.b   cl_wdiff
+    beq.b   pu_cp
+    lea     -8(%sp),%sp                 | a whole-pattern restore: only a record that differs from the
+    movem.l %d0-%d1,(%sp)               | mirror is written, and only it is marked dirty
+    lea     (%a2,%d0.l),%a0
+    movea.l %d3,%a1
+    adda.l  %d0,%a1
+    move.l  %d1,%d0
+    jsr     cl_cmpw
+    tst.l   %d0
+    movem.l (%sp),%d0-%d1
+    lea     8(%sp),%sp
+    bne.b   pu_cp
+    bclr    %d2,%d5
+    bra.b   pu_rn
+pu_cp:
     move.l  %d1,-(%sp)
     move.l  %a2,%d1
     add.l   %d0,%d1
@@ -3687,7 +3717,18 @@ pu_rn:
     addq.l  #1,%d2
     cmpi.l  #16,%d2
     bne.b   pu_rl
-    pea     PATSTRIDE-TRAILER           | the trailer: length / scale / mode / Part link
+    tst.b   cl_wdiff                    | the trailer (length / scale / mode / Part link): in diff mode only
+    beq.b   pu_tr                       | when it differs
+    movea.l %a2,%a0
+    adda.l  #TRAILER,%a0
+    movea.l %d3,%a1
+    adda.l  #TRAILER,%a1
+    move.l  #PATSTRIDE-TRAILER,%d0
+    jsr     cl_cmpw
+    tst.l   %d0
+    beq.b   pu_dirty
+pu_tr:
+    pea     PATSTRIDE-TRAILER
     move.l  %a2,%d0
     addi.l  #TRAILER,%d0
     move.l  %d0,-(%sp)
@@ -3700,7 +3741,7 @@ pu_dirty:
     clr.b   cl_wslab
     moveq   #0,%d2
 pu_l:
-    move.l  %d4,%d0
+    move.l  %d5,%d0
     move.l  %d0,%d1
     lsr.l   #8,%d1
     or.l    %d1,%d0
@@ -3716,8 +3757,9 @@ pu_n:
     move.l  %d4,-(%sp)
     jsr     cl_postpart
     addq.l  #4,%sp
-    movem.l (%sp),%d2-%d4/%a2
-    lea     16(%sp),%sp
+    clr.b   cl_wdiff
+    movem.l (%sp),%d2-%d5/%a2
+    lea     20(%sp),%sp
     rts
 
 | cl_pmark (d3 = Part index, a2 = that Part, of the playing bank): stock's Part-edited mark follows
@@ -3858,6 +3900,21 @@ pq_n:
     beq.b   pq_sl
     clr.b   cl_wpart
     moveq   #0,%d4                      | the rest of the Part changed too: the whole Part
+    tst.b   cl_wdiff                    | ... unless a whole-pattern restore finds it equal to its mirror:
+    beq.b   pq_sl                       | then no byte goes there (a slice mask without slices), the
+    move.b  PLAY_BANK,%d0               | edited mark still follows
+    cmp.b   UI_BANK,%d0
+    bne.b   pq_sl
+    movea.l %a2,%a0
+    move.l  #PARTSZ,%d0
+    muls.l  %d3,%d0
+    addi.l  #SRAM_PART,%d0
+    movea.l %d0,%a1
+    move.l  #PARTSZ,%d0
+    jsr     cl_cmpw
+    tst.l   %d0
+    bne.b   pq_sl
+    move.l  #0x10000,%d4
 pq_sl:
     jsr     cl_pmark                    | its mirror (d4: those slices) and stock's edited mark; d4 = 1: the UI bank
     tst.l   %d4
@@ -6410,6 +6467,7 @@ cl_boxreq:  .byte 0                     | a card reload: the box home at the UI 
 cl_self:    .byte 0                     | ORIG PTN+PART playing: a pattern change to itself is pending
 cl_wpart:   .byte 0                     | the rest of a Part changed (cl_slrest, a card pattern): its whole mirror
 cl_wslab:   .byte 0                     | a NORMAL -> PER TRACK conversion: the mirror owes the whole slab
+cl_wdiff:   .byte 0                     | a whole-pattern restore: the mirror gets only what differs (cl_postmask)
 cl_bat:     .byte 0                     | a batch of loads is running (cl_bbeg / cl_bend): immediate posts wait
     .align 2
 cl_batm:    .long 0                     | ... the tracks they owe (cl_postmask at cl_bend)

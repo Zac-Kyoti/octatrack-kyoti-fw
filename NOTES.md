@@ -38126,3 +38126,9 @@ Now 936 / 932 (<= 945): the pair fits, SC's donor becomes PLATE REV.
 - **Re-pinned FINAL (the 11-06 pins were the buggy build), NOT flashed:** standalone mainos `60e97fb3…`
   (syx `0c289ab5…`), BUG_RTM `dac87abd…` (syx `9582710c…`), KYOTI V1.7 `e7cadcca…` (syx `f50ece8d…`).
   A Clyps image needs Clyps's own merge of this. Scope §21. octabam #1066 updated to the new pin.
+- **KYOTI CL21** (2026-11-07, NOT flashed; CL16 on the unit): audit of CL9-CL20 against CL8's lean rule (scope
+  §1.25): only `cl_selfcopy` (ORIG PTN+PRT playing) wasn't -- it owed the NVRAM mirror the whole slab + Part.
+  Now `cl_wdiff`: `cl_postmask` / `cl_postpart` write only records / trailer / Part that differ from the mirror
+  (gate Z: 6,322 / 0 B, was 42,890 / 42,890). `cl_nlocks` skips rows a lock trig counts. main merged (9dd4287:
+  REC_TRIG_MUTE top dot on T1-T4, `0x400448ba`). New `tools/clyps_profile.py` (Clyps' instructions per state, per
+  call). Gates on CL21: full 116, T 21, F+Q 27, L 17, J 8, M+U 38, X+O+W 15, V+Z+I 31, H 3. syx 3e3fd75b….

@@ -210,6 +210,13 @@ quick check for each:
   responsive.
 - **PART_CHANGE_CARRYOVER_FIX** — a track that is PICKUP on one Part and FLEX on
   another: switching patterns across the Parts plays the FLEX sample, not the old loop.
+- **KYOTI CL21 walk-through** (WIP; `out/KYOTI_WIP/KYOTI_V1.7_WITH_CLYPS/OCTATRACK_OS1.40C_KYOTI_V1.7_WITH_CLYPS.syx`)
+  = CL20 (its list below still applies) + lean ORIG PTN+PRT while playing + REC_TRIG_MUTE's top-dot fix:
+  1. Playing, edit one track, [PTN]+[BANK]+[PAGE]: the pattern comes back as loaded at the switch, as before
+     (DIRECT JUMP off: stock's switch; on: a jump). Power-cycle: the unit comes back with the restored pattern.
+  2. Unnamed slots with locks and no trigs still read `A01 07 LK` with the same counts.
+  3. REC_TRIG_MUTE: a muted T1-T4 tab shows BOTH dots (top and bottom), also on the active track.
+
 - **KYOTI CL20 walk-through** (WIP; `out/KYOTI_WIP/KYOTI_V1.7_WITH_CLYPS/OCTATRACK_OS1.40C_KYOTI_V1.7_WITH_CLYPS.syx`)
   = CL19 (its list below still applies) + the "full span" cells (the approved mock-ups, 2026-11-07):
   1. Each edited "x" sits 1 px before its slot number; the highlight bar and the select box reach left over the
