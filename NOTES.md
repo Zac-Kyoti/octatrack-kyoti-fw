@@ -37871,3 +37871,34 @@ Now 936 / 932 (<= 945): the pair fits, SC's donor becomes PLATE REV.
   DRAM 9 pages); BUG_RL3 mainos `4cec9f74…`, syx `1393bba9…` (bug fixes back in the ROM cave, 5,324 B free); KYOTI
   V1.7 mainos `b6d11be7…`, syx `3a8f702b…` (DRAM 10 pages = 60 KB, MEMORY page still 85.5 MB). octabam REFERENCE
   `fc43e76c…` (48,224 B), 11 detours.
+
+## 2026-11-08/09 cont. (3) (`reload-slice`) — RELOAD_FROM_PROJECT: several chords count, length / scale changes re-phase on the next step (WIP, NOT flashed)
+
+- **The user's decisions (2026-11-08):** (1) a reload that changes the pattern's own length / scale lands on the next
+  step too (not at the master wrap), every track re-phased to where the saved pattern would be since the master cycle
+  began (step 14 of 16 -> step 3 of 12); (2) several chords before a landing all count -- per track, the latest kind
+  wins; a pattern reload, or one aimed at another pattern, replaces everything pending; (3) reloading the pattern you
+  are ON is temp-reload style (the next step all tracks share, in phase) -- a pattern you are NOT on is a pattern
+  change (stock's cue: CHAIN AFTER, or DIRECT JUMP when on). (A "cued like a slot load" variant for the pattern you
+  are on was built and dropped the same session.) Clyps must match all of this (memory: ot-clyps-scope "CLYPS TO-DO").
+- **Request model (`rl_req`):** a generation = one target (bank, pattern) + what is wanted (rq_ptn / rq_seqm /
+  rq_fullm); the card is read once per generation (G_KIND = RQ_STAGE); a chord of an already-staged generation arms
+  its track at once; a job is posted only when none is queued (G_KIND == 0: a second post of stock's one message
+  would reach the 0x14 case with G_KIND consumed = stock's whole-bank reload). `rl_stdone` arms (or lands, stopped);
+  a superseded job is dropped. The one-at-a-time gate (`rl_busy`) is gone.
+- **Landing:** per pending track (`rl_lm` / `rl_lf`) on its own next step (`rl_ready`, `rl_landtrk`, `rl_ctr`); a
+  pattern (`rl_lp`) or a pattern-rate change (`rl_wclass`: trailer +0x8e50..55, or NORMAL len / scale) on the step
+  every track and the master share, then `rl_rephase` (master step = (t0 / tps_M) mod its length + 1, its tick,
+  SCALE_IX, every track's counters). The toast follows what landed (`rl_follow`).
+- **Emulator:** `tools/diag_reload_oracle.py` (new): reference = OT DEMO pattern 1 in NORMAL, 12 steps, played from
+  START; candidate = 12 saved, 16 live, `[PTN]`+`[TRACK 1]` -- landing at master step 6, 11 and 14 (the shrink case):
+  IDENTICAL to the reference afterwards on every tick's counters and every step the scheduler built (496 / 416 / 368
+  steps). `diag_reload_quant.py` (G: two tracks in one step both land; H: SEQ then FULL on one track, FULL wins; E: a
+  master-length change re-phases in the tick) ALL PASS on the standalone and on KYOTI with DIRECT JUMP ON (identical
+  landings: track reloads and the pattern you are on ignore DJ). Not covered: a scale change, real audio timing.
+- **Recommendation given:** keep the per-track landing + our own re-phase (not stock's DJ-style whole-sequencer
+  re-land): the oracle shows it equals stock's own placement for the length case; it touches only the reloaded
+  tracks and needs no DIRECT JUMP.
+- **Builds (WIP, NOT flashed; supersede 140C_RLQ1):** standalone mainos `c0f2a1b0…`, syx `ab82698c…` (`140C_RLQ3`,
+  DRAM 10 pages); BUG_RL3 mainos `5a3fbdb7…`, syx `f8aa363d…`; KYOTI V1.7 mainos `aa1d5e83…`, syx `935db5b2…` (10
+  pages). octabam REFERENCE `bc64fee8…` (48,948 B), 11 detours.

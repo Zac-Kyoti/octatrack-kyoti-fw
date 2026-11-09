@@ -111,7 +111,7 @@ unit that boots; if it doesn't, use §3b.
 |---|---|
 | MUTE_MODES, SIDECHAIN_COMPRESSOR, RELOAD_FROM_PROJECT, QUANTIZE_LIVE_REC_TOGGLE | `140C_KYOTI` |
 | SIDECHAIN_COMPRESSOR light (the earlier version, WIP) | `140C_SCLT` |
-| RELOAD_FROM_PROJECT Part-slice + pattern-reload + quantized-landing test build (WIP, 2026-11-08) | `140C_RLQ1` |
+| RELOAD_FROM_PROJECT Part-slice + pattern-reload + quantized-landing test build (WIP, 2026-11-08) | `140C_RLQ3` |
 | KYOTI V1.7 (the features in one image) | `KYOTI V1.7` |
 | KYOTI V1.6 (the previous one) | `KYOTI V1.6` |
 | KYOTI V1.5 (the previous one) | `KYOTI V1.5` |
@@ -162,7 +162,7 @@ quick check for each:
   trigs, and audio T2 (back on the audio side) still has your unsaved change. On the audio side
   `[PTN]` + `[TRACK 2]` still reloads T2 only.
   **Part-slice + pattern-reload + quantized-landing walk-through (WIP 2026-11-08; standalone
-  `140C_RLQ1`, `BUG_RL3`, `KYOTI V1.7` rebuilt — none flashed yet).** `[BANK]` + `[TRACK n]` now brings back track n's sequence AND
+  `140C_RLQ3`, `BUG_RL3`, `KYOTI V1.7` rebuilt — none flashed yet).** `[BANK]` + `[TRACK n]` now brings back track n's sequence AND
   track n's machine / FX / pages / scene locks / LFO designer *as the project was saved*; no
   other track changes. Start each step from a SAVE PROJECT, on a pattern whose Part T1 and T2
   share, with the transport running.
@@ -204,12 +204,17 @@ quick check for each:
   14. **Quantized, different rates.** T1 at 2x or 3/4 (PER TRACK), edit, reload: it lands on one
       of its own steps and stays in phase with the other tracks afterwards.
   15. **Quantized, pattern.** On the pattern that plays, edit several tracks and the Part, then
-      `[PTN]` + `[BANK]` + its trig: every track changes on the same step, in phase.
-  16. **Length / scale.** Edit the pattern's (master) length or scale, then reload the pattern
-      (or, in NORMAL mode, a track): it lands at the next pattern wrap, with the saved length /
-      scale from there on.
-  17. **Stopped.** STOP, reload: it applies at once. Reload while playing and press STOP before it
-      lands: it still applies. Two reload chords within one step: the second is ignored.
+      `[PTN]` + `[BANK]` + its trig: every track changes on the same next step, in phase — with DIRECT
+      JUMP on or off alike. A pattern you are NOT on still waits for CHAIN AFTER / the pattern end
+      (or DIRECT JUMP's next step when it is on), as a pattern change does.
+  16. **Length / scale.** NORMAL mode, 12 steps saved: set the length to 16, play to step 14, then
+      `[PTN]` + `[TRACK 1]`: on the next step the pattern is 12 long again and every track carries on
+      where a 12-step pattern would be (step 14 of 16 → step 3 of 12), in time. Same for a scale
+      change, and for a pattern reload with a changed master length.
+  17. **Several chords.** Within one step, `[PTN]` + `[TRACK 1]` then `[PTN]` + `[TRACK 2]`: both
+      come back. `[PTN]` + `[TRACK 1]` then `[BANK]` + `[TRACK 1]`: T1 comes back with its sound
+      (the later one wins). **Stopped:** a reload applies at once; press STOP while one waits: it
+      still applies.
 - **QUANTIZE_LIVE_REC_TOGGLE** — hold `[REC]`, tap `[PLAY]` → toast `LIVE REC: QUANTIZED` or
   `LIVE REC: UNQUANTIZED`; tap `[PLAY]` again while it is up → the setting inverts. With
   PROJECT → PERSONALIZE open, the QUANTIZE LIVE REC check mark changes at the same moment.

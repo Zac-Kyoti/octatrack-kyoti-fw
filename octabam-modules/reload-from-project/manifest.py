@@ -56,12 +56,18 @@ QUANTIZED (2026-11-08, the author's request: CLYPS' temp-reload landing for card
 worker stages the card's data in the unit (a pattern slab + its Part, ~43 KB: why the unit is
 48 KB) and, while the transport runs, the sequencer tick lands it: phase D (0x400a2530, where
 every path of phase D meets, one site after DIRECT JUMP KYOTI's 0x400a1f72) at the next step
-start of the track -- old and new rate, phase-continuous counters -- or, for a pattern, at the
-next step all 16 tracks share; the wrap body (0x400a43a0) at a master wrap, and for a reload that
-changes the pattern's own length / scale. The slice and the Part go to the engine in the same
-tick, per track (stock's whole-Part apply posts a kernel message, so it is left to the UI half).
-The UI task's 1/60 s tick (0x40056c28) runs the UI half after the landing, and lands a reload
-still pending when the transport stops. Stopped, or the target not playing: at once.
+start of the track -- old and new rate, phase-continuous counters -- or, reloading the pattern
+you are on, at the next step all 16 tracks share. A reload that changes the pattern's own length /
+scale re-phases the master and every track to where the saved pattern would be since the master
+cycle began (an oracle run that played the saved pattern from the start matches it tick for
+tick). The wrap body (0x400a43a0) lands whatever is pending at a master wrap. The slice and the
+Part go to the engine in the same tick, per track (stock's whole-Part apply posts a kernel
+message, so it is left to the UI half). The UI task's 1/60 s tick (0x40056c28) runs the UI half
+after the landing, and lands a reload still pending when the transport stops. Stopped, or the
+target not playing: at once. A pattern you are NOT on is a pattern change: it lands offline and
+stock's cue takes the OT there (CHAIN AFTER, or DIRECT JUMP when on). Several chords before a
+landing all count: per track, the latest kind wins; a pattern reload, or one aimed at another
+pattern, replaces them; the card is read once per target.
 
 IN DRAM. In octabam this is a Linked(dram=True) unit: octabam's loader unpacks it
 into the platform reserve at the bottom of the audio page arena at every boot, and
@@ -104,10 +110,10 @@ HOOKS = (
 # ---- the author's oracle -------------------------------------------------------
 # patch_reload3.s, m68k-elf-as -mcpu=5407 or 54455 (identical bytes; RL_DONE is the
 # source's default), linked at 0x400d6500 -- the address the standalone image uses:
-# 48224 bytes: ~5 KB of code + the 43 KB staging buffers of the quantized landing (2100 before the
+# 48948 bytes: ~5.6 KB of code + the 43 KB staging buffers of the quantized landing (2100 before the
 # 8 Nov 2026 Part-slice, pattern and quantized reloads). octabam re-links it there on every build
 # and compares.
-REFERENCE = (0x400d6500, "fc43e76c73ba2122ec3e7a785c1484109ed99b097a3a5e3d41fbd9b22be2f30e")
+REFERENCE = (0x400d6500, "bc64fee862d3d7edb6885d4a71ad6306bbc7d85d3b351530c06c884187f18430")
 
 MODULE = Module(
     name="reload-from-project",

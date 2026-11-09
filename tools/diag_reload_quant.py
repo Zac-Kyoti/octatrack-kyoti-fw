@@ -43,6 +43,8 @@ def main(argv):
     ap.add_argument("--elf", required=True, type=lambda p: str(pathlib.Path(p).resolve()))
     ap.add_argument("--project", required=True, type=lambda p: str(pathlib.Path(p).expanduser().resolve()))
     ap.add_argument("--name", required=True)
+    ap.add_argument("--dj-mode-at", type=lambda x: int(x, 0), default=None,
+                    help="DIRECT JUMP KYOTI's DJ_MODE (a KYOTI image): turned ON for the run")
     a = ap.parse_args(argv)
     nm = subprocess.run(["m68k-elf-nm", a.elf], capture_output=True, text=True, check=True).stdout
     syms = {p[2]: int(p[0], 16) for p in (l.split() for l in nm.splitlines()) if len(p) == 3}
@@ -135,6 +137,11 @@ def main(argv):
     u.hook_add(er.eb.UC_HOOK_CODE, on_apply, begin=TRK_APPLY, end=TRK_APPLY)
     u.hook_add(er.eb.UC_HOOK_CODE, lambda uc, ad, sz, ud: events.append(dict(snap("follow"))),
                begin=syms["rl_follow"], end=syms["rl_follow"])
+    dj = a.dj_mode_at is not None
+    if dj:
+        u.mem_write(a.dj_mode_at, (1).to_bytes(4, "big"))
+        print(f"DIRECT JUMP ON (DJ_MODE 0x{a.dj_mode_at:08x})", flush=True)
+
 
     rt.seq_select_live(bank, act)
     rt.internal_clock()
@@ -193,7 +200,7 @@ def main(argv):
                   f"ticks {e['ticks'][0]} -> {out['ticks'][0]})")
         check(e["followed"], "B: the UI half (toast, redraw) runs after the landing")
     check(same_rec(rec(0), card_slab[:TRAC_A]), "B: T1's record from the card")
-    check(rd(syms["rl_busy"], 1) == 0, "B: done (rl_busy clear)")
+    check(rd(syms["rl_arm"], 1) == 0 and rd(syms["rl_post"], 1) == 0, "B: nothing left pending")
 
     # ---- C: a track's sequence + its slice
     print("C: [BANK] + [TRACK 1]", flush=True)
@@ -214,7 +221,7 @@ def main(argv):
           "C: T1's record and slice from the card")
     check(bytes(u.mem_read(pb + 0x2A + 30, 30)) == e2, "C: T2's slice untouched")
 
-    # ---- D: the whole playing pattern
+    # ---- D: the whole playing pattern: like temp reload, the next step all its tracks share (DJ on or off)
     print("D: [PTN] + [BANK] + trig (the playing pattern)", flush=True)
     for t in (0, 1, 4):
         flip(slab_ad + t * TRAC_A, 0x81)
@@ -232,6 +239,7 @@ def main(argv):
         e, t0, old_ok = res
         out = e["out"]
         check(e["where"] == "tick" and old_ok, "D: one tick, a step start of all 16 tracks")
+
         check(out is not None and out["applies"] == 8, f"D: the Part published track by track in that tick "
               f"(TRK_APPLY x{out['applies'] if out else '?'})")
         print(f"      D: instructions in the landing tick's hook: {counter['n']:,}", flush=True)
@@ -255,15 +263,37 @@ def main(argv):
         # its master length changes back, so it waits for the master wrap (rl_wrap)
         print("E: PER TRACK, master length edited, [PTN] + [BANK] + trig (the playing pattern)", flush=True)
         ml = rd(slab_ad + 0x8E50, 2)
-        cut = min(ml - 1, rd(MSTEP, 2) + 6)
+        cut = min(ml - 1, rd(MSTEP, 2) + 12)
         u.mem_write(slab_ad + 0x8E50, cut.to_bytes(2, "big"))
         flip(slab_ad, 0x81)
-        gesture([(PTN, 1), (BANK, 1), (act, 1), (act, 0), (BANK, 0), (PTN, 0)], ms=6000)
+        gesture([(PTN, 1), (BANK, 1), (act, 1), (act, 0), (BANK, 0), (PTN, 0)], ms=3000)
         res = landing("E", list(range(16)))
         if res:
-            check(res[0]["where"] == "wrap", f"E: landed at the master wrap (rl_wrap), master step {res[0]['ms']}")
-        check(rd(slab_ad + 0x8E50, 2) == ml and same_slab(slab(), card_slab),
-              f"E: the master length ({rd(slab_ad + 0x8E50, 2)}) and the pattern from the card")
+            e, t0, old_ok = res
+            out = e["out"]
+            exp = (t0 // tps(e["sc"])) % ml + 1
+            check(e["where"] == "tick" and old_ok, f"E: on the next common step, in the tick, master step {e['ms']}")
+            check(out is not None and rd(slab_ad + 0x8E50, 2) == ml and out["ms"] == exp,
+                  f"E: re-phased -- master step {out['ms'] if out else '?'} (expected {exp}), length back to {ml}")
+        check(rd(slab_ad + 0x8E50, 2) == ml and same_slab(slab(), card_slab), "E: the pattern from the card")
+
+    # ---- G: two tracks inside one step: both land, each on its step
+    print("G: [PTN] + [TRACK 1], then [PTN] + [TRACK 2] at once", flush=True)
+    flip(slab_ad, 0x81)
+    flip(slab_ad + TRAC_A, 0x81)
+    gesture([(PTN, 1), (0x10, 1), (0x10, 0), (0x11, 1), (0x11, 0), (PTN, 0)])
+    puts = [e for e in events if e["where"] in ("tick", "now", "wrap")]
+    print(f"      G: {len(puts)} landing(s): {[(e['where'], e['ms'], e['tc']) for e in puts]}", flush=True)
+    check(same_rec(rec(0), card_slab[:TRAC_A]) and same_rec(rec(1), card_slab[TRAC_A:2 * TRAC_A]),
+          "G: both T1 and T2 from the card")
+    check(rd(syms["rl_arm"], 1) == 0, "G: nothing left pending")
+    # ---- H: the same track twice, SEQ then FULL: the later kind wins (its slice comes back)
+    print("H: [PTN] + [TRACK 1], then [BANK] + [TRACK 1]", flush=True)
+    flip(slab_ad, 0x81)
+    flip(pb + 0x2A, 0x55)
+    gesture([(PTN, 1), (0x10, 1), (0x10, 0), (PTN, 0), (BANK, 1), (0x10, 1), (0x10, 0), (BANK, 0)])
+    check(same_rec(rec(0), card_slab[:TRAC_A]) and bytes(u.mem_read(pb + 0x2A, 30)) == card_part[0x2A:0x2A + 30],
+          "H: T1's record and its slice from the card (FULL won)")
 
     # ---- F: stopped
     print("F: STOP, [PTN] + [TRACK 1]", flush=True)
