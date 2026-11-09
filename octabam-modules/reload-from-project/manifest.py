@@ -52,6 +52,17 @@ held. Both releases are silent (no SELECT PATTERN, no SELECT BANK), the grid sho
 layer. The worker lands the whole slab with its saved Part link and that whole working Part,
 applies it when it is sounding, and doneFn cues the pattern as stock's [PTN] + trig does.
 
+QUANTIZED (2026-11-08, the author's request: CLYPS' temp-reload landing for card reloads). The
+worker stages the card's data in the unit (a pattern slab + its Part, ~43 KB: why the unit is
+48 KB) and, while the transport runs, the sequencer tick lands it: phase D (0x400a2530, where
+every path of phase D meets, one site after DIRECT JUMP KYOTI's 0x400a1f72) at the next step
+start of the track -- old and new rate, phase-continuous counters -- or, for a pattern, at the
+next step all 16 tracks share; the wrap body (0x400a43a0) at a master wrap, and for a reload that
+changes the pattern's own length / scale. The slice and the Part go to the engine in the same
+tick, per track (stock's whole-Part apply posts a kernel message, so it is left to the UI half).
+The UI task's 1/60 s tick (0x40056c28) runs the UI half after the landing, and lands a reload
+still pending when the transport stops. Stopped, or the target not playing: at once.
+
 IN DRAM. In octabam this is a Linked(dram=True) unit: octabam's loader unpacks it
 into the platform reserve at the bottom of the audio page arena at every boot, and
 the eight detours jump there. It moved out of the ROM cave so that every KYOTI module
@@ -72,7 +83,7 @@ from remix.schema import Detour, Kind, Linked, Module
 
 _HERE = os.path.relpath(os.path.dirname(os.path.realpath(__file__)))
 
-# ---- the eight hook sites, all `jmp` (the unit replays and rejoins stock) --------
+# ---- the eleven hook sites, all `jmp` (the unit replays and rejoins stock) --------
 # Three are EIGHT-byte spans: the jmp is six, so one nop follows, or the displaced
 # span would be left half-rewritten.
 HOOKS = (
@@ -85,14 +96,18 @@ HOOKS = (
     (0x40085864, "2d4afd762f2a0004", "rl_job",        8, "message case 0x14 worker"),
     (0x4005a044, "202f00087201",     "rl3_ptn_key",   6, "[PTN] press with [BANK] held"),
     (0x4007b2fc, "2f0a2f02242f000c", "rl3_bank_trig", 8, "[BANK]-layer trig, [PTN] held"),
+    (0x400a2530, "4ab946c8028a",     "rl_tick",       6, "phase D of the sequencer tick: the landing"),
+    (0x400a43a0, "201274018082",     "rl_wrap",       6, "the wrap body: a landing at a master wrap"),
+    (0x40056c28, "2039460d1e6c",     "rl_uitick",     6, "the UI task's 1/60 s tick: the UI half"),
 )
 
 # ---- the author's oracle -------------------------------------------------------
 # patch_reload3.s, m68k-elf-as -mcpu=5407 or 54455 (identical bytes; RL_DONE is the
 # source's default), linked at 0x400d6500 -- the address the standalone image uses:
-# 4124 bytes (2100 before the 8 Nov 2026 Part-slice and pattern reloads). octabam re-links it
-# there on every build and compares.
-REFERENCE = (0x400d6500, "6e2e80f4283ae69e2d80a3b3b0b0d764bd5ed6899ac496c579c09f2e640dd09f")
+# 48224 bytes: ~5 KB of code + the 43 KB staging buffers of the quantized landing (2100 before the
+# 8 Nov 2026 Part-slice, pattern and quantized reloads). octabam re-links it there on every build
+# and compares.
+REFERENCE = (0x400d6500, "fc43e76c73ba2122ec3e7a785c1484109ed99b097a3a5e3d41fbd9b22be2f30e")
 
 MODULE = Module(
     name="reload-from-project",

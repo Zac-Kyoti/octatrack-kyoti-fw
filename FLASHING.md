@@ -111,7 +111,7 @@ unit that boots; if it doesn't, use §3b.
 |---|---|
 | MUTE_MODES, SIDECHAIN_COMPRESSOR, RELOAD_FROM_PROJECT, QUANTIZE_LIVE_REC_TOGGLE | `140C_KYOTI` |
 | SIDECHAIN_COMPRESSOR light (the earlier version, WIP) | `140C_SCLT` |
-| RELOAD_FROM_PROJECT Part-slice + pattern-reload test build (WIP, 2026-11-08) | `140C_RLSL2` |
+| RELOAD_FROM_PROJECT Part-slice + pattern-reload + quantized-landing test build (WIP, 2026-11-08) | `140C_RLQ1` |
 | KYOTI V1.7 (the features in one image) | `KYOTI V1.7` |
 | KYOTI V1.6 (the previous one) | `KYOTI V1.6` |
 | KYOTI V1.5 (the previous one) | `KYOTI V1.5` |
@@ -161,8 +161,8 @@ quick check for each:
   (`[MIDI]`), `[PTN]` + `[TRACK 2]` → `TRK SEQ` / `RELOADED FROM PROJ`: M2 is back to its saved
   trigs, and audio T2 (back on the audio side) still has your unsaved change. On the audio side
   `[PTN]` + `[TRACK 2]` still reloads T2 only.
-  **Part-slice + pattern-reload walk-through (WIP 2026-11-08; standalone `140C_RLSL2`, `BUG_RL3`,
-  `KYOTI V1.7` rebuilt — none flashed yet).** `[BANK]` + `[TRACK n]` now brings back track n's sequence AND
+  **Part-slice + pattern-reload + quantized-landing walk-through (WIP 2026-11-08; standalone
+  `140C_RLQ1`, `BUG_RL3`, `KYOTI V1.7` rebuilt — none flashed yet).** `[BANK]` + `[TRACK n]` now brings back track n's sequence AND
   track n's machine / FX / pages / scene locks / LFO designer *as the project was saved*; no
   other track changes. Start each step from a SAVE PROJECT, on a pattern whose Part T1 and T2
   share, with the transport running.
@@ -195,6 +195,21 @@ quick check for each:
       plain `[PTN]` tap still opens SELECT PATTERN, a plain `[BANK]` tap SELECT BANK, and
       `[PTN]` + trig / `[BANK]` + trig pick a pattern / bank as usual.
   11. With `[PTN]` + `[BANK]` held, a `[TRACK]` key only changes the track (no reload).
+  12. **Quantized, track.** A busy 16-step loop on T1, transport running. Change T1's trigs, then
+      `[PTN]` + `[TRACK 1]` anywhere inside a step: the saved trigs take over exactly on a step,
+      in time — nothing early or late, no doubled or swallowed note at the changeover. The toast
+      appears as the change is heard, not before.
+  13. **Quantized, FULL.** Change T1's FX and a filter on a sustained sound, `[BANK]` + `[TRACK 1]`:
+      the sound changes exactly on the step where the trigs change, not partway through.
+  14. **Quantized, different rates.** T1 at 2x or 3/4 (PER TRACK), edit, reload: it lands on one
+      of its own steps and stays in phase with the other tracks afterwards.
+  15. **Quantized, pattern.** On the pattern that plays, edit several tracks and the Part, then
+      `[PTN]` + `[BANK]` + its trig: every track changes on the same step, in phase.
+  16. **Length / scale.** Edit the pattern's (master) length or scale, then reload the pattern
+      (or, in NORMAL mode, a track): it lands at the next pattern wrap, with the saved length /
+      scale from there on.
+  17. **Stopped.** STOP, reload: it applies at once. Reload while playing and press STOP before it
+      lands: it still applies. Two reload chords within one step: the second is ignored.
 - **QUANTIZE_LIVE_REC_TOGGLE** — hold `[REC]`, tap `[PLAY]` → toast `LIVE REC: QUANTIZED` or
   `LIVE REC: UNQUANTIZED`; tap `[PLAY]` again while it is up → the setting inverts. With
   PROJECT → PERSONALIZE open, the QUANTIZE LIVE REC check mark changes at the same moment.

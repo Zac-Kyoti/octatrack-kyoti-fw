@@ -159,8 +159,9 @@ are lowercase-hyphen, because octabam requires a module's name to equal its fold
 
 - **RELOAD_FROM_PROJECT: [BANK] + [TRACK n] = the track's sequence + its Part slice, [PTN] + [BANK] + trig = the
   whole pattern, both from the card (as Clyps)** — **WIP 2026-11-08, worktree `reload-slice`, NOT flashed.** Emulator
-  PASS (`tools/diag_reload_full.py`, `tools/diag_reload_ptn.py`). Builds: standalone syx `73f127a9…` (`140C_RLSL2`),
-  BUG_RL3 syx `9079b2e7…`, KYOTI V1.7 syx `42a4bc78…`.
+  PASS (`tools/diag_reload_full.py`, `tools/diag_reload_ptn.py`, `tools/diag_reload_quant.py`). Card reloads now land
+  quantized like Clyps' temp reload (next step start, in phase; the unit is in DRAM, 48 KB). Builds: standalone syx
+  `90c64dfd…` (`140C_RLQ1`), BUG_RL3 syx `1393bba9…`, KYOTI V1.7 syx `3a8f702b…`. Next: the same landing in Clyps.
   Next: the user's FLASHING §4 walk-through → promote (re-pin all three) → push → octabam pin PR (off `6a2da8d`;
   octabam's own README / usage page / proof_note too). NOTES 2026-11-08 (`reload-slice`).
 - **The stock DELAY's coefficient table (`0x400d24d0..0x400d2ce0`, midisc's "SAFE_CAVE") is not free** —

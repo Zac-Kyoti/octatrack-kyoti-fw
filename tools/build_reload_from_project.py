@@ -128,6 +128,8 @@ Outputs: out/mainos_reload_from_project.bin, out/elek_reload_from_project.bin,
 """
 import os, pathlib, subprocess, sys
 import kyoti_place                   # combined-image placement (build_kyoti.py); no-op standalone
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "dram"))
+import dram                          # noqa: E402  (tools/dram/dram.py: the vendored platform loader)
 from kyoti_status import gate, seal
 
 gate(__file__)
@@ -174,7 +176,9 @@ PATCHES = [
     # same site 0x4009b6f2, which the remix ledger refuses.  patch_reload3's ceiling
     # is therefore FREE_END itself (measured: stock is zero from 0x400d7400 to
     # 0x400d7c3b and 0xff from 0x400d7c3c).
-    ("patch_reload3", kyoti_place.at("patch_reload3", FREE_START), "RL_DONE=1" + (",RL_DIAG=1" if DIAG else ""),
+    # 2026-11-08 (3): in DRAM, standalone too -- the quantized landing stages up to a whole pattern and
+    # its Part (~43 KB) until its tick; the ROM cave has ~1.8 KB left. KYOTI gives its own address.
+    ("patch_reload3", kyoti_place.at("patch_reload3", dram.ARENA_BASE), "RL_DONE=1" + (",RL_DIAG=1" if DIAG else ""),
      # Session 85 redesign + Session 86's two [BANK]-deferral sites -- SIX
      # detours; RELOAD2 had ten. Neither chord site
      # pokes a keymap layer record, the mechanism behind the DIRECT JUMP slot
@@ -207,7 +211,11 @@ PATCHES = [
       (0x40023c62, "rl_done", "71f9460bd910", 6, "jmp"),
       # 2026-11-08 (2): [PTN] + [BANK] + trig = the pattern reload from the card
       (0x4005a044, "rl3_ptn_key", "202f00087201", 6, "jmp"),      # [PTN] press with [BANK] held
-      (0x4007b2fc, "rl3_bank_trig", "2f0a2f02242f000c", 8, "jmp")]),  # [BANK]-layer trig press
+      (0x4007b2fc, "rl3_bank_trig", "2f0a2f02242f000c", 8, "jmp"),  # [BANK]-layer trig press
+      # 2026-11-08 (3): the landing -- phase D of the tick, the wrap body, the UI task's 1/60 s tick
+      (0x400a2530, "rl_tick", "4ab946c8028a", 6, "jmp"),
+      (0x400a43a0, "rl_wrap", "201274018082", 6, "jmp"),
+      (0x40056c28, "rl_uitick", "2039460d1e6c", 6, "jmp")]),
 ]
 
 # Session 80 continued (2): the [BANK]-held keymap overlay layer.
@@ -232,7 +240,8 @@ FREE_END = 0x400d7c3c
 # Then it is linked at the DRAM address it is given and NOT written into this image -- only
 # its detours are; the combined builder appends it behind the loader. Unset in every
 # standalone run, so this image is byte-for-byte what it was.
-DRAM = bool(kyoti_place.at("patch_reload3_dram", False))
+DRAM = True                          # 2026-11-08 (3): always (KYOTI: its loader carries it, ours otherwise)
+KYOTI = kyoti_place.active()
 
 
 def jmp(t):
@@ -284,8 +293,8 @@ def main():
         if DRAM and name == "patch_reload3":
             if 0x40000400 <= at < 0x40000400 + len(img):
                 sys.exit(f"patch_reload3_dram: 0x{at:08x} is inside the OS image, not DRAM")
-            print(f"  {name:16s} {len(blob):3d} B linked at 0x{at:08x} (DRAM: carried by the "
-                  f"combined image's loader, not written here)")
+            print(f"  {name:16s} {len(blob):,} B linked at 0x{at:08x} (DRAM: "
+                  + ("carried by the combined image's loader)" if KYOTI else "the loader is appended below)"))
         else:
             co = o(at)
             if any(img[co:co + len(blob)]):
@@ -361,6 +370,16 @@ def main():
         sys.exit(f"cave runs past the free zone end (0x{spans[-1][1]:x} > 0x{FREE_END:x})")
     print("  no overlaps; all within the free cave")
 
+    if not KYOTI:
+        # 2026-11-08 (3): the unit rides in DRAM -- tools/dram's loader + payload after the OS image
+        at, blob = placed["patch_reload3"]
+        if at != dram.ARENA_BASE:
+            sys.exit(f"patch_reload3 is linked at 0x{at:08x}, not the arena base 0x{dram.ARENA_BASE:08x}")
+        append, rep = dram.build(blob, ROOT / ("out/_dram_reload" + SFX), img)
+        print(f"  DRAM: {rep['raw']:,} B at 0x{rep['base']:08x}; packed {rep['packed']:,} B; reserve "
+              f"{rep['pages']:,} pages ({rep['reserve_bytes']:,} B), {rep['pages_left']:,} of {dram.PAGES:,} "
+              f"left; loader + payload {rep['append']:,} B at 0x{dram.LOADER_AT:08x}")
+        img += append
     OUT.write_bytes(bytes(img))
 
     seal(__file__, OUT)

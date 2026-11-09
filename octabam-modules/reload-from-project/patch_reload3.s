@@ -452,6 +452,21 @@
     .equ PTN_LEDL,     0x400bebfe       | [PTN]'s LED layer (0x4004346c pushes it with its keymap)
     .equ LED_POP,      0x4007e81c       | (layer): unlink it, wherever it is in the list
     .equ PAT_MSCALE,   0x8e52           | the MASTER scale (PER TRACK mode's source of SCALE_IX)
+    .equ PAT_MLEN,     0x8e50           | u16: the master length (0xffff = INF)
+|   ---- 2026-11-08 (3): the landing (CLYPS' cl_land / cl_wrap / cl_uitick equates, measured there) ----
+    .equ TICK_GATE,    0x46107568       | != 0: this ISR slice is not a tick (0x400a1f68)
+    .equ MASTER_STEP,  0x800065b2       | u16: the master step, ++ at each master tick 0
+    .equ TICK_CTR,     0x800065b6       | byte: master ticks within the step
+    .equ LEN_TBL,      0x400aba50       | long[scale]: ticks per step (2 = 1x = 6)
+    .equ STEP_ARR,     0x800064d0       | byte[16]: per-track step (audio 0..7, MIDI 8..15)
+    .equ STEPM1_ARR,   0x800064e0       | byte[16]: per-track step - 1 (mod len)
+    .equ TICKS_ARR,    0x800064f0       | byte[16]: per-track ticks within the step
+    .equ TSCALE_ARR,   0x8000663e       | byte[16]: per-track scale cache
+    .equ PEND_BANK,    0x800065bf
+    .equ PEND_PAT,     0x800065c0
+    .equ TICK_RES,     0x400a2536       | after `tst.l 0x46c8028a` (stock's beq.w follows)
+    .equ WRAP_RES,     0x400a43a6       | after the wrap body's first three instructions
+    .equ UITICK_RES,   0x40056c2e       | after `move.l 0x460d1e6c,%d0` (stock's beq follows)
     .equ CHAIN_OFF,    0x4009a404       | stock [PTN] + trig's steps (0x40056b2c..): chain off,
     .equ PAT_CUE,      0x400a1030       | (bank, pattern): the cue (running: pending; stopped: at once)
 
@@ -726,8 +741,8 @@ rl3_do_pat:
     bne.w   r3d_out
     tst.l   POPUP
     bne.w   r3d_out
-    tst.b   G_KIND
-    bne.w   r3d_out
+    tst.b   rl_busy
+    bne.w   r3d_out                    | one reload at a time (its data is staged until it lands)
     move.b  %d0,G_PAT
     addq.l  #1,%d0
     move.l  %d0,-(%sp)                 | pattern 1..16
@@ -743,6 +758,8 @@ rl3_do_pat:
     move.b  %d0,rl_msg                 | "PATTERN A05" / "RELOADED FROM PROJ", on SUCCESS
     moveq   #RQ_PTN,%d0
     move.b  %d0,G_KIND
+    moveq   #1,%d0
+    move.b  %d0,rl_busy
     moveq   #0,%d0
     move.b  PLAY_BANK,%d0
     moveq   #1,%d1
@@ -792,6 +809,8 @@ r3b_try_bank:
     move.b  %d0,rl3_bank_used          | claim the [BANK] release: rl3_bank_rel swallows
                                        | it AND runs the overlay teardown there, so the
                                        | teardown happens exactly once, on the release.
+    tst.b   rl_busy
+    bne.w   r3b_done                   | 2026-11-08 (3): one reload at a time
     moveq   #2,%d0
     move.b  %d0,rl_msg                 | "TRK FULL" / "RELOADED FROM PROJ", shown on SUCCESS
     moveq   #0,%d0
@@ -817,6 +836,8 @@ r3b_stock:
 | "gesture consumed" flag so stock's [PTN] release path skips SELECT PATTERN.
 rl3_do_ptn:
     subi.l  #0x10,%d0                  | TRACK keycodes are 0x10..0x17 -> index 0..7
+    tst.b   rl_busy
+    bne.b   r3p_busy                   | 2026-11-08 (3): one reload at a time (its data is staged)
 |   Session 93 (2nd pass): arm the message BEFORE posting, for the same reason as the
 |   [BANK] chord above -- once the job is posted, doneFn may reach rl_done at any moment,
 |   and anything written after the post can arrive too late to be shown. This chord won
@@ -828,6 +849,7 @@ rl3_do_ptn:
     move.l  (%sp)+,%d0
     moveq   #RQ_TRKSEQ,%d1
     jsr     rl3_arm_n                  | arm TRK SEQ for that track and post the job
+r3p_busy:
     move.l  #-1,%d0
     move.l  %d0,PTN_CONSUMED           | same value stock writes at 0x40056b44
 |   Session 88 item 4: this used to be the big block TOAST (FUN_4005a2b8). It is now
@@ -1215,6 +1237,8 @@ rl_arm_trk:
     .global rl3_arm_n
 rl3_arm_n:
     move.b  %d1,G_KIND                 | the kind; d1 is free again until the post below
+    moveq   #1,%d1
+    move.b  %d1,rl_busy                | 2026-11-08 (3): busy until rl_follow (or a failed job)
     andi.l  #7,%d0
     move.b  %d0,G_TRK
     .ifdef RL_DIAG
@@ -1331,6 +1355,24 @@ rl_done:
     jmp     DONE_RESUME
 rld_skip:
     clr.b   rl_own                     | one-shot: consume it
+|   2026-11-08 (3): the job read and staged; when it also LANDED (stopped, or not the playing
+|   pattern) the UI half runs now; armed, the UI tick runs it after the landing (rl_uitick)
+    tst.b   rl_post
+    beq.b   rld_out
+    bsr.w   rl_follow
+rld_out:
+    jmp     DONE_EPILOG                | skip the whole-bank reload entirely
+
+| ================= rl_follow: the UI half of a landed reload (UI task) =================
+| From doneFn (rl_done) or the UI tick (rl_uitick), once rl_post says a landing happened: the
+| Session 93 verify (track reloads), the message, the edited mark, the SRAM mirror, a changed Part
+| link's whole-Part apply, the PICKUP setup and page redraw, the pattern switch. Then the next
+| request may come (rl_busy). Keeps d2-d7/a2-a6.
+rl_follow:
+    lea     -40(%sp),%sp
+    movem.l %d2-%d7/%a2-%a5,(%sp)
+    clr.b   rl_post
+
     .ifdef RL_DIAG
     clr.b   rl_dv                      | DIAG: verify result 0 = not armed
     .endif
@@ -1350,13 +1392,13 @@ rld_skip:
 |   while the user still heard the edited sequence. Comparing against the live slab asks
 |   the question that actually matters: does what is playing now hold the CF-saved trigs?
     moveq   #0,%d0
-    move.b  PLAY_BANK,%d0
-    move.l  #BANKSTRIDE,%d1
+    move.b  rl_tbank,%d0               | 2026-11-08 (3): the reload's own target (it may have landed
+    move.l  #BANKSTRIDE,%d1            | on a pattern that has stopped playing since)
     muls.l  %d1,%d0
     move.l  #BLOB,%a0
     add.l   %d0,%a0
     moveq   #0,%d0
-    move.b  ACT_PAT,%d0
+    move.b  rl_tpat,%d0
     move.l  #PATSTRIDE,%d1
     muls.l  %d1,%d0
     add.l   %d0,%a0
@@ -1454,6 +1496,50 @@ rld_nomsg:
 |   (rl3_part_refresh, Session 120) so the knobs show the reloaded values at once. Both read the
 |   UI bank, so only when the reloaded bank is the one on screen (CLYPS' cl_postpart rule).
 |   The data (the slice, the engine, the edited mark, the SRAM mirror) is already done.
+|   the Part's edited mark (it follows its SAVE PART copy), then the SRAM mirror of the bank (stock's
+|   0x4000faf0: slabs, Parts, the edited byte) -- after the landing, so the mirror holds what plays
+    tst.b   rl_pfull
+    beq.b   rld_lv
+    moveq   #0,%d0
+    move.b  rl_tbank,%d0
+    move.l  #BANKSTRIDE,%d1
+    muls.l  %d1,%d0
+    movea.l #BLOB,%a5
+    adda.l  %d0,%a5                    | a5 = the bank
+    moveq   #0,%d0
+    move.b  rl_tpat,%d0
+    move.l  #PATSTRIDE,%d1
+    muls.l  %d1,%d0
+    movea.l %a5,%a0
+    adda.l  %d0,%a0
+    adda.l  #PAT_PART,%a0
+    moveq   #0,%d2
+    move.b  (%a0),%d2
+    andi.l  #3,%d2                     | d2 = the Part the target links to
+    bsr.w   rl_partp                   | a3 = it
+    bsr.w   rl_pmark
+rld_lv:
+    moveq   #0,%d0
+    move.b  PLAY_BANK,%d0              | the bank written (reloads aim at the playing bank)
+    move.l  %d0,-(%sp)
+    jsr     LIVE_REFRESH               | FUN_4000faf0(bank): RAM->RAM, no card
+    addq.l  #4,%sp
+|   the playing pattern's Part link changed under it: stock's whole-Part apply too (UI context: it
+|   posts a kernel message, which the tick may not)
+    tst.b   rl_lnk
+    beq.b   rld_pf
+    clr.b   rl_lnk
+    moveq   #0,%d0
+    move.b  CUR_PART,%d0
+    move.l  %d0,-(%sp)
+    moveq   #0,%d0
+    move.b  PLAY_BANK,%d0
+    move.l  %d0,-(%sp)
+    jsr     PARTAPPLY                  | FUN_40009094(bank, part)
+    addq.l  #8,%sp
+rld_pf:
+    moveq   #1,%d0
+    move.l  %d0,RDRAW                  | Session 93: repaint after the data has landed
     tst.b   rl_pfull
     beq.b   rld_epi
     clr.b   rl_pfull
@@ -1472,13 +1558,13 @@ rld_epi:
 |   [PTN] + trig, 0x40056b2c..0x40056b8c, without its window teardown): the chain off, the cue
 |   (running: a pending change; stopped: at once), then stock's refreshes. Its own pattern: nothing.
     move.b  rl_ptngo,%d0
-    beq.b   rld_out
+    beq.b   rlf_out
     clr.b   rl_ptngo
     andi.l  #15,%d0
     moveq   #0,%d1
     move.b  ACT_PAT,%d1
     cmp.l   %d0,%d1
-    beq.b   rld_out
+    beq.b   rlf_out
     move.l  %d0,-(%sp)                 | N (the cue's second argument)
     jsr     CHAIN_OFF
     moveq   #0,%d0
@@ -1493,8 +1579,12 @@ rld_epi:
     jsr     0x4004b528
     jsr     0x4004b08c
     lea     12(%sp),%sp
-rld_out:
-    jmp     DONE_EPILOG                | skip the whole-bank reload entirely
+rlf_out:
+    clr.b   rl_busy
+    movem.l (%sp),%d2-%d7/%a2-%a5
+    lea     40(%sp),%sp
+    rts
+
     .endif
 
 | ================= the SEQ worker -- jmp detour @ the type-0x14 case 0x40085864 =================
@@ -1599,6 +1689,7 @@ rlj_ours:
     jsr     rl_openstrd                | -> d0 = open result (fh in rl_fh)
     tst.l   %d0
     bpl.b   rlj_opened
+    clr.b   rl_busy
     moveq   #-12,%d0                   | ENOENT -> stock "THIS BANK HAS NEVER BEEN SAVED!"
     bra.w   rlj_exit
 
@@ -1633,19 +1724,21 @@ rlj_ploop:
     cmp.l   %d5,%d4
     ble.b   rlj_ploop                  | parse patterns 0..P (0..P-1 discarded)
 
-    move.l  rl_kind,%d7                | d7 = kind (RQ_TRKSEQ / RQ_TRKFULL)
-    cmpi.l  #RQ_TRKFULL,%d7
-    bcc.b   rlj_keep                   | FULL / PTN read on, to the Part chunk (rl_rdpart closes)
-    pea     rl_fh
-    jsr     FCLOSE
-    addq.l  #4,%sp
-rlj_keep:
-
+|   ===== 2026-11-08 (3): STAGE, then land -- now, or at the next step start (rl_tick / rl_wrap) =====
+|   The user (2026-11-08): reloads from the card land like CLYPS' temp reload -- at the track's next
+|   step start, in phase -- and a reload of the playing pattern at the next step all its tracks share.
+|   So the worker no longer writes the live pattern: it stages the saved slab (RQ_SLAB) and, for
+|   FULL / PTN, the working Part chunk (RQ_PART); rl_put lands them. Stopped, or the pattern is not
+|   playing: rl_put now (here). Playing: armed (rl_arm), rl_tick lands it in phase D of the right
+|   tick, rl_wrap at a master wrap; rl_follow does the UI half after (doneFn or the UI tick).
+    move.l  rl_kind,%d7                | d7 = kind (RQ_TRKSEQ / RQ_TRKFULL / RQ_PTN)
     moveq   #0,%d0
     move.b  PLAY_BANK,%d0              | must be the same bank d5's pattern belongs to
     .ifdef RL_DIAG
     move.b  %d0,rl_dw+0                | DIAG: bank as the worker read it
     .endif
+    move.b  %d0,rl_tbank
+    move.b  %d5,rl_tpat
     move.l  #BANKSTRIDE,%d1
     muls.l  %d1,%d0
     move.l  #BLOB,%a4
@@ -1654,19 +1747,6 @@ rlj_keep:
     move.l  #PATSTRIDE,%d1
     muls.l  %d1,%d0
     add.l   %d0,%a4                    | a4 = live slab for P
-
-    cmpi.l  #RQ_PTN,%d7
-    bne.b   rlj_trk
-    bsr.w   rl_ptnjob                  | the whole pattern + its Part (2026-11-08 (2))
-    tst.l   %d0
-    bpl.w   rlj_setflag
-    moveq   #7,%d0
-    move.b  %d0,rl_msg                 | the pattern landed, its Part did not
-    bra.w   rlj_setflag
-
-rlj_trk:
-|   --- kind 3 = TRK SEQ: copy just the selected track's region ---
-|   d2 = in-slab byte offset, d3 = length
     moveq   #0,%d0
     move.b  G_TRK,%d0
     andi.l  #7,%d0
@@ -1676,224 +1756,104 @@ rlj_trk:
     move.b  %d1,rl_dw+3                | DIAG: midi flag as the worker read it
     .endif
     tst.b   G_TMIDI
-    bne.b   rlj_trk_midi
-    move.l  #TRAC_A,%d1
-    muls.l  %d1,%d0                    | d0 = t * 0x91a
-    move.l  %d0,%d2
-    move.l  #TRAC_A,%d3
-|   2026-11-08 (CLYPS, gate X/L): an audio record's +0x899 is not in the bank file -- the parser
-|   leaves the buffer's byte there, and stock's own reload (which parses into the live slab) keeps
-|   the live one. So does this copy: the live byte goes into SCRATCH first.
-    move.l  #SCRATCH+0x899,%a0
-    add.l   %d2,%a0
-    move.l  %a4,%a1
-    add.l   %d2,%a1
-    move.b  0x899(%a1),(%a0)
-    bra.b   rlj_trk_copy
-rlj_trk_midi:
-    move.l  #TRAC_M,%d1
-    muls.l  %d1,%d0                    | d0 = t * 0x8b0
-    add.l   #MIDI_BASE,%d0             | + 0x48d0
-    move.l  %d0,%d2
-    move.l  #TRAC_M,%d3
-rlj_trk_copy:
-    move.l  %d3,-(%sp)                 | length
-    move.l  #SCRATCH,%d0
-    add.l   %d2,%d0
-    move.l  %d0,-(%sp)                 | src = SCRATCH + off
-    move.l  %a4,%d0
-    add.l   %d2,%d0
-    move.l  %d0,-(%sp)                 | dst = liveslab + off
-    .ifdef RL_DIAG
-    move.l  %d0,%a0                    | DIAG: the live record BEFORE the copy -- what
-    lea     rl_dpre,%a1                | was playing (the edited state). Bytewise: the
-    move.b  (%a0)+,(%a1)+              | slab is even-aligned but do not rely on it.
-    move.b  (%a0)+,(%a1)+
-    move.b  (%a0)+,(%a1)+
-    move.b  (%a0)+,(%a1)+
-    .endif
-    jsr     FWMEMCPY
+    beq.b   rlj_t
+    addq.l  #8,%d0
+rlj_t:
+    move.b  %d0,rl_t                   | the track 0..15 (MIDI 8..15)
+|   the bytes the bank file never holds keep their live values (stock parses into the live slab):
+|   each audio record's +0x899 and the slab tail +0x8e5c.. (CLYPS gate X)
+    movea.l #SCRATCH,%a0
+    move.l  #0x899,%d0
+rlj_ns:
+    move.b  (%a4,%d0.l),%d1
+    move.b  %d1,(%a0,%d0.l)
+    addi.l  #TRAC_A,%d0
+    cmpi.l  #8*TRAC_A,%d0
+    bcs.b   rlj_ns
+    move.l  #0x8e5c,%d0
+rlj_nt:
+    move.b  (%a4,%d0.l),%d1
+    move.b  %d1,(%a0,%d0.l)
+    addq.l  #1,%d0
+    cmpi.l  #PATSTRIDE,%d0
+    bcs.b   rlj_nt
+    move.l  #PATSTRIDE,-(%sp)
+    pea     SCRATCH
+    pea     RQ_SLAB
+    jsr     FWMEMCPY                   | the saved pattern, staged
     lea     12(%sp),%sp
-
-|   ===== Session 93: snapshot what we just wrote, so rl_done can VERIFY it. =====
-|   Report #14 follow-up, and this is now a TIGHT question. The user flashed the build
-|   whose message is drawn only from rld_skip -- which needs rl_own, set only at
-|   rlj_setflag, i.e. AFTER this copy -- and still sees "TRK SEQ RELOADED" with the old
-|   sequence both lit on the grid AND audibly playing. So the worker ran, the file opened,
-|   every parse succeeded and this memcpy executed. Two possibilities remain, and they
-|   need opposite fixes:
-|       (a) the copy never stuck   -- the bytes here are not what we parsed
-|       (b) the copy was undone    -- they were, and something overwrote them afterwards
-|   The snapshot goes into OUR CAVE, deliberately NOT into SCRATCH: SCRATCH is
-|   OPEN_BUF + 0x7000, and every one of stock's 14 users of that buffer passes size
-|   0x10000 (e.g. 0x4008fbde, 0x400916d4). Corrected 2026-10-08 (octabam #561 review):
-|   those 14 references all sit in the file-format routines 0x4008fb58..0x40091920, and
-|   every caller found is a STORAGE-TASK job -- FUN_4008445c's dispatcher on queue
-|   0x460d17ce (0x40084b9e, 0x400850b8, 0x4008522e, 0x40085314, 0x40085370, 0x40085582)
-|   and FUN_400919e4 (0x40091a52, the type-6 case). Our worker is that task's type-0x14
-|   job, so no stock user of the buffer runs while SCRATCH holds our parse: audio
-|   streaming does not use it (the earlier note here said it might; it was a guess).
-|   Static evidence; a write-watch on SCRATCH under the port would settle it. The cave
-|   snapshot stays: it costs 16 bytes and keeps the verify independent of SCRATCH.
-    move.l  #SCRATCH,%a0
-    add.l   %d2,%a0
-    lea     rl_vsnap,%a1
-    moveq   #16,%d0
-rlj_snap:
-    move.b  (%a0)+,(%a1)+              | the 16 trig-mask bytes, offset 0..0x0f
-    subq.l  #1,%d0
-    bne.b   rlj_snap
-    move.l  %d2,rl_voff                | the in-slab OFFSET, not an absolute address --
-                                       | rl_done recomputes the slab from LIVE state, so a
-                                       | copy that went to the WRONG slab is caught too
-    moveq   #1,%d0
-    move.b  %d0,rl_varm                | "a verify is pending"
-
-|   ===== Session 89: NORMAL scale mode needs the PATTERN length too =====
-|   Hardware report #12: "in NORMAL mode (not per track) reloads are not respecting the
-|   pattern length that was set in the CF-saved version (ie, if the CF-saved version is
-|   16 steps, and the user sets the active track to 12 steps and reloads, the track
-|   remains at 12 steps). Per Track mode does not have this problem."
-|
-|   The asymmetry names the cause exactly. A track's own length/scale live INSIDE its
-|   record, at +0x50 / +0x51 of the 0x91a slice just copied -- so in PER TRACK mode the
-|   reload restores them for free, which is why that mode was already correct. In NORMAL
-|   mode the step count is not a track field at all: it is the PATTERN's, at slab
-|   +0x8e53 (scale at +0x8e54), outside every track slice, so nothing restored it.
-|
-|   ** The scope consequence is inherent, not a shortcut: in NORMAL mode the length is a
-|   PATTERN-level property shared by all 8 tracks, so restoring it restores it for the
-|   whole pattern. There is no per-track length in that mode -- that is what NORMAL mode
-|   means -- so "this track's saved step count" and "the pattern's saved step count" are
-|   the same thing here. **
-|   The LIVE flag is consulted, because it is what governs playback right now.
-    move.l  %a4,%a0
-    add.l   #PAT_SMODE,%a0
-    tst.b   (%a0)
-    bne.b   rlj_trk_done               | PER TRACK -> already restored inside the slice
-    move.l  #SCRATCH,%a1
-    add.l   #PAT_LEN,%a1               | saved length, saved scale at +1
-    move.l  %a4,%a0
-    add.l   #PAT_LEN,%a0
-    move.b  (%a1),%d0
-    move.b  %d0,(%a0)                  | pattern LENGTH (+0x8e53)
-    move.b  1(%a1),%d0
-    move.b  %d0,1(%a0)                 | pattern SCALE  (+0x8e54)
-|   ===== carried over from the DIRECT JUMP thread's own scars =====
-|   Restoring the blob byte is not enough for the SCALE: SCALE_IX (0x8000663d) is a LIVE
-|   cache that stock refreshes only on a transport cycle, the whole-bank re-home, or a
-|   pattern-switch commit -- and Session 86 deliberately stopped arming the re-home, so
-|   nothing here would have refreshed it. The restored rate would then not take effect
-|   until the user happened to stop/start or change pattern. This is exactly the class of
-|   bug DIRECT JUMP paid for twice (its Session 84 per-track SCALE cache gap, and its
-|   Session 79 cont.33 master-scale read); the per-TRACK cache is fine because stock does
-|   re-read that one on every wrap (0x400a3d08), but the MASTER one it does not.
-|
-|   ** Written ONLY when it actually differs. ** DIRECT JUMP measured that poking this
-|   mid-cycle re-phases the master for one step, and report #9 asked for reloads to leave
-|   time undisturbed -- so the common case (the user changed only the LENGTH, not the
-|   scale) must touch nothing at all. d0 still holds the saved scale here.
-    move.b  SCALE_IX,%d1
-    cmp.b   %d1,%d0
-    beq.b   rlj_trk_done
-    move.b  %d0,SCALE_IX               | the saved rate genuinely differs -> apply it
-rlj_trk_done:
-|   2026-11-08: [BANK] + [TRACK n] -- now that track's slice of the card's Part (rl_full closes the
-|   file on every path). The sequence has landed whatever happens next, so a Part chunk that cannot
-|   be read is still a success, with its own message: "TRK SEQ RELOADED" / "PART NOT READ!".
-    cmpi.l  #RQ_TRKFULL,%d7
-    bne.b   rlj_setflag
-    bsr.w   rl_full
+    clr.b   rl_nopart
+    cmpi.l  #RQ_TRKSEQ,%d7
+    bne.b   rlj_part
+    pea     rl_fh
+    jsr     FCLOSE
+    addq.l  #4,%sp
+    bra.b   rlj_class
+rlj_part:
+    moveq   #0,%d3
+    move.b  RQ_SLAB+PAT_PART,%d3
+    andi.l  #3,%d3                     | the Part the SAVED pattern links to
+    bsr.w   rl_rdpart                  | -> RQ_PART; the file closed on every path
     tst.l   %d0
-    bpl.b   rlj_setflag
-    moveq   #5,%d0
+    bpl.b   rlj_class
+    moveq   #1,%d0
+    move.b  %d0,rl_nopart              | the sequence lands, the Part does not
+    moveq   #5,%d0                     | "TRK SEQ RELOADED" / "PART NOT READ!"
+    cmpi.l  #RQ_PTN,%d7
+    bne.b   rlj_npm
+    moveq   #7,%d0                     | "PATTERN A05" / "PART NOT READ!"
+rlj_npm:
     move.b  %d0,rl_msg
-
+rlj_class:
+|   a landing that changes the pattern's own length / scale / mode waits for the master wrap
+|   (rl_wrap): a reload of the whole pattern whose trailer differs, or a track reload in NORMAL mode
+|   whose pattern length / scale differ (it brings them back, Session 89)
+    clr.b   rl_wcls
+    movea.l %a4,%a0
+    adda.l  #PAT_MLEN,%a0
+    movea.l #RQ_SLAB+PAT_MLEN,%a1
+    moveq   #6,%d1                     | +0x8e50..55: master len (2), master scale, len, scale, mode
+    cmpi.l  #RQ_PTN,%d7
+    beq.b   rlj_cmp
+    tst.b   PAT_SMODE-PAT_MLEN(%a0)
+    bne.b   rlj_when                   | PER TRACK: a track's own rate lands in phase
+    addq.l  #3,%a0
+    addq.l  #3,%a1
+    moveq   #2,%d1                     | NORMAL: the pattern's length / scale
+rlj_cmp:
+    move.b  (%a0)+,%d0
+    cmp.b   (%a1)+,%d0
+    bne.b   rlj_wc
+    subq.l  #1,%d1
+    bne.b   rlj_cmp
+    bra.b   rlj_when
+rlj_wc:
+    moveq   #1,%d0
+    move.b  %d0,rl_wcls
+rlj_when:
+    cmpi.l  #RQ_PTN,%d7
+    bne.b   rlj_w2
+    move.l  %d5,%d0
+    ori.l   #0x80,%d0
+    move.b  %d0,rl_ptngo               | rl_follow: the OT goes to it (nothing if it already plays)
+rlj_w2:
+    tst.l   RUNNING
+    beq.b   rlj_now
+    moveq   #0,%d0
+    move.b  ACT_PAT,%d0
+    cmp.l   %d5,%d0
+    bne.b   rlj_now                    | not the playing pattern: no phase to keep
+    move.b  %d7,rl_arm                 | the tick lands it (rl_tick / rl_wrap)
+    bra.b   rlj_setflag
+rlj_now:
+    move.l  %d7,%d0
+    bsr.w   rl_putm                    | land it now, interrupts masked (a task context)
     .global rlj_setflag        | exported so tests can hook the real success point
 rlj_setflag:
-|   ===== Session 93: ask for a REDRAW here -- after the data has landed. =====
-|   ** This is the answer to report #14 item 1, and to the asymmetry the user spotted:
-|   "Parts always reload well. However, the sequence data does not always reload
-|   reliably ... the toast will show 'reloaded', but the sequence is not actually
-|   restored." **
-|   RDRAW (0x46c7c72c) is the screen-redraw dirty flag, and it was set in exactly two
-|   places, with the ORDERING being the whole bug:
-|     * the Part path (rlj_faithful) sets it INSIDE THE WORKER, right after PARTAPPLY --
-|       i.e. AFTER the data is applied. So the Part always repaints. Always worked.
-|     * the TOAST path (rt2_done) set it at CHORD time, in the key handler, BEFORE the
-|       async worker had copied anything. So the panel repainted showing the PRE-reload
-|       sequence, the copy landed a moment later, and nothing asked for another redraw.
-|     * the SEQUENCE success path set it NOWHERE.
-|   So the trigs were restored correctly every time -- measured repeatedly: 6/6 on the
-|   user's own empty->reload->LED test, 8/8 [PTN], 4/4 [BANK], and the engine reads the
-|   cold blob directly so the data is live immediately -- while the DISPLAY kept showing
-|   the old state until something else happened to dirty the screen. Hence "most of the
-|   time it does": most of the time something else repaints promptly.
-|   That is also why no amount of byte-comparing found it. The data path was never wrong.
-    moveq   #1,%d0
-    move.l  %d0,RDRAW                  | the sequence changed under the UI -- repaint it
     .ifdef RL_DONE
-|   Session 90: the copy has succeeded, so the whole-bank reload this job's doneFn is
-|   about to perform IS redundant -- claim it now, and only now.
     moveq   #1,%d0
-    move.b  %d0,rl_own
-|   Session 83: RESTORED together with rl_done -- the two stand or fall together.
-|   Without the suppression, stock's own whole-bank reload refills the live cache;
-|   with it, nothing does, and the slice lands in the cold blob while playback
-|   keeps reading stale bytes (measured in "(4)" as "LIVE copy: STILL SCRIBBLED").
-    moveq   #0,%d0
-    move.b  PLAY_BANK,%d0              | refresh the live cache of the bank we just wrote
-    move.l  %d0,-(%sp)
-    jsr     LIVE_REFRESH               | FUN_4000faf0(bank): RAM->RAM, no card
-    addq.l  #4,%sp
+    move.b  %d0,rl_own                 | Session 90: the job has succeeded -- doneFn's bank reload is ours
     .endif
-|   Session 80 continued (4): refresh the LIVE cache from the cold blob.
-|   MEASURED: our worker writes only the cold blob (0x400e21e0...). Stock's
-|   whole-bank reload -- the one rl_done now suppresses -- was what refilled the
-|   downstream live cache at 0x1001614e, so with it gone the slice landed in the
-|   blob while playback kept reading stale bytes ("LIVE copy: STILL SCRIBBLED"
-|   in diag_reload2_deser.py). Suppressing the reload without this would have
-|   made every reload inaudible.
-|   FUN_4000faf0(bank) is stock's own "make bank current": memcpy(0x1001614e,
-|   blob + bank*0x9b340, 0x8ed80) + the parts region -> 0x100a4ece. It is
-|   RAM->RAM, no card access, so it costs none of the ~1 s the card read did,
-|   and NOTES.md (Session 27 thread) already records it as safe to call for
-|   exactly this purpose: it copies all 16 slabs, but only the reloaded one
-|   differs. Direction matters and is correct -- the cold blob is the working
-|   store (p-lock edits land there) and the live cache is downstream of it.
-|   ** BACKED OUT in Session 80 continued (5) along with rl_done -- see the
-|   rl_done block below for why. The call was:
-|       moveq #0,%d0 ; move.b CUR_BANK,%d0 ; move.l %d0,-(%sp)
-|       jsr LIVE_REFRESH ; addq.l #4,%sp
-|   It is only needed WITH the rl_done suppression (without it, stock's own
-|   whole-bank reload refills the live cache), so the two stand or fall together. **
-|   ===== Session 86: RELOAD_NOW IS NEVER ARMED. =====
-|   Hardware report #9 item 3: "Reloading restarts the track sequence from step 1,
-|   AND the internal (master) metronome is also restarted." MEASURED root cause --
-|   the flag at 0x46c8028a is polled once per step at 0x400a2530 and the block it
-|   gates is stock's WHOLE-BANK re-home, which is POSITIONAL, not just a cache
-|   refresh. In that block:
-|     0x400a26fe  movew #0,0x800065b4    | previous master step
-|     0x400a2704  movew #0,0x800065b2    | THE MASTER PLAYHEAD -> sequence restart
-|     0x400a2658  moveb LEN_TBL[..]-1,0x800065b6  | ticks-within-step -> wrap next tick
-|     0x400a27e2  movel #1,0x800065b8    | RUNNING = 1 -- this is ALSO the old
-|                                        | "reload while stopped starts playback" bug,
-|                                        | which the RUNNING gate here was papering over
-|   0x800065b2 is DIRECT JUMP's MASTER_STEP / BAR_CTR -- measured there as the bounded
-|   master playhead -- and the metronome's beat flags are derived from it by masking
-|   against 0x400abae4 / 0x400abacc (0x400a4264..0x400a42a0). So zeroing it restarts
-|   the sequence AND the metronome from one write: two symptoms, one cause.
-|
-|   Nothing in that block is needed here, which is why dropping it costs nothing:
-|     * trig data -- our worker writes the cold blob and the LIVE_REFRESH above copies
-|       blob -> live cache, so both consumers already see the new bytes.
-|     * per-track scale/length -- stock re-reads it from the blob on EVERY wrap
-|       (0x400a3d08 `moveb %a2@(1),%a3@` -> TRK_SCALE_IX[t], DIRECT JUMP's own
-|       finding), so a changed step count self-heals within one cycle, in time.
-|   So ask for a screen refresh and touch the transport on NO path at all -- the same
-|   conclusion DIRECT JUMP reached the hard way: keep time by READING the clock, never
-|   by reseeding it. ACT_PAT / RUNNING are no longer consulted: there is nothing left
-|   to gate, because we no longer do anything that could disturb the transport.
 rlj_ok:
     moveq   #1,%d0
 rlj_exit:
@@ -1907,10 +1867,11 @@ rlj_readfail:
     pea     rl_fh
     jsr     FCLOSE
     addq.l  #4,%sp
+rlj_fail0:
+    clr.b   rl_busy                    | stock's doneFn shows its error, rl_done never runs
     moveq   #-1,%d0
     bra.b   rlj_exit
 
-| ---- rl_openstrd: d0 = open result; builds rl_pathbuf, fills rl_fh ----
     .global rl_openstrd
 rl_openstrd:
     lea     -40(%sp),%sp
@@ -1950,215 +1911,550 @@ rlo_zero:
     lea     40(%sp),%sp
     rts
 
-| ================= 2026-11-08: [BANK] + [TRACK n] -- the track's Part slice from the card =================
-| CLYPS' card FULL reload (tools/clyps/clyps_reload.s rj_tfull + patch_clyps.s cl_slice / cl_mapply /
-| cl_pmark, trkseq worktree), for the standalone. Worker task, after the track's record has landed.
-| In:  d5 = pattern P, d6 = the version word, d7 = kind, a4 = P's live slab; rl_fh open just past
-|      PTRN chunk P; SCRATCH = the SAVED pattern P (its Part link is the Part chunk to read).
-| Out: d0 = 0 the slice has landed; -1 the Part chunk could not be read (no Part byte changed).
-|      rl_fh is closed on every path. Keeps d2-d7/a2-a5.
-|
-| What lands, for track t only (audio 0..7, MIDI 8..15): its slice of the card's WORKING Part (the
-| .strd's PART chunk -- the Part as the project was saved, not its SAVE PART copy), written into the
-| Part P links to NOW, then published for t alone (audio: stock's TRK_APPLY, as its machine edit
-| does; MIDI: rl_mapply, stock's whole-Part apply cut down to one track). A new audio machine also
-| restarts the voice (ENG_RESTART, stock's machine edit) and owes the PICKUP setup (rl_done). Stock's
-| Part-edited mark follows "differs from its SAVE PART copy" (CLYPS §1.8b). The SRAM mirror (Part +
-| edited byte) follows at rlj_setflag: LIVE_REFRESH copies both (0x4000faf0: bank +0x8ed80, 0x62c8 B
-| -> 0x100a4ece; +0x95048 -> 0x100b145e).
-rl_full:
-    lea     -24(%sp),%sp
-    movem.l %d2-%d4/%a2-%a3/%a5,(%sp)
-    moveq   #0,%d3
-    move.l  #SCRATCH+PAT_PART,%a0
-    move.b  (%a0),%d3
-    andi.l  #3,%d3                     | d3 = the Part the SAVED pattern links to
-    bsr.w   rl_rdpart                  | -> SCRATCH = that working Part; the file closed
-    tst.l   %d0
-    bmi.w   rf_out
-|   the Part P links to NOW (a3, index d2), in the playing bank (a5)
+| ================= 2026-11-08 (3): the landing =================
+| rl_put(kind) -- land what the worker staged (RQ_SLAB, RQ_PART) on the target (rl_tbank, rl_tpat).
+| No counters: the caller sets them (rl_tick) or stock re-homes after it (rl_wrap), or nothing plays.
+| Writes RAM only (the slab, the Part, engine state through stock's per-track applies, our state):
+| safe in the sequencer tick, as CLYPS' cl_apply / cl_fullone (stock's whole-Part apply 0x40009094
+| posts a kernel message, so a changed Part link gets it later, from rl_follow).
+|   TRK SEQ   the track's record (+ the pattern's length / scale in NORMAL mode, Session 89)
+|   TRK FULL  + its slice of the Part (CLYPS' cl_slice tables), published for that track alone
+|   PTN       the whole slab (its saved Part link included) + that whole Part, published per track
+|             when sounding (the playing pattern, or one sharing its Part)
+| A new audio machine sets its restart bit (stock's machine edit 0x400973b4) and owes the PICKUP
+| setup (rl_mch). Keeps every register.
+rl_putm:                               | the same, interrupts masked: a task context (the worker,
+    move.l  %d1,-(%sp)                 | the UI tick) while the sequencer may be running
+    move.w  %sr,%d1
+    move.w  %d1,-(%sp)
+    ori.l   #0x0700,%d1
+    move.w  %d1,%sr
+    bsr.b   rl_put
+    move.w  (%sp)+,%d1
+    move.w  %d1,%sr
+    move.l  (%sp)+,%d1
+    rts
+rl_put:
+    lea     -60(%sp),%sp
+    movem.l %d0-%d7/%a0-%a6,(%sp)
+    move.l  %d0,%d7                    | d7 = kind
     moveq   #0,%d0
-    move.b  PLAY_BANK,%d0
+    move.b  rl_tbank,%d0
+    move.l  %d0,%d6                    | d6 = the bank
     move.l  #BANKSTRIDE,%d1
     muls.l  %d1,%d0
     movea.l #BLOB,%a5
-    adda.l  %d0,%a5
+    adda.l  %d0,%a5                    | a5 = the bank
+    moveq   #0,%d5
+    move.b  rl_tpat,%d5                | d5 = the pattern
+    move.l  %d5,%d0
+    move.l  #PATSTRIDE,%d1
+    muls.l  %d1,%d0
+    movea.l %a5,%a4
+    adda.l  %d0,%a4                    | a4 = its live slab
+    cmpi.l  #RQ_PTN,%d7
+    bne.w   rp_trk
+|   ---- the whole pattern ----
+    move.l  #PATSTRIDE,-(%sp)
+    pea     RQ_SLAB
+    move.l  %a4,-(%sp)
+    jsr     FWMEMCPY
+    lea     12(%sp),%sp
+    tst.b   rl_nopart
+    bne.w   rp_out
     movea.l %a4,%a0
     adda.l  #PAT_PART,%a0
     moveq   #0,%d2
     move.b  (%a0),%d2
-    andi.l  #3,%d2
+    andi.l  #3,%d2                     | d2 = its Part (the saved link)
+    bsr.w   rl_partp                   | a3 = that Part
+    bsr.w   rl_sounds                  | d4 = 1: it is sounding (CUR_PART becomes it when playing)
+    tst.l   %d4
+    beq.b   rp_pcopy
+    moveq   #0,%d3                     | machine changes: the voices restart (audio)
+rp_mc:
+    move.b  0x22(%a3,%d3.l),%d0
+    movea.l #RQ_PART,%a0
+    cmp.b   0x22(%a0,%d3.l),%d0
+    beq.b   rp_mn
+    bsr.w   rl_restart                 | d3 = t
+rp_mn:
+    addq.l  #1,%d3
+    cmpi.l  #8,%d3
+    bne.b   rp_mc
+rp_pcopy:
+    move.l  #PARTSZ,-(%sp)
+    pea     RQ_PART
+    move.l  %a3,-(%sp)
+    jsr     FWMEMCPY
+    lea     12(%sp),%sp
+    moveq   #1,%d0
+    move.b  %d0,rl_pfull
+    tst.l   %d4
+    beq.w   rp_out
+    moveq   #0,%d3                     | publish it, track by track
+rp_pub:
+    move.l  %d3,-(%sp)
+    move.l  %d2,-(%sp)
+    move.l  %d6,-(%sp)
+    jsr     TRK_APPLY                  | audio t
+    bsr.w   rl_mapply                  | MIDI m (same arguments)
+    lea     12(%sp),%sp
+    addq.l  #1,%d3
+    cmpi.l  #8,%d3
+    bne.b   rp_pub
+    bra.w   rp_out
+|   ---- one track ----
+rp_trk:
+    moveq   #0,%d3
+    move.b  rl_t,%d3                   | d3 = t 0..15
+    move.l  %d3,%d0
+    bsr.w   rl_toff                    | d0 = offset, d1 = length
+    move.l  %d0,%d4
+    move.l  %d1,-(%sp)
+    move.l  #RQ_SLAB,%d1
+    add.l   %d0,%d1
+    move.l  %d1,-(%sp)
+    move.l  %a4,%d1
+    add.l   %d0,%d1
+    move.l  %d1,-(%sp)
+    jsr     FWMEMCPY                   | the record
+    lea     12(%sp),%sp
+    movea.l #RQ_SLAB,%a0               | Session 93: the trig masks as landed (rl_follow verifies)
+    adda.l  %d4,%a0
+    lea     rl_vsnap,%a1
+    moveq   #16,%d0
+rp_sn:
+    move.b  (%a0)+,(%a1)+
+    subq.l  #1,%d0
+    bne.b   rp_sn
+    move.l  %d4,rl_voff
+    moveq   #1,%d0
+    move.b  %d0,rl_varm
+|   Session 89: NORMAL mode -- the pattern's length / scale come back with the track
+    movea.l %a4,%a0
+    adda.l  #PAT_SMODE,%a0
+    tst.b   (%a0)
+    bne.b   rp_full
+    movea.l %a4,%a0
+    adda.l  #PAT_LEN,%a0
+    move.b  RQ_SLAB+PAT_LEN,%d0
+    move.b  %d0,(%a0)
+    move.b  RQ_SLAB+PAT_SCALE,%d0
+    move.b  %d0,1(%a0)
+    moveq   #0,%d1
+    move.b  ACT_PAT,%d1
+    cmp.l   %d5,%d1
+    bne.b   rp_full                    | not playing: the live master scale is another pattern's
+    cmp.b   SCALE_IX,%d0
+    beq.b   rp_full
+    move.b  %d0,SCALE_IX               | the saved rate genuinely differs -> apply it
+rp_full:
+    cmpi.l  #RQ_TRKFULL,%d7
+    bne.w   rp_out
+    tst.b   rl_nopart
+    bne.w   rp_out
+    movea.l %a4,%a0
+    adda.l  #PAT_PART,%a0
+    moveq   #0,%d2
+    move.b  (%a0),%d2
+    andi.l  #3,%d2                     | d2 = the Part the pattern links to now
+    bsr.w   rl_partp                   | a3 = it
+    bsr.w   rl_sounds                  | d4 = 1: sounding
+    tst.l   %d4
+    beq.b   rp_fcopy
+    cmpi.l  #8,%d3
+    bcc.b   rp_fcopy
+    move.b  0x22(%a3,%d3.l),%d0
+    movea.l #RQ_PART,%a0
+    cmp.b   0x22(%a0,%d3.l),%d0
+    beq.b   rp_fcopy
+    bsr.w   rl_restart
+rp_fcopy:
+    pea     RQ_PART
+    move.l  %a3,-(%sp)
+    move.l  %d3,-(%sp)
+    bsr.w   rl_slice
+    lea     12(%sp),%sp
+    moveq   #1,%d0
+    move.b  %d0,rl_pfull
+    tst.l   %d4
+    beq.b   rp_out
+    move.l  %d3,%d0
+    cmpi.l  #8,%d0
+    bcs.b   rp_ft
+    subq.l  #8,%d0
+rp_ft:
+    move.l  %d0,-(%sp)                 | t / m
+    move.l  %d2,-(%sp)                 | part
+    move.l  %d6,-(%sp)                 | bank
+    cmpi.l  #8,%d3
+    bcc.b   rp_fm
+    jsr     TRK_APPLY
+    bra.b   rp_fp
+rp_fm:
+    bsr.w   rl_mapply
+rp_fp:
+    lea     12(%sp),%sp
+rp_out:
+    moveq   #1,%d0
+    move.b  %d0,rl_post                | the UI half is owed (rl_follow)
+    movem.l (%sp),%d0-%d7/%a0-%a6
+    lea     60(%sp),%sp
+    rts
+
+| rl_partp (a5 = the bank, d2 = Part index) -> a3 = that Part. Uses d0.
+rl_partp:
     move.l  #PARTSZ,%d0
     muls.l  %d2,%d0
     movea.l %a5,%a3
     adda.l  #PART_OFF,%a3
     adda.l  %d0,%a3
+    rts
+| rl_sounds (d5 = pattern, d2 = its Part) -> d4 = 1 when that Part is sounding: the pattern plays
+| (then it becomes the current Part, 0x80000003 -- a changed link owes stock's whole-Part apply,
+| rl_lnk) or it shares the playing pattern's Part. Uses d0.
+rl_sounds:
     moveq   #0,%d4
-    move.b  G_TRK,%d4
-    andi.l  #7,%d4
-    tst.b   G_TMIDI
-    beq.b   rf_aud
-    addq.l  #8,%d4                     | d4 = t 0..15 (MIDI 8..15)
-    bra.b   rf_copy
-rf_aud:
-|   a new machine: restart the voice, as stock's machine edit does (0x400973b4), and owe the PICKUP
-|   setup to rl_done
-    movea.l #SCRATCH,%a0
-    move.b  0x22(%a0,%d4.l),%d0
-    cmp.b   0x22(%a3,%d4.l),%d0
-    beq.b   rf_copy
+    moveq   #0,%d0
+    move.b  ACT_PAT,%d0
+    cmp.l   %d5,%d0
+    bne.b   rs2_sh
+    move.b  rl_tbank,%d0
+    cmp.b   PLAY_BANK,%d0
+    bne.b   rs2_out
+    moveq   #1,%d4
+    move.b  CUR_PART,%d0
+    cmp.b   %d2,%d0
+    beq.b   rs2_out
+    move.b  %d2,CUR_PART
     moveq   #1,%d0
-    lsl.l   %d4,%d0
+    move.b  %d0,rl_lnk
+    rts
+rs2_sh:
+    move.b  rl_tbank,%d0
+    cmp.b   PLAY_BANK,%d0
+    bne.b   rs2_out
+    move.b  CUR_PART,%d0
+    cmp.b   %d2,%d0
+    bne.b   rs2_out
+    moveq   #1,%d4
+rs2_out:
+    rts
+| rl_restart (d3 = audio track): its voice restarts on a new machine (stock's machine edit,
+| 0x400973b4); the PICKUP setup is owed (rl_mch). Uses d0-d1.
+rl_restart:
+    moveq   #1,%d0
+    lsl.l   %d3,%d0
     move.b  ENG_RESTART,%d1
     or.l    %d1,%d0
     move.b  %d0,ENG_RESTART
     moveq   #1,%d0
     move.b  %d0,rl_mch
-rf_copy:
-    pea     SCRATCH
-    move.l  %a3,-(%sp)
-    move.l  %d4,-(%sp)
-    bsr.w   rl_slice
-    lea     12(%sp),%sp
-    move.l  %d4,%d0                    | publish it: this track only
+    rts
+| rl_toff (d0 = t 0..15) -> d0 = the record's offset in a slab, d1 = its length
+rl_toff:
     cmpi.l  #8,%d0
-    bcs.b   rf_t
+    bcc.b   to2_m
+    move.l  #TRAC_A,%d1
+    muls.l  %d1,%d0
+    rts
+to2_m:
     subq.l  #8,%d0
-rf_t:
-    move.l  %d0,-(%sp)                 | t / m
-    move.l  %d2,-(%sp)                 | part
+    move.l  #TRAC_M,%d1
+    muls.l  %d1,%d0
+    addi.l  #MIDI_BASE,%d0
+    rts
+| rl_tps (d0 = scale index) -> d0 = ticks per step (stock's table; out of range reads as 1x, as
+| DIRECT JUMP and CLYPS do). Uses a0.
+rl_tps:
+    cmpi.l  #6,%d0
+    bls.b   tp2_ok
+    moveq   #2,%d0
+tp2_ok:
+    lea     LEN_TBL,%a0
+    move.l  (%a0,%d0.l*4),%d0
+    rts
+| rl_rate (a0 = a slab, d0 = t) -> d0 = ticks per step, d1 = length, d2 = scale index that track
+| plays at from that slab: PER TRACK the record's own (audio +0x50/+0x51, MIDI +0x28/+0x29), NORMAL
+| the pattern's (+0x8e53 / +0x8e54). A zero length reads as 16 (never divide by it). Uses a0-a1.
+rl_rate:
+    movea.l %a0,%a1
+    adda.l  #PAT_LEN,%a1
+    tst.b   PAT_SMODE-PAT_LEN(%a1)
+    bne.b   rr2_pt
+    moveq   #0,%d1
+    move.b  (%a1),%d1
+    moveq   #0,%d2
+    move.b  1(%a1),%d2
+    bra.b   rr2_t
+rr2_pt:
+    move.l  %d3,-(%sp)
+    move.l  %d0,%d3
+    bsr.w   rl_toff                    | d0 = offset
+    movea.l %a0,%a1
+    adda.l  %d0,%a1
+    moveq   #0x50,%d0
+    cmpi.l  #8,%d3
+    bcs.b   rr2_a
+    moveq   #0x28,%d0
+rr2_a:
+    moveq   #0,%d1
+    move.b  (%a1,%d0.l),%d1
+    moveq   #0,%d2
+    move.b  1(%a1,%d0.l),%d2
+    move.l  (%sp)+,%d3
+rr2_t:
+    tst.l   %d1
+    bne.b   rr2_l
+    moveq   #16,%d1
+rr2_l:
+    move.l  %d2,%d0
+    bra.w   rl_tps
+
+| ================= rl_tick: phase D of the sequencer tick, 0x400a2530 =================
+| Replaces `tst.l 0x46c8028a` (6 B; stock's beq.w follows on its flags, so the replay comes LAST).
+| Every path of phase D converges here -- the tick gate's skip (0x400a1f6e), DIRECT JUMP's landing
+| countdown (0x400a1f72, DIRECT JUMP KYOTI's site) and the count-in -- before the per-track
+| scheduler (phase E, 0x400a2982): CLYPS' landing point (scope §3.4), one site later. Slices that
+| are not a tick (0x46107568 != 0) pass straight through.
+| The rule is CLYPS' (measured on the A4..A8 oracles): t0 = (MASTER_STEP - 1) * tps_M + TICK_CTR;
+| a track lands on the first tick that starts a step of its old AND its new rate, and then plays
+| phase-continuous: STEP = (t0 / tps + 1) mod len, STEP-1, TICKS = t0 mod tps, its scale cache.
+| A pattern lands all 16 tracks on the first such tick they share. A landing that changes the
+| pattern's own length / scale waits for rl_wrap -- unless the master never wraps (INF length).
+    .global rl_tick
+rl_tick:
+    tst.b   rl_arm
+    beq.w   rt3_out                    | nothing armed: one byte test per tick
+    tst.l   TICK_GATE
+    bne.w   rt3_out
+    tst.l   RUNNING
+    beq.w   rt3_out                    | stopped: the UI tick lands it
+    lea     -60(%sp),%sp
+    movem.l %d0-%d7/%a0-%a6,(%sp)
     moveq   #0,%d0
-    move.b  PLAY_BANK,%d0
-    move.l  %d0,-(%sp)                 | bank
-    cmpi.l  #8,%d4
-    bcc.b   rf_m
-    jsr     TRK_APPLY
-    bra.b   rf_pub
-rf_m:
-    bsr.w   rl_mapply
-rf_pub:
-    lea     12(%sp),%sp
-    bsr.w   rl_pmark
-    moveq   #1,%d0
-    move.b  %d0,rl_pfull               | rl_done: the UI half
+    move.b  rl_arm,%d0
+    movea.l %d0,%a4                    | a4 = the kind armed
+    move.b  rl_tpat,%d0
+    cmp.b   ACT_PAT,%d0
+    bne.w   rt3_off
+    move.b  rl_tbank,%d0
+    cmp.b   PLAY_BANK,%d0
+    bne.w   rt3_off
+    tst.b   rl_wcls
+    beq.b   rt3_go
+    move.w  RQ_SLAB+PAT_MLEN,%d0       | the master length as saved; 0xffff (INF) never wraps
+    cmpi.w  #-1,%d0
+    bne.w   rt3_done
+rt3_go:
     moveq   #0,%d0
-rf_out:
-    movem.l (%sp),%d2-%d4/%a2-%a3/%a5
-    lea     24(%sp),%sp
+    move.b  SCALE_IX,%d0
+    bsr.w   rl_tps
+    move.l  %d0,%d5                    | d5 = tps_M
+    moveq   #0,%d3
+    move.w  MASTER_STEP,%d3
+    tst.l   %d3
+    beq.w   rt3_done                   | no master step yet (transport start)
+    moveq   #0,%d1
+    move.b  TICK_CTR,%d1
+    move.l  %d3,%d0
+    subq.l  #1,%d0
+    muls.l  %d5,%d0
+    add.l   %d1,%d0
+    move.l  %d0,%d7                    | d7 = t0
+    beq.w   rt3_done                   | the master's first tick: rl_wrap has landed it
+|   every landing track must start a step at t0, at its old rate and at its new one
+    bsr.w   rl_tset                    | d4 = first track, d6 = one past the last
+rt3_chk:
+    lea     TSCALE_ARR,%a0
+    moveq   #0,%d0
+    move.b  (%a0,%d4.l),%d0
+    bsr.w   rl_tps
+    move.l  %d7,%d1
+    remu.l  %d0,%d2:%d1
+    tst.l   %d2
+    bne.w   rt3_done                   | its old step not at its start: wait
+    movea.l #RQ_SLAB,%a0
+    move.l  %d4,%d0
+    bsr.w   rl_rate                    | the new rate
+    move.l  %d7,%d1
+    remu.l  %d0,%d2:%d1
+    tst.l   %d2
+    bne.w   rt3_done
+    addq.l  #1,%d4
+    cmp.l   %d6,%d4
+    bne.b   rt3_chk
+|   land, then every landed track's counters, phase-continuous
+    move.l  %a4,%d0
+    clr.b   rl_arm
+    bsr.w   rl_put
+    tst.b   rl_wcls
+    beq.b   rt3_ctr
+    bsr.w   rl_scales                  | INF master: the scale caches follow at once
+    clr.b   rl_wcls
+rt3_ctr:
+    bsr.w   rl_tset
+rt3_cl:
+    movea.l #RQ_SLAB,%a0
+    move.l  %d4,%d0
+    bsr.w   rl_rate                    | d0 = tps, d1 = len, d2 = scale
+    move.l  %d2,%d3                    | d3 = its scale
+    move.l  %d0,%d5                    | d5 = its tps
+    move.l  %d7,%d0
+    divu.l  %d5,%d0                    | t0 / tps
+    addq.l  #1,%d0
+    remu.l  %d1,%d2:%d0                | d2 = STEP = (t0 / tps + 1) mod len
+    lea     STEP_ARR,%a0
+    move.b  %d2,(%a0,%d4.l)
+    add.l   %d1,%d2
+    subq.l  #1,%d2
+    remu.l  %d1,%d0:%d2                | d0 = (STEP + len - 1) mod len
+    lea     STEPM1_ARR,%a0
+    move.b  %d0,(%a0,%d4.l)
+    move.l  %d7,%d0
+    remu.l  %d5,%d2:%d0                | d2 = t0 mod tps (0 at a step start)
+    lea     TICKS_ARR,%a0
+    move.b  %d2,(%a0,%d4.l)
+    lea     TSCALE_ARR,%a0
+    move.b  %d3,(%a0,%d4.l)
+    addq.l  #1,%d4
+    cmp.l   %d6,%d4
+    bne.b   rt3_cl
+    bra.b   rt3_done
+rt3_off:
+|   the target no longer plays (a pattern change, a DIRECT JUMP): no phase to keep, land it now
+    move.l  %a4,%d0
+    clr.b   rl_arm
+    bsr.w   rl_put
+rt3_done:
+    movem.l (%sp),%d0-%d7/%a0-%a6
+    lea     60(%sp),%sp
+rt3_out:
+    tst.l   RELOAD_NOW                 | displaced; stock's beq.w follows on these flags
+    jmp     TICK_RES
+
+| rl_tset (a4 = the kind) -> d4 = the first landing track, d6 = one past the last (a pattern: 16)
+rl_tset:
+    moveq   #0,%d4
+    moveq   #16,%d6
+    cmpa.l  #RQ_PTN,%a4
+    beq.b   ts2_o
+    move.b  rl_t,%d4
+    move.l  %d4,%d6
+    addq.l  #1,%d6
+ts2_o:
     rts
 
-| ================= 2026-11-08 (2): [PTN] + [BANK] + trig N -- pattern N from the card =================
-| CLYPS' pattern reload (clyps_reload.s rj_ptn), worker task. In: d5 = N (playing bank), d6 = the
-| version word, a4 = N's live slab; rl_fh open just past PTRN chunk N, SCRATCH = the saved N.
-| The whole slab lands (sequences, length / scale / mode, and the SAVED Part link), then the whole
-| working Part it links to, from the card. That Part is applied (stock's whole-Part apply
-| 0x40009094, as the old PART + PTN SEQ did) when it is sounding: N is the playing pattern (its Part
-| becomes the current one, 0x80000003) or N shares the playing pattern's Part. Its edited mark
-| follows its SAVE PART copy. rl_done then sends the OT to N (rl_ptngo) -- running: at the pattern
-| end / CHAIN AFTER (DIRECT JUMP on: its landing point); stopped: at once.
-| -> d0 = 0, or -1 when the Part chunk could not be read (the slab has landed). Keeps d2-d7/a2-a6.
-rl_ptnjob:
+| rl_scales: the master scale cache and every track's scale cache from the target's live slab, after
+| a landing that changed the pattern's own rate (at a wrap, before stock re-homes every track; or an
+| INF master): NORMAL the pattern's scale, PER TRACK the master scale and each record's own.
+| Keeps every register.
+rl_scales:
     lea     -24(%sp),%sp
-    movem.l %d2-%d4/%a2-%a3/%a5,(%sp)
-|   the bytes the bank file never holds keep their live values (stock parses into the live slab):
-|   each audio record's +0x899 and the slab tail +0x8e5c.. (CLYPS gate X)
-    movea.l #SCRATCH,%a0
-    move.l  #0x899,%d0
-rp_ns:
-    move.b  (%a4,%d0.l),%d1
-    move.b  %d1,(%a0,%d0.l)
-    addi.l  #TRAC_A,%d0
-    cmpi.l  #8*TRAC_A,%d0
-    bcs.b   rp_ns
-    move.l  #0x8e5c,%d0
-rp_nt:
-    move.b  (%a4,%d0.l),%d1
-    move.b  %d1,(%a0,%d0.l)
-    addq.l  #1,%d0
-    cmpi.l  #PATSTRIDE,%d0
-    bcs.b   rp_nt
-    move.l  #PATSTRIDE,-(%sp)
-    pea     SCRATCH
-    move.l  %a4,-(%sp)
-    jsr     FWMEMCPY                   | the whole slab, its saved Part link included
-    lea     12(%sp),%sp
-    movea.l %a4,%a0
-    adda.l  #PAT_PART,%a0
-    moveq   #0,%d3
-    move.b  (%a0),%d3
-    andi.l  #3,%d3                     | d3 = its (saved) Part
-    move.l  %d3,%d2
+    movem.l %d0-%d4/%a2,(%sp)
     moveq   #0,%d0
-    move.b  PLAY_BANK,%d0
+    move.b  rl_tbank,%d0
     move.l  #BANKSTRIDE,%d1
     muls.l  %d1,%d0
-    movea.l #BLOB,%a5
-    adda.l  %d0,%a5                    | a5 = the bank
-    move.l  #PARTSZ,%d0
-    muls.l  %d3,%d0
-    movea.l %a5,%a3
-    adda.l  #PART_OFF,%a3
-    adda.l  %d0,%a3                    | a3 = that Part
-|   the playing pattern: the live master scale cache, as the track reload does (Session 89)
+    movea.l #BLOB,%a2
+    adda.l  %d0,%a2
     moveq   #0,%d0
-    move.b  ACT_PAT,%d0
-    cmp.l   %d5,%d0
-    bne.b   rp_rd
-    movea.l %a4,%a0
+    move.b  rl_tpat,%d0
+    move.l  #PATSTRIDE,%d1
+    muls.l  %d1,%d0
+    adda.l  %d0,%a2                    | a2 = the live slab
+    movea.l %a2,%a0
     adda.l  #PAT_SCALE,%a0
-    movea.l %a4,%a1
+    movea.l %a2,%a1
     adda.l  #PAT_SMODE,%a1
     tst.b   (%a1)
-    beq.b   rp_sc
-    movea.l %a4,%a0
-    adda.l  #PAT_MSCALE,%a0            | PER TRACK: the master scale
-rp_sc:
+    beq.b   sc2_m
+    movea.l %a2,%a0
+    adda.l  #PAT_MSCALE,%a0
+sc2_m:
     move.b  (%a0),%d0
-    cmp.b   SCALE_IX,%d0
-    beq.b   rp_rd
     move.b  %d0,SCALE_IX
-rp_rd:
-    bsr.w   rl_rdpart                  | SCRATCH = that working Part; the file closed
-    tst.l   %d0
-    bmi.b   rp_go
-    move.l  #PARTSZ,-(%sp)
-    pea     SCRATCH
-    move.l  %a3,-(%sp)
-    jsr     FWMEMCPY
-    lea     12(%sp),%sp
-    moveq   #0,%d0
-    move.b  ACT_PAT,%d0
-    cmp.l   %d5,%d0
-    bne.b   rp_share
-    move.b  %d3,CUR_PART               | the playing pattern: its Part is the sounding one now
-    bra.b   rp_apply
-rp_share:
-    moveq   #0,%d0
-    move.b  CUR_PART,%d0
-    cmp.l   %d3,%d0
-    bne.b   rp_mark                    | another Part than the sounding one: nothing to apply
-rp_apply:
-    move.l  %d3,-(%sp)
-    moveq   #0,%d0
-    move.b  PLAY_BANK,%d0
-    move.l  %d0,-(%sp)
-    jsr     PARTAPPLY                  | FUN_40009094(bank, part)
-    addq.l  #8,%sp
-    moveq   #1,%d0
-    move.b  %d0,rl_pfull               | rl_done: the page redraw
-rp_mark:
-    bsr.w   rl_pmark
-    moveq   #0,%d0
-rp_go:
-    move.l  %d5,%d1
-    ori.l   #0x80,%d1
-    move.b  %d1,rl_ptngo               | rl_done: the OT goes to N
-    movem.l (%sp),%d2-%d4/%a2-%a3/%a5
+    moveq   #0,%d4
+sc2_l:
+    movea.l %a2,%a0
+    move.l  %d4,%d0
+    bsr.w   rl_rate
+    lea     TSCALE_ARR,%a0
+    move.b  %d2,(%a0,%d4.l)
+    addq.l  #1,%d4
+    cmpi.l  #16,%d4
+    bne.b   sc2_l
+    movem.l (%sp),%d0-%d4/%a2
     lea     24(%sp),%sp
     rts
 
+| ================= rl_wrap: the wrap body's entry, 0x400a43a0 =================
+| Replaces `move.l (%a2),%d0 ; moveq #1,%d2 ; or.l %d2,%d0` (6 B). Phase G at a master wrap, and when
+| a stock pattern change lands. CLYPS' measured rule (A1/A2 oracles): a copy HERE equals a stock
+| change, because the wrap body re-homes every track right after; phase D of the next tick is one
+| tick too late. So whatever is armed lands here -- a pattern change about to land, or a target
+| that no longer plays: no phase, just the data -- with the scale caches set before the re-home.
+    .global rl_wrap
+rl_wrap:
+    tst.b   rl_arm
+    beq.b   rw2_out
+    lea     -60(%sp),%sp
+    movem.l %d0-%d7/%a0-%a6,(%sp)
+    moveq   #0,%d0
+    move.b  rl_arm,%d0
+    clr.b   rl_arm
+    move.b  PEND_PAT,%d1
+    cmp.b   ACT_PAT,%d1
+    bne.b   rw2_off
+    move.b  PEND_BANK,%d1
+    cmp.b   PLAY_BANK,%d1
+    bne.b   rw2_off
+    move.b  rl_tpat,%d1
+    cmp.b   ACT_PAT,%d1
+    bne.b   rw2_off
+    move.b  rl_tbank,%d1
+    cmp.b   PLAY_BANK,%d1
+    bne.b   rw2_off
+    bsr.w   rl_put
+    bsr.w   rl_scales
+    clr.b   rl_wcls
+    bra.b   rw2_done
+rw2_off:
+    bsr.w   rl_put
+rw2_done:
+    movem.l (%sp),%d0-%d7/%a0-%a6
+    lea     60(%sp),%sp
+rw2_out:
+    move.l  (%a2),%d0                  | displaced
+    moveq   #1,%d2                     | displaced
+    or.l    %d2,%d0                    | displaced
+    jmp     WRAP_RES
+
+| ================= rl_uitick: the UI task's 1/60 s tick, 0x40056c28 =================
+| Replaces `move.l 0x460d1e6c,%d0` (6 B, the toast countdown read; stock's beq follows on its flags).
+| UI context (task 0x40056c40, once per tick message -- CLYPS' cl_uitick). A landing still armed
+| with the transport stopped lands here (nothing plays); a landing the tick made gets its UI half.
+    .global rl_uitick
+rl_uitick:
+    tst.b   rl_arm
+    beq.b   ru2_post
+    tst.l   RUNNING
+    bne.b   ru2_post
+    moveq   #0,%d0
+    move.b  rl_arm,%d0
+    clr.b   rl_arm
+    bsr.w   rl_putm
+ru2_post:
+    tst.b   rl_post
+    beq.b   ru2_out
+    bsr.w   rl_follow
+ru2_out:
+    move.l  TOAST_CD,%d0               | displaced; stock's beq follows on these flags
+    jmp     UITICK_RES
+
 | rl_rdpart (d3 = the working Part to read, d6 = the version word; rl_fh open): that PART chunk ->
-| SCRATCH -- a direct seek, else the file again chunk by chunk. rl_fh is closed on every path.
+| RQ_PART -- a direct seek, else the file again chunk by chunk. rl_fh is closed on every path.
 | -> d0 = 0 read, -1 not. Keeps d2-d7/a2-a6.
 rl_rdpart:
     move.l  %d4,-(%sp)
@@ -2275,11 +2571,11 @@ pm_dirty:
     move.l  (%sp)+,%a2
     rts
 
-| rf_parse (d0 = Part index): PARSEPRT(rl_fh, SCRATCH, d0, d6) -> d0 < 0: failed
+| rf_parse (d0 = Part index): PARSEPRT(rl_fh, RQ_PART, d0, d6) -> d0 < 0: failed
 rf_parse:
     move.l  %d6,-(%sp)
     move.l  %d0,-(%sp)
-    pea     SCRATCH
+    pea     RQ_PART
     pea     rl_fh
     jsr     PARSEPRT
     lea     16(%sp),%sp
@@ -2531,7 +2827,31 @@ rl_pfull:
 rl_mch:
     .space 1
 rl_ptngo:
-    .space 1                           | 0x80 | N: rl_done sends the OT to pattern N
+    .space 1                           | 0x80 | N: rl_follow sends the OT to pattern N
+|   2026-11-08 (3): the landing
+rl_arm:
+    .space 1                           | 3 / 4 / 5: a staged reload waits for its tick
+rl_wcls:
+    .space 1                           | 1: it changes the pattern's own rate -- the master wrap lands it
+rl_post:
+    .space 1                           | 1: it has landed, the UI half is owed (rl_follow)
+rl_busy:
+    .space 1                           | 1: a request is in flight (one at a time: the data is staged)
+rl_tbank:
+    .space 1                           | the target: bank,
+rl_tpat:
+    .space 1                           | pattern,
+rl_t:
+    .space 1                           | track 0..15 (track reloads)
+rl_nopart:
+    .space 1                           | 1: the Part chunk was not read (the sequence still lands)
+rl_lnk:
+    .space 1                           | 1: the playing pattern's Part link changed (stock's apply owed)
+    .align 4
+RQ_SLAB:
+    .space PATSTRIDE                   | the saved pattern, as staged by the worker
+RQ_PART:
+    .space PARTSZ+2                    | the saved working Part it links to
     .align 2
 rl_cksum:
     .space 4

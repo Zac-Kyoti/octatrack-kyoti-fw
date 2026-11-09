@@ -37832,3 +37832,42 @@ Now 936 / 932 (<= 945): the pair fits, SC's donor becomes PLATE REV.
   `73f127a9…` (OS VERSION `140C_RLSL2`, 4124 B unit); BUG_RL3 mainos `f9c12a45…`, syx `9079b2e7…`; KYOTI V1.7 mainos
   `94b3f362…`, syx `42a4bc78…` (2 arena pages, unchanged). build_reload_from_project.py and build_kyoti.py's B2 now
   require the [PTN] handler to be stock or exactly RELOAD's jmp. octabam REFERENCE `6e2e80f4…`, 8 detours.
+
+## 2026-11-08 cont. (2) (`reload-slice`) — RELOAD_FROM_PROJECT: card reloads land quantized, like Clyps' temp reload (WIP, NOT flashed)
+
+- **The user's ask:** card reloads (track SEQ, track FULL, the pattern you are on) should land like Clyps' temp
+  reload -- the track's next step start, in phase -- with the Part slice in the same tick (coupled), and a pattern
+  on the next step all its tracks share. Decided: standalone RELOAD moves to DRAM (staging RAM); a reload that
+  changes the pattern's own length / scale waits for the master wrap. Clyps gets the same next (not yet done).
+- **Measured / decided sites (all free in our builds and in octabam):** phase D `0x400a2530` (`tst.l 0x46c8028a`,
+  6 B; every phase-D path meets there -- the tick gate's skip `0x400a1f6e`, DJK's `0x400a1f72`, the count-in -- before
+  phase E `0x400a2982`; non-tick slices pass on the gate `0x46107568`); the wrap body `0x400a43a0` (Clyps' A1/A2
+  oracles: a copy there equals a stock change, phase D of the next tick is one tick late); the UI task's 1/60 s tick
+  `0x40056c28` (Clyps' cl_uitick; route A runs no UI tick, gates call it). DJK owns `0x400a1f72`; octabam has no
+  HOOKS bridge for it; KITS owns the [PTN]-layer trig, Tim's DIRECT JUMP only `0x400a06d6` / `0x400a44e2`.
+  No RTOS sleep primitive exists, so the worker cannot hold the storage task until the landing: staging RAM.
+- **Design:** the worker stages the saved slab (`RQ_SLAB`) and, for FULL / PTN, the working Part chunk (`RQ_PART`,
+  `rl_rdpart` parses into it) -- 43 KB in the unit, so the unit is 48,224 B (9 arena pages standalone). Stopped or the
+  target not playing: `rl_put` lands at once (interrupts masked). Playing: `rl_arm`; `rl_tick` lands it on the first
+  tick that is a step start of every landing track's old and new rate (Clyps' rule, t0 = (MASTER_STEP-1)*tps_M +
+  TICK_CTR), then STEP / STEP-1 / TICKS / scale cache phase-continuous; `rl_wrap` lands anything armed at a master
+  wrap (a stock change or a target that no longer plays: data only) and the wrap-class (`rl_wcls`: a pattern whose
+  trailer +0x8e50..55 differs, or a NORMAL track reload whose pattern length / scale differ), with the master and
+  per-track scale caches set before stock's re-home (`rl_scales`); an INF master never wraps, so it lands in the tick.
+  The slice / Part go to the engine in the landing tick, per track (`TRK_APPLY` x8 + `rl_mapply` x8): stock's
+  whole-Part apply `0x40009094` posts a kernel message (`0x40000c3c`), so it runs only from the UI half, and only when
+  the playing pattern's Part link changed (`rl_lnk`). `rl_follow` (doneFn or the UI tick) does the UI half after the
+  landing: verify, toast, edited mark, SRAM mirror (LIVE_REFRESH moved here), PICKUP + redraw, the pattern switch.
+  One reload at a time (`rl_busy`, cleared by rl_follow or a failed job).
+- **Emulator** (`tools/diag_reload_quant.py`, new; OT DEMO, transport RUNNING, the UI tick driven): track SEQ lands
+  in phase D at a step start (master step 7 tick 0, t0 36), T1's counters exactly stock's (7 -> 7, ticks 0 -> 0), the
+  UI half after it; FULL publishes the slice in the same tick (TRK_APPLY x1); the playing pattern lands all 16 tracks
+  in one tick with TRK_APPLY x8, 29,616 instructions in that tick (Clyps' ORIG PTN+PRT: ~17 K); the master length
+  edited + a pattern reload lands in rl_wrap and brings 64 back; stopped: at once. ALL PASS (standalone; the KYOTI run passed every landing, its one FAIL was the gate's stale wrap flag, fixed). Same on the KYOTI
+  image (RELOAD linked first in its DRAM image, same addresses). `diag_reload_full.py` (JAM2 MIDI) and
+  `diag_reload_ptn.py` (stopped path; its apply count now TRK_APPLY) PASS. Not covered: a NORMAL-mode pattern, real
+  audio timing (route A), a reload armed across a DIRECT JUMP landing.
+- **Builds (WIP, NOT flashed; supersede 140C_RLSL2):** standalone mainos `613f83bb…`, syx `90c64dfd…` (`140C_RLQ1`,
+  DRAM 9 pages); BUG_RL3 mainos `4cec9f74…`, syx `1393bba9…` (bug fixes back in the ROM cave, 5,324 B free); KYOTI
+  V1.7 mainos `b6d11be7…`, syx `3a8f702b…` (DRAM 10 pages = 60 KB, MEMORY page still 85.5 MB). octabam REFERENCE
+  `fc43e76c…` (48,224 B), 11 detours.
