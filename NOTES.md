@@ -37927,3 +37927,7 @@ Now 936 / 932 (<= 945): the pair fits, SC's donor becomes PLATE REV.
   `86ec750b…`, same mainos), `BUG_RL3` mainos `cd480be6…` (syx `ebea05b5…`), KYOTI V1.7 mainos `ee151d9c…` (syx
   `dd21ef01…`). octabam REFERENCE `62953b35…` (50,044 B). The BLACKPYRAMIDS_303 / VARISPEED Bugbuilds were not
   rebuilt here (the BP DSP assembler lives in its own worktree); their pins are unchanged.
+- **octabam:** pin PR sambanks/octabam#1079 (fork branch `kyoti-reload-card-27ab725`, `23257ee6`, base `1adbd491`):
+  upstream `6a2da8d` → `27ab725`, eleven detours, FREE LOOP declared a conflict in octabam's wrapper (its
+  `fl_ui_stub` detours the same `0x40056c28`), usage page rewritten. Gates green (verify-docs, test/reload-from-project,
+  octabam-bus, octabam, test/mods, reach); test remix mainos `ec12c327…`. This octabam form is not flashed.
