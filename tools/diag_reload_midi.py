@@ -29,7 +29,8 @@ def main(argv):
     ap.add_argument("--project", required=True, type=lambda p: str(pathlib.Path(p).expanduser().resolve()))
     ap.add_argument("--name", required=True)
     ap.add_argument("--chord", choices=("ptn", "bank"), default="ptn",
-                    help="ptn: [PTN]+[TRACK 2] (sequence); bank: [BANK]+[TRACK 2] (sequence + the saved Part)")
+                    help="ptn: [PTN]+[TRACK 2] (sequence); bank: [BANK]+[TRACK 2] (sequence + M2's Part slice, "
+                         "2026-11-08; tools/diag_reload_full.py checks the slice itself)")
     a = ap.parse_args(argv)
     os.chdir(OCTABAM)
     sys.path.insert(0, str(OCTABAM / "tools"))
@@ -83,8 +84,8 @@ def main(argv):
     print(f"stock Part reload 0x4004aab4 called {len(calls)}x, part args {calls}; "
           f"the playing pattern's Part (0x80000003) = {rd(0x80000003, 1)}")
     if a.chord == "bank":
-        ok_p = calls == [rd(0x80000003, 1)]
-        print(f"  {'ok  ' if ok_p else 'FAIL'} [BANK]+[TRACK]: the Part reload ran once, for the playing pattern's Part")
+        ok_p = calls == []              # 2026-11-08: the track's slice from the card, never stock's whole-Part reload
+        print(f"  {'ok  ' if ok_p else 'FAIL'} [BANK]+[TRACK]: stock's whole-Part reload never ran")
         ok_t = ok_t and ok_p
     print(f"  {'ok  ' if ok_m else 'FAIL'} the MIDI track M2 was reloaded from the saved bank (.strd)")
     print(f"  {'ok  ' if ok_t else 'FAIL'} the audio track T2 was left alone")

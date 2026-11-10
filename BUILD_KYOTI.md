@@ -78,7 +78,9 @@ python3 tools/build_kyoti.py
 It writes `out/KYOTI/OCTATRACK_OS1.40C_KYOTI_V1.7.syx` and `.bin` (OS VERSION `KYOTI V1.7`).
 
 > **Sample memory.** RELOAD_FROM_PROJECT runs from DRAM in V1.5–V1.7, as in V1.2–V1.3, and DIRECT JUMP
-> joins it in V1.7: two 6 KB pages (12 KB) of the 85.5 MB pool. An octabam-built image (octabam's own remixer) reserves a fixed
+> joins it in V1.7: since 2026-11-09 eleven 6 KB pages (66 KB) of the 85.5 MB pool -- RELOAD holds a reloaded
+> pattern and its Part until the step it lands on (it was two pages, 12 KB). The standalone RELOAD image
+> runs from DRAM too (11 pages). An octabam-built image (octabam's own remixer) reserves a fixed
 > **10 MiB** whenever any module runs from DRAM.
 
 KYOTI V1.0 was withdrawn on 2026-10-06; V1.1 replaced it, V1.2 (with an earlier varispeed module) replaced V1.1,

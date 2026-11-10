@@ -220,14 +220,20 @@ uses it loads it as NONE.
 
 ### RELOAD_FROM_PROJECT
 
-Reload one track's sequence from the CF card **without stopping the transport**:
+Reload a track, or a whole pattern, from the CF card **without stopping the transport**:
 
-- **`[PTN]` + `[TRACK n]`** — reload that track's card-saved sequence, Part untouched
-- **`[BANK]` + `[TRACK n]`** — the same, and re-apply the saved Part
+- **`[PTN]` + `[TRACK n]`** — that track's sequence as the project was saved
+- **`[BANK]` + `[TRACK n]`** — the same, plus that track's machine, FX, pages, scene locks and
+  LFO designer; every other track is left alone
+- **`[PTN]` + `[BANK]` + trig** — that pattern of the playing bank, all its tracks and its Part.
+  The pattern you are on reloads in place; another pattern is a pattern change, so it comes in
+  at CHAIN AFTER or the pattern end (DIRECT JUMP's next step when it is on)
 
-`[CUE]` + `[TRACK n]` stays stock. It reloads the pattern that is playing, on an audio or a MIDI track, and never restarts
-the sequence or the metronome. A toast confirms when the reload has finished, and says
-so if the trigs did not land.
+While playing, a reload lands on the track's next step, in time with everything else (a whole
+pattern: on the next step its tracks share). A saved length or scale comes back the same way, with
+every track carried on where the saved pattern would be. Several reloads in a row all count; the
+latest one for a track wins. Stopped, a reload applies at once. A toast confirms each reload as it
+lands. `[CUE]` + `[TRACK n]` stays stock.
 
 **Hardware:** confirmed.\
 **Final build:** [`tools/build_reload_from_project.py`](tools/build_reload_from_project.py) →

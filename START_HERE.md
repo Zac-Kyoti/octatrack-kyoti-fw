@@ -157,6 +157,18 @@ are lowercase-hyphen, because octabam requires a module's name to equal its fold
 
 > Check this against the tree before trusting it; it has gone stale before.
 
+- **RELOAD_FROM_PROJECT — FINAL 2026-11-09: card reloads as Clyps (Part slice, pattern reload, quantized landing).**
+  - `[BANK]` + `[TRACK n]` = the track's sequence + its Part slice from the card; `[PTN]` + `[BANK]` + trig = the
+    whole pattern. Running, reloads land on the track's next step (the pattern you are on: the next shared step),
+    length / scale changes re-phase, several chords all count; the Part settings reach the engine with the first
+    new step. Another pattern is a stock cue (CHAIN AFTER / DIRECT JUMP).
+  - Confirmed on the author's MKI with KYOTI V1.7 (syx `dd21ef01…`), 2026-11-09: everything in FLASHING §4's
+    walk-through, including the Part change on the new step, no click on `[PTN]` + `[BANK]` + trig, and the cue cancel.
+  - Pins: standalone mainos `22a6a9ff…` (syx `7a8b53d4…`, `140C_KYOTI`), `BUG_RL3` mainos `cd480be6…` (syx
+    `ebea05b5…`), KYOTI V1.7 mainos `ee151d9c…` (syx `dd21ef01…`). The unit is in DRAM, 50,044 B, 11 pages.
+  - Gates: `tools/diag_reload_full.py`, `_ptn.py`, `_quant.py`, `_wrap.py`, `_midi.py`, `_oracle.py`.
+  - octabam: pin PR sambanks/octabam#1079 (`27ab725`, octabam form emulator only; FREE LOOP declared a conflict, both detour `0x40056c28`); waiting on Sam. KITS not run together.
+  - Next: the same in Clyps (memory: ot-clyps-scope "CLYPS TO-DO"; the Clyps session in `trkseq`).
 - **The stock DELAY's coefficient table (`0x400d24d0..0x400d2ce0`, midisc's "SAFE_CAVE") is not free** —
   **KYOTI V1.7 FINAL 2026-11-02** (flashed: all tests pass, DELAY repeats as stock). V1.1–V1.6 and BUG_VEM10 kept
   code there and darkened DELAY repeats. `seal()` refuses any image that changes the range (every builder);

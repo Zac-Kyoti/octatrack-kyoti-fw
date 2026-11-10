@@ -157,10 +157,67 @@ quick check for each:
   `[TRACK n]` while playing: the saved trigs come back without the transport stopping.
   **MIDI tracks (fix of 2026-10-25):** in a pattern, give MIDI track 2 and audio track 2 a few
   trigs each, SAVE the project, then change both tracks' trigs (unsaved). On the MIDI tracks
-  (`[MIDI]`), `[PTN]` + `[TRACK 2]` → `TRK SEQ RELOADED`: M2 is back to its saved trigs, and
-  audio T2 (back on the audio side) still has your unsaved change. Same with `[BANK]` +
-  `[TRACK 2]` (sequence + the saved Part; change a MIDI track setting after saving the Part to
-  see the Part come back). On the audio side `[PTN]` + `[TRACK 2]` still reloads T2 only.
+  (`[MIDI]`), `[PTN]` + `[TRACK 2]` → `TRK SEQ` / `RELOADED FROM PROJ`: M2 is back to its saved
+  trigs, and audio T2 (back on the audio side) still has your unsaved change. On the audio side
+  `[PTN]` + `[TRACK 2]` still reloads T2 only.
+  **Part-slice + pattern-reload + quantized-landing walk-through (FINAL 2026-11-09; passed on the
+  author's MKI with KYOTI V1.7).** `[BANK]` + `[TRACK n]` now brings back track n's sequence AND
+  track n's machine / FX / pages / scene locks / LFO designer *as the project was saved*; no
+  other track changes. Start each step from a SAVE PROJECT, on a pattern whose Part T1 and T2
+  share, with the transport running.
+  1. Change T1's trigs, its FX1 type and a few knobs (SRC, AMP, FX), and one knob on T2.
+     `[BANK]` + `[TRACK 1]` → `TRK FULL` / `RELOADED FROM PROJ`. T1's trigs and settings are
+     back, and the knobs on screen show them at once. T2 keeps its change, and the transport
+     never stops.
+  2. Change T1's machine (e.g. Flex → Static) → `[BANK]` + `[TRACK 1]`: the saved machine is
+     back and plays its saved sample. The old machine doesn't hang on.
+  3. Change T1's scene locks (a scene A/B lock) and its LFO designer wave → `[BANK]` +
+     `[TRACK 1]`: both come back.
+  4. A Part never saved with SAVE PART works the same (no `SAVE PART FIRST!` any more). After a
+     SAVE PART *since* the project save, `[BANK]` + `[TRACK n]` brings back the PROJECT's
+     version of the track, not the SAVE PART one.
+  5. `[MIDI]`: change M2's channel / program / a CC value and its trigs, and M1's channel.
+     `[BANK]` + `[TRACK 2]` → `TRK FULL` / `RELOADED FROM PROJ`: M2 is back, M1 keeps its
+     change.
+  6. `[PTN]` + `[TRACK n]` still brings back only the trigs (`TRK SEQ` / `RELOADED FROM PROJ`).
+  7. **Pattern reload, stopped.** Edit pattern A05 (trigs on several tracks, a Part setting of
+     its Part) while on A01. Hold `[PTN]`, then `[BANK]`, tap trig 5 → `PATTERN A05` /
+     `RELOADED FROM PROJ`, and the OT is on A05 with its saved trigs and settings. While the two
+     keys are held the trigs show the patterns, not the banks; neither SELECT PATTERN nor
+     SELECT BANK appears, on any press or release.
+  8. **The other order, running.** Edit A05 again, then while A01 plays hold `[BANK]`, then
+     `[PTN]`, tap trig 5: A05 is cued and starts where a stock pattern change would (with
+     DIRECT JUMP on, at its landing point). The transport never stops.
+  9. **The playing pattern.** While A05 plays, edit it, then `[PTN]` + `[BANK]` + trig 5: its
+     trigs and its Part come back in place, and the knobs show the saved values.
+  10. **No trig.** Hold `[PTN]` + `[BANK]` and let go of both: nothing happens, no window. Then a
+      plain `[PTN]` tap still opens SELECT PATTERN, a plain `[BANK]` tap SELECT BANK, and
+      `[PTN]` + trig / `[BANK]` + trig pick a pattern / bank as usual.
+  11. With `[PTN]` + `[BANK]` held, a `[TRACK]` key only changes the track (no reload).
+  12. **Quantized, track.** A busy 16-step loop on T1, transport running. Change T1's trigs, then
+      `[PTN]` + `[TRACK 1]` anywhere inside a step: the saved trigs take over exactly on a step,
+      in time — nothing early or late, no doubled or swallowed note at the changeover. The toast
+      appears as the change is heard, not before.
+  13. **Quantized, FULL.** Change T1's FX and a filter on a sustained sound, `[BANK]` + `[TRACK 1]`:
+      the sound changes exactly on the step where the trigs change, not partway through.
+  14. **Quantized, different rates.** T1 at 2x or 3/4 (PER TRACK), edit, reload: it lands on one
+      of its own steps and stays in phase with the other tracks afterwards.
+  15. **Quantized, pattern.** On the pattern that plays, edit several tracks and the Part, then
+      `[PTN]` + `[BANK]` + its trig: every track changes on the same next step, in phase — with DIRECT
+      JUMP on or off alike. A pattern you are NOT on still waits for CHAIN AFTER / the pattern end
+      (or DIRECT JUMP's next step when it is on), as a pattern change does.
+  16. **Length / scale.** NORMAL mode, 12 steps saved: set the length to 16, play to step 14, then
+      `[PTN]` + `[TRACK 1]`: on the next step the pattern is 12 long again and every track carries on
+      where a 12-step pattern would be (step 14 of 16 → step 3 of 12), in time. Same for a scale
+      change, and for a pattern reload with a changed master length.
+  17. **Several chords.** Within one step, `[PTN]` + `[TRACK 1]` then `[PTN]` + `[TRACK 2]`: both
+      come back. `[PTN]` + `[TRACK 1]` then `[BANK]` + `[TRACK 1]`: T1 comes back with its sound
+      (the later one wins). **Stopped:** a reload applies at once; press STOP while one waits: it
+      still applies.
+  18. **No click.** Hold `[PTN]` + `[BANK]` and tap trigs on a running pattern: no click on any press,
+      whether the pattern is cued or reloads.
+  19. **Cancel a cue.** On A01, cue A02 with `[PTN]` + trig 2, then before it lands `[PTN]` + `[BANK]` +
+      trig 1: A01 reloads and A02 never comes in.
 - **QUANTIZE_LIVE_REC_TOGGLE** — hold `[REC]`, tap `[PLAY]` → toast `LIVE REC: QUANTIZED` or
   `LIVE REC: UNQUANTIZED`; tap `[PLAY]` again while it is up → the setting inverts. With
   PROJECT → PERSONALIZE open, the QUANTIZE LIVE REC check mark changes at the same moment.

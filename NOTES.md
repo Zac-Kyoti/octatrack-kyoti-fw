@@ -38162,3 +38162,191 @@ Now 936 / 932 (<= 945): the pair fits, SC's donor becomes PLATE REV.
   published at t0 198 -> 204 (one step). TRAPS: emu_rtos `call_as_main` leaves its arguments on main's stack (8 B per
   2-argument call): a gate posting every 17 ms overflowed main into its TCB -> `main_call` restores SP; Clyps' tick
   landing measured <= 220 B. The cancel test needs a cue still pending at the press: CHAIN AFTER off.
+
+## 2026-11-09 (`rec-trig-mute`) — REC_TRIG_MUTE: the T1–T4 top-dot fix (`91a58e9`) confirmed on hardware
+
+- **Hardware (user, MKI):** the dots show as designed in KYOTI V1.7 + Clyps **CL22** (trkseq `29bc52b`,
+  merged `91a58e9` at `9dd4287`), running 9 Nov; also seen 8 Nov in an earlier V1.7 + Clyps image
+  (CL21 or CL22, both after the merge). The standalone, BUG_RTM, and the FINAL KYOTI V1.7 `e7cadcca…` were not flashed on their own.
+- **octabam:** Sam asked on #1066 (merged 9 Nov) for a line in the proof note once `91a58e9` was flashed.
+  Branch `Zac-Kyoti/octabam:rec-trig-mute-proof-cl22` (`7b4d50e7`, base `1adbd491`): proof_note,
+  docstring, module README (also its stale `553d8d2` pin and edge-icon text, left from #1066), `make docs`;
+  verify-docs clean. Opened as sambanks/octabam#1078, waiting on Sam.
+## 2026-11-08 (`reload-slice`) — RELOAD_FROM_PROJECT: [BANK] + [TRACK n] reloads the track's Part slice from the card, as Clyps does (WIP, NOT flashed)
+
+- **The user's ask:** the standalone RELOAD's [BANK] + [TRACK n] should do what Clyps' card reload does (CLYPS_SCOPE
+  §1.8, trkseq worktree): the track's sequence + **that track's slice** of the Part, **as the project was saved on the
+  card** -- not stock's PART RELOAD (the whole Part, from its SAVE PART copy in RAM, which reverted every other track
+  on the Part and needed a SAVE PART). When KYOTI with Clyps is promoted, KYOTI drops this module (the exclusion in
+  the trkseq worktree, `tools/feature_exclusions.py`); until then KYOTI V1.7 carries it.
+- **What changed** (`octabam-modules/reload-from-project/patch_reload3.s`, 2100 → 3226 B):
+  - The chord no longer calls `0x4004aab4`; it posts one job, kind `RQ_TRKFULL` (4). `rl3_arm_n` takes the kind in
+    d1. The picker-era kinds 1/2 (never armed since Session 85) are gone; the worker accepts 3..4.
+  - `rl_full` (worker, after the record has landed): the saved pattern's Part link → a direct seek to that working
+    PART chunk (`0x16 + 16*st + 0x18bb*p`, Clyps' offsets, `rl_seek` = Clyps' `rq_seek`), parsed by stock's
+    `0x4008be2c` into SCRATCH; anything unexpected → reopen and read chunk by chunk (16 PTRN, PART 0..p). Then
+    Clyps' `cl_slice` tables (audio: FX, levels, machine, all pages, slot, recorder setup, 16 scene-lock rows,
+    per-scene bytes, LFO designer; MIDI: page values, setup, designer) into the Part the live pattern links to,
+    published for that track alone: audio `TRK_APPLY 0x40001f18(bank, part, t)` (our reading: a5/fp/d6), MIDI
+    `rl_mapply` (Clyps' `cl_mapply`). A new audio machine sets the `0x8000184c` restart bit (stock's machine edit,
+    `0x400973b4`). The Part-edited bit (bank +0x95048) follows "differs from its SAVE PART copy"; BDIRTY + DIRTY2 set.
+    The SRAM mirror follows through the existing LIVE_REFRESH (`0x4000faf0` copies the Parts and the edited byte).
+  - **doneFn runs on the UI task** (measured: the storage loop posts it as message 0x2b to the UI queue
+    `0x460d17ae`, `0x40084110`; the UI loop's case 0x2b at `0x40062454` calls it), so `rl_done` does the UI half:
+    PICKUP setup `0x40097290` after a new machine, then `rl3_part_refresh` (Session 120's page redraw) -- only when
+    the reloaded bank is the UI bank. No new hook (the UI-tail site `0x40062d1c` is VARISPEED_EMUS'.)
+  - Toasts now Clyps': `TRK SEQ` / `RELOADED FROM PROJ`, `TRK FULL` / `RELOADED FROM PROJ`; a Part chunk that cannot
+    be read after the sequence landed: `TRK SEQ RELOADED` / `PART NOT READ!`. `SAVE PART FIRST!` is gone.
+  - An audio record's +0x899 (not in the bank file) now keeps its live value, as stock's reload and Clyps do.
+- **Emulator** (`tools/diag_reload_full.py`, new; SAVE PROJECT, edit T1/T2 records + slices, real key events):
+  PASS on OT DEMO (audio: [PTN] keeps the slice; [BANK] restores T1's record + slice, T2's record + slice and every
+  other Part byte untouched, no `0x4004aab4` call, page redraw ran, the direct seek read the chunk, edited bit
+  correct; then a changed T1 machine with the seek forced to fail: fallback read the Part, machine back, restart
+  bit set, PICKUP once) and on JAM2 (MIDI side: M1 record + slice back, M2 untouched, the MIDI engine record = the
+  Part values). `diag_reload_midi.py --chord bank` (now expects no Part reload call): PASS. The KYOTI (DRAM) form
+  was not emulator-run; its bytes are the same unit linked at 0x40a955e0.
+- **Builds (all WIP, NOT flashed):** standalone mainos `847226fa…`, `out/OCTATRACK_OS1.40C_RELOAD_FROM_PROJECT.syx`
+  `87b76abf…` (OS VERSION `140C_RLSL1`); BUG_RL3 mainos `0f235ce9…`, syx `c9c9de32…`; KYOTI V1.7 mainos `c139d317…`,
+  syx `3e7aad6f…` (OS VERSION still `KYOTI V1.7`). Hardware walk-through: FLASHING §4 RELOAD_FROM_PROJECT.
+- **octabam:** manifest REFERENCE `143aeeca…` (3226 B, 5407 = 54455); the OCTAKIT conflict stays (no longer the PART
+  RELOAD trap, but never run together; octabam drops that conflict anyway). After promotion: pin PR moving
+  `modules/reload-from-project/upstream` off `6a2da8d`, plus octabam's own wrapper docstring / proof_note,
+  `modules/reload-from-project/README.md` and `docs/site/usage/reload-from-project.md` ("re-apply the track's saved
+  Part" is wrong now).
+
+## 2026-11-08 cont. (`reload-slice`) — RELOAD_FROM_PROJECT: [PTN] + [BANK] + trig N reloads a whole pattern from the card, as Clyps does (WIP, NOT flashed)
+
+- **The user's ask:** keep the name RELOAD FROM PROJECT by bringing Clyps' pattern reload along: the same gesture
+  ([PTN] + [BANK] + trig N), the OT switches to that pattern after the load, and no stray toast / window from the
+  stock [PTN] / [BANK] press and release behaviour during the chord ("the same system as Clyps").
+- **Measured keymaps (stock):** [PTN] layer (struct `0x400bf0f2`, records `0x400bef04`): trigs → `0x40056b2c` (pattern
+  pick; octabam KITS detours it), NO, YES. [BANK] layer (`0x400cff14`, records `0x400cff34`): trigs → `0x4007b2fc`
+  (bank pick; release `0x4007b434` acts only at BANK_SEL 2), NO, YES. Neither maps the other key, so the chord's second
+  key reaches its own base handler and pushes its layer on top. [PTN] press (`0x4005a044`) pushes its keymap + LED layer
+  via `0x4004346c`; its release shows SELECT PATTERN unless PTN_CONSUMED (`0x4005a0be`: teardown `0x40043418` only).
+  LED layers: `0x4007e760` APPENDS at the tail of the list at `0x460e7624` -- the tail is the top, the head
+  (`0x400d0a1c`, pushed at boot by `0x4007e930`) the base.
+- **Design:** the chord is one state in either order. [PTN] press with [BANK] held (new detour `0x4005a044`
+  `rl3_ptn_key`, 6 B) runs stock's press as a call, then LAYER_POP + LAYER_PUSH puts [BANK]'s keymap layer back on top;
+  [BANK] press with [PTN] held (the existing `rl3_bank_show` press path) is already on top. `rl3_chord` then sets
+  PTN_CONSUMED = -1 and `rl3_bank_used` (both releases silent: no SELECT PATTERN, no SELECT BANK), and moves [PTN]'s LED
+  layer to the top (the grid shows patterns, as Clyps' chord). The [BANK]-layer trig press (new detour `0x4007b2fc`
+  `rl3_bank_trig`, 8 B) with both held and BANK_SEL 0 → `rl3_do_pat` (gated: no arranger, no dialog, no request of ours
+  still waiting). With both held a [TRACK] key reloads nothing (Clyps' exclusive modifiers). KITS' `0x40056b2c` is not
+  touched.
+- **Worker** (kind `RQ_PTN` 5, `rl_ptnjob`): the whole slab (the live +0x899 bytes and the slab tail kept, as Clyps),
+  its saved Part link, then that whole working Part from the card (`rl_rdpart`, the read split out of `rl_full`);
+  applied (`0x40009094`) when sounding (N playing → it becomes CUR_PART, or N shares the playing Part); the master
+  scale cache follows for the playing pattern; edited mark (`rl_pmark`, split out too). `rl_done` toasts `PATTERN A05`
+  / `RELOADED FROM PROJ` (`PART NOT READ!` on line 2 if the Part chunk failed), redraws when applied, then the cue as
+  Clyps' `cl_ptnswitch` (`0x4009a404`, `0x400a1030(bank, N)`, stock's refreshes). Also: `rl_varm` cleared at every
+  job start (Clyps does it; a failed track job could have left it set).
+- **Emulator:** `tools/diag_reload_ptn.py` (new; OT DEMO, stopped): both key orders route the trigs to [BANK]'s layer;
+  pattern 5 (Part 2) and its Part from the card, the OT goes to it; reloading the playing pattern applies its Part and
+  redraws; no SELECT window / dialog at any step; the dispatch table and LED layers come back exactly; the chord with
+  no trig and the chord + [TRACK] reload nothing; a plain [PTN] tap still opens SELECT PATTERN. ALL PASS.
+  `diag_reload_full.py` re-run on this build: PASS (OT DEMO audio, JAM2 MIDI). Not run in the emulator: the switch
+  while the transport runs (the cue is stock's), the KYOTI (DRAM) form.
+- **Builds (all WIP, NOT flashed; supersede the 140C_RLSL1 set above):** standalone mainos `20beb3a4…`, syx
+  `73f127a9…` (OS VERSION `140C_RLSL2`, 4124 B unit); BUG_RL3 mainos `f9c12a45…`, syx `9079b2e7…`; KYOTI V1.7 mainos
+  `94b3f362…`, syx `42a4bc78…` (2 arena pages, unchanged). build_reload_from_project.py and build_kyoti.py's B2 now
+  require the [PTN] handler to be stock or exactly RELOAD's jmp. octabam REFERENCE `6e2e80f4…`, 8 detours.
+
+## 2026-11-08 cont. (2) (`reload-slice`) — RELOAD_FROM_PROJECT: card reloads land quantized, like Clyps' temp reload (WIP, NOT flashed)
+
+- **The user's ask:** card reloads (track SEQ, track FULL, the pattern you are on) should land like Clyps' temp
+  reload -- the track's next step start, in phase -- with the Part slice in the same tick (coupled), and a pattern
+  on the next step all its tracks share. Decided: standalone RELOAD moves to DRAM (staging RAM); a reload that
+  changes the pattern's own length / scale waits for the master wrap. Clyps gets the same next (not yet done).
+- **Measured / decided sites (all free in our builds and in octabam):** phase D `0x400a2530` (`tst.l 0x46c8028a`,
+  6 B; every phase-D path meets there -- the tick gate's skip `0x400a1f6e`, DJK's `0x400a1f72`, the count-in -- before
+  phase E `0x400a2982`; non-tick slices pass on the gate `0x46107568`); the wrap body `0x400a43a0` (Clyps' A1/A2
+  oracles: a copy there equals a stock change, phase D of the next tick is one tick late); the UI task's 1/60 s tick
+  `0x40056c28` (Clyps' cl_uitick; route A runs no UI tick, gates call it). DJK owns `0x400a1f72`; octabam has no
+  HOOKS bridge for it; KITS owns the [PTN]-layer trig, Tim's DIRECT JUMP only `0x400a06d6` / `0x400a44e2`.
+  No RTOS sleep primitive exists, so the worker cannot hold the storage task until the landing: staging RAM.
+- **Design:** the worker stages the saved slab (`RQ_SLAB`) and, for FULL / PTN, the working Part chunk (`RQ_PART`,
+  `rl_rdpart` parses into it) -- 43 KB in the unit, so the unit is 48,224 B (9 arena pages standalone). Stopped or the
+  target not playing: `rl_put` lands at once (interrupts masked). Playing: `rl_arm`; `rl_tick` lands it on the first
+  tick that is a step start of every landing track's old and new rate (Clyps' rule, t0 = (MASTER_STEP-1)*tps_M +
+  TICK_CTR), then STEP / STEP-1 / TICKS / scale cache phase-continuous; `rl_wrap` lands anything armed at a master
+  wrap (a stock change or a target that no longer plays: data only) and the wrap-class (`rl_wcls`: a pattern whose
+  trailer +0x8e50..55 differs, or a NORMAL track reload whose pattern length / scale differ), with the master and
+  per-track scale caches set before stock's re-home (`rl_scales`); an INF master never wraps, so it lands in the tick.
+  The slice / Part go to the engine in the landing tick, per track (`TRK_APPLY` x8 + `rl_mapply` x8): stock's
+  whole-Part apply `0x40009094` posts a kernel message (`0x40000c3c`), so it runs only from the UI half, and only when
+  the playing pattern's Part link changed (`rl_lnk`). `rl_follow` (doneFn or the UI tick) does the UI half after the
+  landing: verify, toast, edited mark, SRAM mirror (LIVE_REFRESH moved here), PICKUP + redraw, the pattern switch.
+  One reload at a time (`rl_busy`, cleared by rl_follow or a failed job).
+- **Emulator** (`tools/diag_reload_quant.py`, new; OT DEMO, transport RUNNING, the UI tick driven): track SEQ lands
+  in phase D at a step start (master step 7 tick 0, t0 36), T1's counters exactly stock's (7 -> 7, ticks 0 -> 0), the
+  UI half after it; FULL publishes the slice in the same tick (TRK_APPLY x1); the playing pattern lands all 16 tracks
+  in one tick with TRK_APPLY x8, 29,616 instructions in that tick (Clyps' ORIG PTN+PRT: ~17 K); the master length
+  edited + a pattern reload lands in rl_wrap and brings 64 back; stopped: at once. ALL PASS (standalone; the KYOTI run passed every landing, its one FAIL was the gate's stale wrap flag, fixed). Same on the KYOTI
+  image (RELOAD linked first in its DRAM image, same addresses). `diag_reload_full.py` (JAM2 MIDI) and
+  `diag_reload_ptn.py` (stopped path; its apply count now TRK_APPLY) PASS. Not covered: a NORMAL-mode pattern, real
+  audio timing (route A), a reload armed across a DIRECT JUMP landing.
+- **Builds (WIP, NOT flashed; supersede 140C_RLSL2):** standalone mainos `613f83bb…`, syx `90c64dfd…` (`140C_RLQ1`,
+  DRAM 9 pages); BUG_RL3 mainos `4cec9f74…`, syx `1393bba9…` (bug fixes back in the ROM cave, 5,324 B free); KYOTI
+  V1.7 mainos `b6d11be7…`, syx `3a8f702b…` (DRAM 10 pages = 60 KB, MEMORY page still 85.5 MB). octabam REFERENCE
+  `fc43e76c…` (48,224 B), 11 detours.
+
+## 2026-11-08/09 cont. (3) (`reload-slice`) — RELOAD_FROM_PROJECT: several chords count, length / scale changes re-phase on the next step (WIP, NOT flashed)
+
+- **The user's decisions (2026-11-08):** (1) a reload that changes the pattern's own length / scale lands on the next
+  step too (not at the master wrap), every track re-phased to where the saved pattern would be since the master cycle
+  began (step 14 of 16 -> step 3 of 12); (2) several chords before a landing all count -- per track, the latest kind
+  wins; a pattern reload, or one aimed at another pattern, replaces everything pending; (3) reloading the pattern you
+  are ON is temp-reload style (the next step all tracks share, in phase) -- a pattern you are NOT on is a pattern
+  change (stock's cue: CHAIN AFTER, or DIRECT JUMP when on). (A "cued like a slot load" variant for the pattern you
+  are on was built and dropped the same session.) Clyps must match all of this (memory: ot-clyps-scope "CLYPS TO-DO").
+- **Request model (`rl_req`):** a generation = one target (bank, pattern) + what is wanted (rq_ptn / rq_seqm /
+  rq_fullm); the card is read once per generation (G_KIND = RQ_STAGE); a chord of an already-staged generation arms
+  its track at once; a job is posted only when none is queued (G_KIND == 0: a second post of stock's one message
+  would reach the 0x14 case with G_KIND consumed = stock's whole-bank reload). `rl_stdone` arms (or lands, stopped);
+  a superseded job is dropped. The one-at-a-time gate (`rl_busy`) is gone.
+- **Landing:** per pending track (`rl_lm` / `rl_lf`) on its own next step (`rl_ready`, `rl_landtrk`, `rl_ctr`); a
+  pattern (`rl_lp`) or a pattern-rate change (`rl_wclass`: trailer +0x8e50..55, or NORMAL len / scale) on the step
+  every track and the master share, then `rl_rephase` (master step = (t0 / tps_M) mod its length + 1, its tick,
+  SCALE_IX, every track's counters). The toast follows what landed (`rl_follow`).
+- **Emulator:** `tools/diag_reload_oracle.py` (new): reference = OT DEMO pattern 1 in NORMAL, 12 steps, played from
+  START; candidate = 12 saved, 16 live, `[PTN]`+`[TRACK 1]` -- landing at master step 6, 11 and 14 (the shrink case):
+  IDENTICAL to the reference afterwards on every tick's counters and every step the scheduler built (496 / 416 / 368
+  steps). `diag_reload_quant.py` (G: two tracks in one step both land; H: SEQ then FULL on one track, FULL wins; E: a
+  master-length change re-phases in the tick) ALL PASS on the standalone and on KYOTI with DIRECT JUMP ON (identical
+  landings: track reloads and the pattern you are on ignore DJ). Not covered: a scale change, real audio timing.
+- **Recommendation given:** keep the per-track landing + our own re-phase (not stock's DJ-style whole-sequencer
+  re-land): the oracle shows it equals stock's own placement for the length case; it touches only the reloaded
+  tracks and needs no DIRECT JUMP.
+- **Builds (WIP, NOT flashed; supersede 140C_RLQ1):** standalone mainos `c0f2a1b0…`, syx `ab82698c…` (`140C_RLQ3`,
+  DRAM 10 pages); BUG_RL3 mainos `5a3fbdb7…`, syx `f8aa363d…`; KYOTI V1.7 mainos `aa1d5e83…`, syx `935db5b2…` (10
+  pages). octabam REFERENCE `bc64fee8…` (48,948 B), 11 detours.
+
+## 2026-11-09 (`reload-slice`) — RELOAD_FROM_PROJECT: the Part change lands with the first new step; chord click, cue cancel; PROMOTED FINAL
+
+- **Bug (peer report from the Clyps session, the user approved the fix):** a running landing called the per-track
+  apply `0x40001f18` and set the engine restart in the landing tick, but the scheduler builds one step ahead, so the
+  new Part settings sounded a step early, on the old step. Now the slice goes into the Part at the landing and the
+  engine publish waits `tps(TSCALE_ARR[t])` ticks (`rl_spcount0` at the end of the landing tick's phase D,
+  `rl_spcount` each phase D, `rl_spflush` when the transport stops). It is dropped unless the armed bank is
+  `PLAY_BANK` and the Part is the playing pattern's slab link (`+0x8e57 & 3`; `0x80000003` is not it). A link change
+  publishes every track; the deferred whole-Part apply waits until no publish is pending and runs only if the target
+  still plays.
+- **Hardware fixes (the user's report):** the click on `[PTN]` + `[BANK]` + trig was the 43 KB pattern copy run
+  with interrupts masked (it held off the audio frame); the copy now runs unmasked and only changed slices are
+  published. On P1, cue P2, reload P1 → P2 landed (a stale `rl_ptngo` and no cancel); reloading the pattern you are
+  on now cancels a cued change (stock's `CHAIN_OFF 0x4009a404` + the cue refreshes).
+- **Emulator, standalone and KYOTI V1.7:** `diag_reload_quant.py` C (landing tick 193 → apply 199), D (349 → 355,
+  changed tracks only), I (cancel at 300 and 1500 ms), and `diag_reload_wrap.py` (new: landing in the wrap body at
+  tick 48 → apply 55); `_ptn`, `_full`, `_midi`, `_oracle` PASS. The wrap case forces its landing by hiding `rl_arm`
+  at `rl_tick`'s entry and restoring it at `rl_wrap`'s (a poll never sees it: the tick lands it in the same slice).
+- **Hardware:** KYOTI V1.7 syx `dd21ef01…` flashed 2026-11-09 — the author: "Everything works well" (after the
+  checks: Part change on the new step, no chord click, the cue cancel). **Promoted FINAL** on the author's
+  instruction: standalone mainos `22a6a9ff…` (syx `7a8b53d4…`, `140C_KYOTI`; the earlier test wrap `140C_RLQ5` was
+  `86ec750b…`, same mainos), `BUG_RL3` mainos `cd480be6…` (syx `ebea05b5…`), KYOTI V1.7 mainos `ee151d9c…` (syx
+  `dd21ef01…`). octabam REFERENCE `62953b35…` (50,044 B). The BLACKPYRAMIDS_303 / VARISPEED Bugbuilds were not
+  rebuilt here (the BP DSP assembler lives in its own worktree); their pins are unchanged.
+- **octabam:** pin PR sambanks/octabam#1079 (fork branch `kyoti-reload-card-27ab725`, `23257ee6`, base `1adbd491`):
+  upstream `6a2da8d` → `27ab725`, eleven detours, FREE LOOP declared a conflict in octabam's wrapper (its
+  `fl_ui_stub` detours the same `0x40056c28`), usage page rewritten. Gates green (verify-docs, test/reload-from-project,
+  octabam-bus, octabam, test/mods, reach); test remix mainos `ec12c327…`. This octabam form is not flashed.
