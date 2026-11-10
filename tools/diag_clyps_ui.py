@@ -1723,10 +1723,11 @@ def main(argv):
         closed_ok("[NO]")
 
     if "Z" in a.only:
-        # --- Z: ORIG PTN+PART while playing = a pattern change to itself (the user, 2026-11-04). DIRECT JUMP off:
+        # --- Z: ORIG PTN+PART while playing lands IN PLACE (the user, 2026-11-09, replacing 2026-11-04's
+        # "pattern change to itself"): every changed track on the next step they share, in phase. Formerly: DIRECT JUMP off:
         # stock's switch (CHAIN AFTER point, d6 hand-off 0x400a45ba, COND_RESET -1); on: DJ's jump (next
         # landing point, its hand-off, no stock real switch). The originals come back at that point only.
-        print("Z: [PTN]+[BANK]+[PAGE] playing: a switch to the pattern as loaded (DJ off: stock's, DJ on: a jump)")
+        print("Z: [PTN]+[BANK]+[PAGE] playing: the pattern as loaded, in place (DJ off and on)")
         djm = syms.get("DJ_MODE")
         act = rd(0x800065BE, 1)
         sl = BLOB + bank * BANKSTRIDE + act * PATSTRIDE
@@ -1797,13 +1798,13 @@ def main(argv):
             key(BANK, 1, 0)
             key(PAGE, 1, 0)
             s0 = rd(0x800065B2, 2)
-            pend = rd(syms["cl_self"], 1)
+            pend = rd(syms["cl_tog"], 2)
             still = restored() != ([], [])
             key(PAGE, 0, 0)
             key(BANK, 0, 0)
             key(PTN, 0, 0)
             n = 0
-            while rd(syms["cl_self"], 1) and n < 800:
+            while (rd(syms["cl_tog"], 2) or rd(syms["cl_nq"], 1)) and n < 800:
                 rt.run(ms=5)
                 n += 1
             s1 = rd(0x800065B2, 2)
@@ -1823,14 +1824,12 @@ def main(argv):
             print(f"      DJ {dj}: request {pend}, edited until the switch {still}; landed after {n * 5} ms (master step "
                   f"{s0} -> {s1}); stock real switch x{hits['real']}, COND_RESET {[hex(x) for x in hits['cond']]}; "
                   f"differences now {d1_}", flush=True)
-            check(pend == 1 and still and rd(syms["cl_self"], 1) == 0 and d1_ == ([], []),
-                  f"DJ {dj}: requested, nothing restored before the switch, then the pattern + Part as loaded")
-            if dj:
-                check(hits["real"] == 0 and 0xFFFFFFFF in hits["cond"],
-                      "... by DIRECT JUMP's jump (no stock real switch; its hand-off reset the conditions)")
-            else:
-                check(hits["real"] >= 1 and 0xFFFFFFFF in hits["cond"],
-                      "... by stock's real switch (the d6 hand-off ran, the conditions reset)")
+            check(pend != 0 and still and d1_ == ([], []),
+                  f"DJ {dj}: armed together, nothing restored before its landing, then the pattern + Part as loaded")
+            # in place (the user, 2026-11-09: DIRECT JUMP or not): no pattern change, no counter reset
+            check(hits["real"] == 0 and 0xFFFFFFFF not in hits["cond"] and rd(syms["cl_self"], 1) == 0,
+                  f"... in place: no stock switch, no DJ jump, the conditional counters kept (switch x{hits['real']}, "
+                  f"COND_RESET {[hex(x) for x in hits['cond']]})")
             key(0x27, 1)
             key(0x27, 0)
             rt.run(ms=300)

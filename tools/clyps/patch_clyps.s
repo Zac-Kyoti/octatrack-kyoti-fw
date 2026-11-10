@@ -199,6 +199,7 @@
 | sources other than a slot: the bank byte of a cue / provenance code (bank << 8 | pattern)
     .equ SRC_ORIG,    0xfd              | the track's original (the load snapshot) on the playing pattern
     .equ SRC_SAVED,   0xfe              | the track's saved sequence
+    .equ SRC_CARD,    0xfc              | the track as saved on the card (staged: RQ_SLAB / RQ_PART, clyps_reload.s)
 
 | ---- the view's geometry (window-local, y = 0 is the bottom row; text occupies y..y+4). Measured
 | in the emulator by rendering stock's own compositor output (tools/clyps_render.py).
@@ -1588,6 +1589,8 @@ cl_cueload:
 |   FULL the track's Part slice (cl_slsame): nothing is loaded, a pending cue for the track goes, the
 |   provenance follows the pick (the user, 2026-11-06: "unless the playing data already matches")
     lea     cl_cue,%a2
+    tst.b   cl_noskip                   | a pattern landing whose Part link changes: every track lands
+    bne.b   lo_go
     jsr     cl_samein
     tst.l   %d0
     bne.b   lo_go
@@ -1726,6 +1729,13 @@ cl_slsame:
     adda.l  %d0,%a3
     bra.b   ss_live
 ss_ns:
+    cmpi.l  #SRC_CARD,%d4
+    bne.b   ss_nc
+    tst.b   rq_stok
+    beq.w   ss_ne
+    movea.l #RQ_PART,%a3
+    bra.b   ss_live
+ss_nc:
     cmpi.l  #SRC_ORIG,%d4
     bne.b   ss_slot
     jsr     cl_origok
@@ -1817,6 +1827,8 @@ cl_provset:
     move.l  %d2,%d0
     lsr.l   #8,%d0
     cmpi.b  #SRC_ORIG,%d0
+    beq.b   pv2_off
+    cmpi.b  #SRC_CARD,%d0
     beq.b   pv2_off
     lea     cl_src,%a0
     move.b  %d0,(%a0,%d1.l)
@@ -1924,15 +1936,46 @@ ex2_nact:
     move.l  #SRC_ORIG<<8,%d3
 ex2_ld:
     or.l    %d4,%d3
-    clr.l   -(%sp)                      | cued
-    move.l  %d3,-(%sp)
-    move.l  %d2,-(%sp)
-    jsr     cl_cueload
-    lea     12(%sp),%sp
+    move.l  %d3,%d0                     | a load (not a restore): the whole execution is cued (the user,
+    lsr.l   #8,%d0                      | 2026-11-09: a mixed one lands at the cued point, together)
+    cmpi.b  #SRC_ORIG,%d0
+    beq.b   ex2_st
+    moveq   #1,%d0
+    move.b  %d0,cl_xany
+ex2_st:
+    lea     cl_xc,%a0
+    move.l  %d2,%d0
+    lsl.l   #2,%d0
+    move.l  %d3,(%a0,%d0.l)
 ex2_n:
     addq.l  #1,%d2
     cmpi.l  #16,%d2
     bne.w   ex2_l
+|   pass 2: restores in place (the track's next step, in phase), unless something here loads
+    moveq   #0,%d2
+ex2_p:
+    lea     cl_xc,%a0
+    move.l  %d2,%d0
+    lsl.l   #2,%d0
+    move.l  (%a0,%d0.l),%d3
+    bmi.b   ex2_pn
+    moveq   #-1,%d0
+    move.l  %d0,(%a0,%d2.l*4)
+    moveq   #1,%d0
+    tst.b   cl_xany
+    beq.b   ex2_now
+    moveq   #0,%d0
+ex2_now:
+    move.l  %d0,-(%sp)
+    move.l  %d3,-(%sp)
+    move.l  %d2,-(%sp)
+    jsr     cl_cueload
+    lea     12(%sp),%sp
+ex2_pn:
+    addq.l  #1,%d2
+    cmpi.l  #16,%d2
+    bne.b   ex2_p
+    clr.b   cl_xany
     jsr     cl_bend
 |   the confirmation: the active track's slot
     move.l  %a2,%d0
@@ -2043,7 +2086,7 @@ df_out:
     rts
 
 | cl_restore (d0 = 0x10000: with its machine / FX, ORIG SEQ/MCH/FX): the active track's original
-| back (cued like any load). Sequence only (and every MIDI restore): nothing if the sequence is
+| back, in place: at its next step start, in phase (the user, 2026-11-09; it was cued like a load). Sequence only (and every MIDI restore): nothing if the sequence is
 | original. With machine / FX: always (its Part slice may differ). With a group: every member its
 | own original, by the same rule (scope §1.9, the user's choice).
 cl_restore:
@@ -2066,7 +2109,7 @@ rs_l:
 rs_go:
     move.l  %d3,%d0
     ori.l   #SRC_ORIG<<8,%d0
-    clr.l   -(%sp)
+    pea     1                           | in place: the track's next step, in phase (the user, 2026-11-09)
     move.l  %d0,-(%sp)
     move.l  %d2,-(%sp)
     jsr     cl_cueload
@@ -2088,39 +2131,15 @@ rs_n:
 cl_restorepat:
     jsr     cl_origok
     tst.l   %d0
-    beq.w   rp_out
-|   playing (the user, 2026-11-04): the pattern as loaded comes back AS A PATTERN CHANGE to itself --
-|   DIRECT JUMP on: its jump (the next landing point, every track re-landed, its hand-off); off: stock's
-|   switch (the CHAIN AFTER point / the pattern end, every track from its start, the Part applied by the
-|   engine, START SILENT, the conditional counters reset). cl_self is the request: cl_sw6 / cl_scommit
-|   (stock) or dj_selfvec (DIRECT JUMP) land it, cl_selfcopy puts the originals back at that point.
-|   Stopped: at once, as before.
-    tst.l   RUNNING
-    beq.b   rp_now
-    moveq   #1,%d0
-    move.b  %d0,cl_self
-.ifdef DJ_SELFVEC
-    lea     cl_djvec,%a0
-    move.l  %a0,DJ_SELFVEC
-.endif
-    rts
-rp_now:
-    moveq   #1,%d0
-    move.b  %d0,cl_pwhole
-    move.l  %d2,-(%sp)
-    jsr     cl_bbeg
-    moveq   #0,%d2
-rp_l:
-    clr.l   -(%sp)
-    pea     0x10000+(SRC_ORIG<<8)
-    move.l  %d2,-(%sp)
-    jsr     cl_cueload
-    lea     12(%sp),%sp
-    addq.l  #1,%d2
-    cmpi.l  #16,%d2
-    bne.b   rp_l
-    jsr     cl_bend
-    move.l  (%sp)+,%d2
+    beq.b   rp_out
+|   2026-11-09 (the user): in place, DIRECT JUMP or not -- the pattern you are on comes back as loaded on the
+|   first step its tracks share, in phase (cl_togarm, as the card's reload of it); it replaces CL9's "pattern
+|   change to itself" (cl_self / cl_sw6 / cl_scommit / DJ's self-jump, inert now). A pattern cued meanwhile
+|   is cancelled first (restoring what you are on cancels a cued change, item 11).
+    jsr     cl_ptncancel
+    pea     SRC_ORIG
+    jsr     cl_togarm
+    addq.l  #4,%sp
 rp_out:
     rts
 
@@ -2595,6 +2614,8 @@ ap_seq:
 ap_lsoff:
     add.l   %d4,%d3                     | d3 = offset of this record's len byte
     lea     (%a2,%d3.l),%a0             | a0 -> the destination record's len byte
+    cmpi.l  #SRC_CARD,%d2
+    beq.w   ap_card
     cmpi.l  #SRC_ORIG,%d2
     bne.b   ap_wlen
     movea.l %a2,%a1                     | putting an original back onto a NORMAL pattern: its own
@@ -2616,7 +2637,7 @@ ap_back:
     moveq   #-1,%d1
     move.b  %d1,(%a0,%d0.l)
     moveq   #1,%d0
-    bra.b   ap_out
+    bra.w   ap_out
 ap_dst:
     movea.l %a2,%a1
     adda.l  #TRAILER,%a1                | a1 -> the destination trailer
@@ -2644,6 +2665,39 @@ ap_prov:
     move.b  %d1,1(%a0,%d0.l)
     moveq   #1,%d0
     bra.b   ap_out
+ap_card:                                | the card's copy, as the old job wrote it: NORMAL now -> the saved
+    movea.l %a2,%a1                     | pattern's own length / scale come with it (the landing re-phases
+    adda.l  #TRAILER,%a1                | on a change, cl_togland); PER TRACK now -> the track's resolved
+    movea.l #RQ_SLAB+TRAILER,%a3        | bytes, and a pattern saved NORMAL that a Clyps load converted is
+    tst.b   T_SMODE(%a1)                | undone once every track is original again (cl_back)
+    bne.b   ac_pt
+    move.b  T_LEN(%a3),%d0
+    move.b  %d0,T_LEN(%a1)
+    move.b  T_SCALE(%a3),%d0
+    move.b  %d0,T_SCALE(%a1)
+    tst.l   RUNNING
+    bne.b   ac_off
+    move.b  %d0,SCALE_IX                | stopped: the saved rate at once (running: cl_togland re-phases)
+    bra.b   ac_off
+ac_pt:
+    move.l  %a4,%d0
+    move.b  %d0,(%a0)
+    move.l  %a5,%d0
+    move.b  %d0,1(%a0)
+    tst.b   T_SMODE(%a3)
+    bne.b   ac_off
+    jsr     cl_back
+    moveq   #1,%d0
+    move.b  %d0,cl_wslab
+ac_off:
+    move.l  %d6,%d0                     | a card reload is no Clyps load: provenance off
+    add.l   %d0,%d0
+    lea     cl_home,%a0
+    moveq   #-1,%d1
+    move.b  %d1,(%a0,%d0.l)
+    move.b  %d1,1(%a0,%d0.l)
+    moveq   #1,%d0
+    bra.w   ap_out
 ap_own:
     move.l  %d6,%d0                     | back to its own: provenance off
     add.l   %d0,%d0
@@ -2661,7 +2715,7 @@ ap_out:
 | name of t (a slot's, the saved sequence's, or the one it had when loaded). Keeps d2-d7/a2-a6.
 cl_nload:
     tst.b   cl_namesok
-    beq.b   nl_out
+    beq.w   nl_out
     moveq   #0,%d0                      | the destination
     move.b  PLAY_BANK,%d0
     lsl.l   #4,%d0
@@ -2678,6 +2732,8 @@ cl_nload:
     beq.b   nl_saved
     cmpi.l  #SRC_ORIG,%d2
     beq.b   nl_orig
+    cmpi.l  #SRC_CARD,%d2
+    beq.b   nl_card
     move.l  %d2,%d0                     | a slot
     lsl.l   #4,%d0
     add.l   %d7,%d0
@@ -2693,6 +2749,13 @@ nl_saved:
     moveq   #NAME_W,%d1
     muls.l  %d1,%d0
     movea.l #SNAMES,%a0
+    adda.l  %d0,%a0
+    bra.b   nl_cp
+nl_card:
+    move.l  %d6,%d0                     | the name the card holds for it (rq_names, staged)
+    moveq   #NAME_W,%d1
+    muls.l  %d1,%d0
+    lea     rq_nst,%a0
     adda.l  %d0,%a0
     bra.b   nl_cp
 nl_orig:
@@ -2808,10 +2871,17 @@ cl_fullone:
     beq.b   fo_saved
     cmpi.l  #SRC_ORIG,%d2
     beq.b   fo_orig
+    cmpi.l  #SRC_CARD,%d2
+    beq.b   fo_card
     move.l  %d2,%d0
     move.l  %d7,%d1
     movea.l #BLOB,%a1
     bsr.w   cl_partin
+    bra.b   fo_src
+fo_card:
+    tst.b   rq_stok
+    beq.w   fo_out
+    movea.l #RQ_PART,%a0
     bra.b   fo_src
 fo_saved:
     lea     cl_svalid,%a0
@@ -2852,9 +2922,17 @@ fo_src:
     beq.b   fo_copy
     moveq   #1,%d0
     lsl.l   %d6,%d0
+    tst.l   RUNNING                     | playing: with the publish, one step later (cl_spdo)
+    bne.b   fo_rsd
     move.b  ENG_RESTART,%d1
     or.l    %d1,%d0
     move.b  %d0,ENG_RESTART
+    bra.b   fo_rsx
+fo_rsd:
+    move.b  cl_spr,%d1
+    or.l    %d1,%d0
+    move.b  %d0,cl_spr
+fo_rsx:
     lea     cl_postm,%a0
     moveq   #1,%d0
     move.b  %d0,(%a0,%d6.l)
@@ -2863,16 +2941,34 @@ fo_copy:
     move.l  %a2,-(%sp)
     move.l  %d6,-(%sp)
     bsr.w   cl_slice
-    cmpi.l  #SRC_ORIG,%d2               | ORIG PTN/PART: the first landing brings the rest of the
-    bne.b   fo_norest                   | Part too (cl_restorepat)
-    tst.b   cl_pwhole
-    beq.b   fo_norest
+    tst.b   cl_pwhole                   | ORIG PTN/PART or the card's pattern: the first landing
+    beq.b   fo_norest                   | brings the rest of the Part too (cl_restorepat, cl_togarm)
+    cmpi.l  #SRC_ORIG,%d2
+    beq.b   fo_rest
+    cmpi.l  #SRC_CARD,%d2
+    bne.b   fo_norest
+fo_rest:
     clr.b   cl_pwhole
     moveq   #1,%d0
     move.b  %d0,cl_wpart                | the UI side owes the whole Part's mirror
     bsr.w   cl_slrest
 fo_norest:
     lea     12(%sp),%sp
+|   playing (the user, 2026-11-09): the slice reaches the engine when the new sequence SOUNDS -- the
+|   scheduler builds a step one step ahead, so a sequence landed at a step start is heard a step later;
+|   TRK_APPLY now put the new volume etc. on the old sound a step early. The Part holds the slice now (the
+|   builder reads it); the engine gets it, and a new machine its restart, one step later (cl_spdo).
+    tst.l   RUNNING
+    beq.b   fo_now
+    lea     cl_spp,%a0
+    move.b  %d4,(%a0,%d6.l)
+    lea     cl_spd,%a0
+    moveq   #-1,%d0
+    move.b  %d0,(%a0,%d6.l)             | armed: its rate after the landing sets the count
+    moveq   #1,%d0
+    move.b  %d0,cl_spn
+    bra.b   fo_pubd
+fo_now:
     move.l  %d6,%d0                     | publish it: this track only
     cmpi.l  #8,%d0
     bcs.b   fo_t
@@ -2891,6 +2987,7 @@ fo_m:
     bsr.w   cl_mapply
 fo_pub:
     lea     12(%sp),%sp
+fo_pubd:
     lea     cl_postf,%a0
     moveq   #1,%d0
     move.b  %d0,(%a0,%d6.l)             | the UI side owes its part (cl_postpart)
@@ -3031,6 +3128,8 @@ cl_srcrec:
     beq.b   sr_saved
     cmpi.l  #SRC_ORIG,%d0
     beq.b   sr_orig
+    cmpi.l  #SRC_CARD,%d0
+    beq.w   sr_card
     move.l  4(%sp),-(%sp)
     jsr     cl_toff
     addq.l  #4,%sp
@@ -3043,7 +3142,7 @@ cl_srcrec:
     adda.l  #TRAILER,%a1                | a1 -> the source trailer
     adda.l  (%sp)+,%a0                  | a0 -> the source record
     tst.b   T_SMODE(%a1)
-    bne.b   sr_rec                      | PER TRACK: the record's own bytes
+    bne.w   sr_rec                      | PER TRACK: the record's own bytes
     moveq   #0,%d0
     move.b  T_LEN(%a1),%d0
     moveq   #0,%d1
@@ -3053,12 +3152,12 @@ sr_saved:
     move.l  4(%sp),%d0
     lea     cl_svalid,%a0
     tst.b   (%a0,%d0.l)
-    beq.b   sr_none
+    beq.w   sr_none
     move.l  #TRAC_A,%d1
     muls.l  %d1,%d0
     movea.l #SAVED_BASE,%a0
     adda.l  %d0,%a0
-    bra.b   sr_rec
+    bra.w   sr_rec
 sr_orig:
     jsr     cl_origok
     tst.l   %d0
@@ -3078,6 +3177,23 @@ sr_orig:
     tst.b   T_SMODE(%a1)
     bne.b   sr_rec                      | PER TRACK when loaded: the record's own bytes
     moveq   #0,%d0                      | NORMAL when loaded: the pattern's length / scale
+    move.b  T_LEN(%a1),%d0
+    moveq   #0,%d1
+    move.b  T_SCALE(%a1),%d1
+    rts
+sr_card:                                | the card's copy, staged (2026-11-09: card reloads land like temp reload)
+    tst.b   rq_stok
+    beq.b   sr_none
+    move.l  4(%sp),-(%sp)
+    jsr     cl_toff
+    addq.l  #4,%sp
+    movea.l #RQ_SLAB,%a0
+    movea.l %a0,%a1
+    adda.l  #TRAILER,%a1
+    adda.l  %d0,%a0
+    tst.b   T_SMODE(%a1)
+    bne.b   sr_rec                      | PER TRACK as saved: the record's own bytes
+    moveq   #0,%d0                      | NORMAL as saved: the saved pattern's length / scale
     move.b  T_LEN(%a1),%d0
     moveq   #0,%d1
     move.b  T_SCALE(%a1),%d1
@@ -3530,6 +3646,7 @@ cl_ptnswitch:
     move.b  ACT_PAT,%d0
     cmp.l   %d2,%d0
     beq.b   pw_out
+pw_cue:
     jsr     0x4009a404                  | the chain off
     move.l  %d2,-(%sp)
     moveq   #0,%d0
@@ -3547,6 +3664,196 @@ cl_ptnswitch:
 pw_out:
     move.l  (%sp)+,%d2
     rts
+
+| cl_ptncancel (UI task): the pattern you are on is reloaded while another one is cued -- that cue goes,
+| by stock's own cue of the playing pattern (as [PTN] + its trig does; the user, 2026-11-09, hardware).
+cl_ptncancel:
+    move.b  PEND_PAT,%d0
+    cmp.b   ACT_PAT,%d0
+    bne.b   pk_go
+    move.b  PEND_BANK,%d0
+    cmp.b   PLAY_BANK,%d0
+    beq.b   pk_out
+pk_go:
+    move.l  %d2,-(%sp)
+    moveq   #0,%d2
+    move.b  ACT_PAT,%d2
+    bra.w   pw_cue
+pk_out:
+    rts
+
+| cl_togarm(src = SRC_CARD / SRC_ORIG) (UI task): the pattern you are on comes back as that source has it --
+| every track whose sequence or slice differs, its trailer and the rest of its Part -- landing together on
+| the first step its tracks share, in phase (cl_togland). A change of the pattern's own rate (trailer
+| +0x8e50..55) re-phases every track and the master; a changed Part link lands every track. Stopped: at once.
+cl_togarm:
+    lea     -12(%sp),%sp
+    movem.l %d2-%d3/%a2,(%sp)
+    move.l  16(%sp),%d3                 | d3 = src
+    move.b  %d3,cl_togs
+    clr.w   cl_tog
+    clr.b   cl_togr
+    jsr     cl_togsrc
+    movea.l %a0,%a2
+    adda.l  #TRAILER,%a2                | a2 = the source trailer
+    jsr     cl_live
+    adda.l  #TRAILER,%a0                | a0 = the live one
+    moveq   #0,%d2
+ta_r:
+    move.b  (%a0,%d2.l),%d0
+    cmp.b   (%a2,%d2.l),%d0
+    bne.b   ta_rate
+    addq.l  #1,%d2
+    cmpi.l  #6,%d2
+    bne.b   ta_r
+    bra.b   ta_lk
+ta_rate:
+    moveq   #1,%d0
+    move.b  %d0,cl_togr
+    move.b  %d0,cl_noskip               | every track re-phases: all of them land together
+ta_lk:
+    move.b  7(%a0),%d0
+    cmp.b   7(%a2),%d0
+    beq.b   ta_p
+    moveq   #1,%d0
+    move.b  %d0,cl_noskip
+ta_p:
+    moveq   #1,%d0
+    move.b  %d0,cl_togp
+    move.b  %d0,cl_pwhole
+    tst.l   RUNNING
+    bne.b   ta_run
+    jsr     cl_togpre                   | stopped: the trailer first, the master's scale, then every track
+    jsr     cl_live
+    jsr     cl_mrate
+    move.b  %d2,SCALE_IX
+ta_run:
+    jsr     cl_bbeg
+    moveq   #0,%d2
+ta_l:
+    pea     1
+    move.l  %d3,%d0
+    lsl.l   #8,%d0
+    ori.l   #0x10000,%d0
+    move.l  %d0,-(%sp)
+    move.l  %d2,-(%sp)
+    jsr     cl_cueload
+    lea     12(%sp),%sp
+    addq.l  #1,%d2
+    cmpi.l  #16,%d2
+    bne.b   ta_l
+    jsr     cl_bend
+    clr.b   cl_noskip
+    cmpi.l  #SRC_CARD,%d3               | the card's names for every track it did not need to land (a
+    bne.b   ta_nn                       | landing brings its own, cl_nload)
+    moveq   #0,%d2
+ta_nl:
+    move.l  %d2,%d0
+    jsr     cl_cardname
+    addq.l  #1,%d2
+    cmpi.l  #16,%d2
+    bne.b   ta_nl
+ta_nn:
+    tst.l   RUNNING
+    beq.b   ta_rest
+    moveq   #0,%d2                      | the members: every track now cued from this source
+    moveq   #0,%d1
+    lea     cl_cue,%a0
+ta_m:
+    move.b  (%a0)+,%d0
+    addq.l  #1,%a0
+    cmp.b   %d3,%d0
+    bne.b   ta_mn
+    bset    %d2,%d1
+ta_mn:
+    addq.l  #1,%d2
+    cmpi.l  #16,%d2
+    bne.b   ta_m
+    move.w  %d1,cl_tog
+    bne.b   ta_out
+    clr.b   cl_togr                     | nothing differs (no rate, no link change): only the Part's rest
+    clr.b   cl_togp
+ta_rest:
+    tst.b   cl_pwhole                   | the rest of the Part when no FULL landing took it: now (data)
+    beq.b   ta_t
+    clr.b   cl_pwhole
+    jsr     cl_togpart                  | a0 = the source Part
+    move.l  %a0,-(%sp)
+    moveq   #0,%d0
+    move.b  PLAY_BANK,%d0
+    moveq   #0,%d1
+    move.b  ACT_PAT,%d1
+    movea.l #BLOB,%a1
+    jsr     cl_partin
+    move.l  %a0,-(%sp)
+    clr.l   -(%sp)
+    jsr     cl_slrest
+    lea     12(%sp),%sp
+    moveq   #1,%d0
+    move.b  %d0,cl_wpart
+ta_t:
+    tst.l   RUNNING
+    bne.b   ta_out
+    cmpi.l  #SRC_CARD,%d3
+    bne.b   ta_out
+    moveq   #1,%d0
+    move.b  %d0,cl_ctoast               | stopped: it landed now
+ta_out:
+    movem.l (%sp),%d2-%d3/%a2
+    lea     12(%sp),%sp
+    rts
+
+| cl_cardname (d0 = t): the card's staged name of t -> the playing pattern's, unless t's card landing is still
+| pending (it brings the name itself). Uses d0-d1/a0-a1.
+cl_cardname:
+    move.l  %d0,%d1
+    add.l   %d1,%d1
+    lea     cl_cue,%a0
+    move.b  (%a0,%d1.l),%d1
+    cmpi.b  #SRC_CARD,%d1
+    beq.b   cn2_out
+    tst.b   cl_namesok
+    beq.b   cn2_out
+    move.l  %d0,-(%sp)
+    moveq   #0,%d0
+    move.b  PLAY_BANK,%d0
+    lsl.l   #4,%d0
+    moveq   #0,%d1
+    move.b  ACT_PAT,%d1
+    add.l   %d1,%d0
+    lsl.l   #4,%d0
+    add.l   (%sp),%d0
+    moveq   #NAME_W,%d1
+    muls.l  %d1,%d0
+    movea.l #NAMES,%a1
+    adda.l  %d0,%a1
+    move.l  (%sp)+,%d0
+    moveq   #NAME_W,%d1
+    muls.l  %d1,%d0
+    lea     rq_nst,%a0
+    adda.l  %d0,%a0
+    moveq   #NAME_W,%d0
+cn2_l:
+    move.b  (%a0)+,(%a1)+
+    subq.l  #1,%d0
+    bne.b   cn2_l
+cn2_out:
+    rts
+
+| cl_togpart -> a0 = the together landing's source Part (the card's, or the playing pattern's as loaded).
+cl_togpart:
+    move.b  cl_togs,%d0
+    cmpi.b  #SRC_ORIG,%d0
+    beq.b   tq_orig
+    movea.l #RQ_PART,%a0
+    rts
+tq_orig:
+    moveq   #0,%d0
+    move.b  PLAY_BANK,%d0
+    moveq   #0,%d1
+    move.b  ACT_PAT,%d1
+    movea.l #SNAPB,%a1
+    jmp     cl_partin
 
 | cl_pshow: an arrow moved the pre-select box -- it shows until the next execution. Uses d0.
 cl_pshow:
@@ -3964,12 +4271,17 @@ cl_land:
     jsr     DJ_LAND
 .endif
     tst.b   cl_nq
-    beq.w   la_out                      | nothing cued: one byte test per tick
+    bne.b   la_any
+    tst.b   cl_spn
+    beq.w   la_out                      | nothing cued, nothing to publish: two byte tests per tick
+la_any:
     tst.l   RUNNING
     beq.w   la_out
 |   mid-function in stock's tick handler: every register may be live -- save them all
     lea     -60(%sp),%sp
     movem.l %d0-%d7/%a0-%a6,(%sp)
+    tst.b   cl_nq
+    beq.w   la_done                     | only a publish is pending
 .ifdef DJ_STATE
 |   DIRECT JUMP lands on this tick (dj_land just committed: state LANDING): stock re-lands the
 |   whole sequencer right after us, so every pending cue is dropped (scope §1.10, O8's rule)
@@ -4055,11 +4367,18 @@ la_armn:
 
 | every armed track whose old and new rates both start a window at t0
 la_tracks:
+    tst.w   cl_tog                      | a together landing first (d5 = tps_M, d7 = t0)
+    beq.b   la_ntog
+    jsr     cl_togland
+la_ntog:
     moveq   #0,%d6                      | d6 = track
 la_tl:
     lea     cl_arm,%a0
     tst.b   (%a0,%d6.l)
     beq.w   la_tn
+    move.w  cl_tog,%d0                  | a member of the together landing: not on its own
+    btst    %d6,%d0
+    bne.w   la_tn
 |   the cue must still aim at the playing pattern
     move.l  %d6,%d0
     add.l   %d0,%d0
@@ -4137,6 +4456,7 @@ la_tn:
     cmpi.l  #16,%d6
     bne.w   la_tl
 la_done:
+    jsr     cl_spdo                     | the slices due now reach the engine
     movem.l (%sp),%d0-%d7/%a0-%a6
     lea     60(%sp),%sp
 la_out:
@@ -4152,10 +4472,10 @@ cl_wrap:
     movem.l %d0-%d7/%a0-%a6,(%sp)
     move.b  PEND_PAT,%d0
     cmp.b   ACT_PAT,%d0
-    bne.b   wr_drop
+    bne.w   wr_drop
     move.b  PEND_BANK,%d0
     cmp.b   PLAY_BANK,%d0
-    bne.b   wr_drop
+    bne.w   wr_drop
     jsr     cl_sreq                     | ORIG PTN+PART's switch to itself lands here: a pattern change,
     tst.l   %d0                         | which drops every cue (as O8)
     beq.b   wr_pl
@@ -4163,6 +4483,10 @@ cl_wrap:
     tst.l   %d0
     bne.b   wr_drop
 wr_pl:
+    tst.w   cl_tog                      | a together landing at the wrap: its trailer first
+    beq.b   wr_nt
+    jsr     cl_togpre
+wr_nt:
     moveq   #0,%d6                      | a plain wrap: every cue lands, copy only
 wr_l:
     move.l  %d6,%d0
@@ -4187,6 +4511,14 @@ wr_n:
     addq.l  #1,%d6
     cmpi.l  #16,%d6
     bne.b   wr_l
+    tst.b   cl_togr                     | the pattern's rate changed: the master's scale cache (stock
+    beq.b   wr_tc                       | re-homes every track after the wrap body)
+    jsr     cl_live
+    jsr     cl_mrate
+    move.b  %d2,SCALE_IX
+wr_tc:
+    clr.w   cl_tog
+    clr.b   cl_togr
     bra.b   wr_done
 wr_drop:
     jsr     cl_dropall                  | the pattern is changing: the cues' destination goes
@@ -4198,6 +4530,384 @@ wr_out:
     moveq   #1,%d2
     or.l    %d2,%d0
     jmp     WRAP_RESUME
+
+| ---------------------------------------------------------------- the together landing (2026-11-09)
+| The user's rule: restoring what the pattern you are on IS lands in place on the next step, in phase. A
+| pattern (its card copy, ORIG PTN+PRT) lands all its changed tracks on the first tick that starts a step of
+| each at its old AND new rate; a landing that changes the pattern's own rate (cl_togr: a pattern's trailer
+| +0x8e50..55, or a NORMAL pattern's length / scale from a track reload) waits for a tick that starts a step
+| of EVERY track and the master, old and new, and re-phases them all to where the new pattern would be had
+| it played since this master cycle began (RELOAD's rt3_all / rl_rephase, oracle-proven there).
+| cl_togland (d5 = tps_M, d7 = t0; the sequencer tick, every register saved by cl_land). Keeps d5 / d7.
+cl_togland:
+    lea     -40(%sp),%sp
+    movem.l %d2-%d6/%a2-%a6,(%sp)
+    moveq   #0,%d6
+tl_chk:
+    move.w  cl_tog,%d0
+    btst    %d6,%d0
+    bne.b   tl_mem
+    tst.b   cl_togr
+    beq.b   tl_cn                       | another track, no rate change: not concerned
+    bsr.w   tl_old
+    tst.l   %d0
+    bne.w   tl_wait
+    bsr.w   cl_togsrc                   | its rate under the new trailer (its own record, the new mode)
+    move.l  %d6,%d0
+    bsr.w   cl_trate
+    bra.b   tl_new
+tl_mem:
+    bsr.w   tl_old
+    tst.l   %d0
+    bne.w   tl_wait
+    move.l  %d6,%d0                     | a member: its cue's source
+    add.l   %d0,%d0
+    lea     cl_cue,%a0
+    moveq   #0,%d1
+    move.w  (%a0,%d0.l),%d1
+    move.l  %d1,%d0
+    andi.l  #0xff,%d0
+    move.l  %d0,-(%sp)
+    lsr.l   #8,%d1
+    move.l  %d1,-(%sp)
+    move.l  %d6,-(%sp)
+    jsr     cl_newrate
+    lea     12(%sp),%sp
+tl_new:
+    tst.l   %d0
+    beq.b   tl_cn                       | no source any more: it lands nothing
+    move.l  %d7,%d1
+    remu.l  %d0,%d2:%d1
+    tst.l   %d2
+    bne.w   tl_wait
+tl_cn:
+    addq.l  #1,%d6
+    cmpi.l  #16,%d6
+    bne.b   tl_chk
+    tst.b   cl_togr                     | a rate change: the master too, old and new
+    beq.b   tl_go
+    move.l  %d7,%d1
+    remu.l  %d5,%d2:%d1
+    tst.l   %d2
+    bne.w   tl_wait
+    bsr.w   cl_togsrc
+    jsr     cl_mrate
+    move.l  %d7,%d1
+    remu.l  %d0,%d2:%d1
+    tst.l   %d2
+    bne.w   tl_wait
+tl_go:
+    move.w  cl_tog,%d3                  | d3 = the members
+    move.b  cl_togr,%d4                 | d4 = rate change
+    jsr     cl_togpre                   | a whole pattern: its trailer first (the Part link, the rates)
+    moveq   #0,%d6
+tl_l:
+    btst    %d6,%d3
+    beq.b   tl_ln
+    jsr     cl_landone                  | d6 = t: copy (+ slice), the cue goes
+tl_ln:
+    addq.l  #1,%d6
+    cmpi.l  #16,%d6
+    bne.b   tl_l
+    clr.w   cl_tog
+    clr.b   cl_togr
+    moveq   #0,%d6                      | counters at the new rates: the members, or every track on a
+tl_c:                                   | rate change (and the master)
+    tst.b   %d4
+    bne.b   tl_cc
+    btst    %d6,%d3
+    beq.b   tl_cnx
+tl_cc:
+    bsr.w   cl_ctr
+tl_cnx:
+    addq.l  #1,%d6
+    cmpi.l  #16,%d6
+    bne.b   tl_c
+    tst.b   %d4
+    beq.b   tl_wait
+    bsr.w   cl_mreph
+tl_wait:
+    movem.l (%sp),%d2-%d6/%a2-%a6
+    lea     40(%sp),%sp
+    rts
+tl_old:                                 | d6 = t -> d0 = 0 when t starts a step at t0 at its old rate
+    lea     TSCALE_ARR,%a0
+    moveq   #0,%d0
+    move.b  (%a0,%d6.l),%d0
+    jsr     cl_tps
+    move.l  %d7,%d1
+    remu.l  %d0,%d2:%d1
+    move.l  %d2,%d0
+    rts
+
+| cl_togsrc -> a0 = the together landing's source slab (the card's staged copy, or the playing pattern as
+| loaded). Uses d0-d1/a0-a1.
+cl_togsrc:
+    move.b  cl_togs,%d0
+    cmpi.b  #SRC_ORIG,%d0
+    beq.b   ts_orig
+    movea.l #RQ_SLAB,%a0
+    rts
+ts_orig:
+    moveq   #0,%d0
+    move.b  PLAY_BANK,%d0
+    moveq   #0,%d1
+    move.b  ACT_PAT,%d1
+    jmp     cl_snapslab
+
+| cl_live -> a0 = the playing pattern's slab. Uses d0-d1/a0.
+cl_live:
+    moveq   #0,%d0
+    move.b  ACT_PAT,%d0
+    move.l  %d0,-(%sp)
+    move.b  PLAY_BANK,%d0
+    move.l  %d0,-(%sp)
+    jsr     cl_slab
+    addq.l  #8,%sp
+    rts
+
+| cl_togpre: a whole pattern lands -- its trailer (+0x8e50..5b: the master's and the pattern's length /
+| scale / mode, CHAIN AFTER, the Part link) from the source first, so the tracks' landings that follow
+| copy their slices into the Part it links to; the UI's current Part follows the link. Uses d0-d1/a0-a1.
+cl_togpre:
+    tst.b   cl_togp
+    beq.b   tp2_out
+    clr.b   cl_togp
+    bsr.w   cl_togsrc
+    movea.l %a0,%a1
+    adda.l  #TRAILER,%a1
+    move.l  %a1,-(%sp)
+    bsr.w   cl_live
+    adda.l  #TRAILER,%a0
+    movea.l (%sp)+,%a1
+    moveq   #12,%d0
+tp2_l:
+    move.b  (%a1)+,(%a0)+
+    subq.l  #1,%d0
+    bne.b   tp2_l
+    move.b  -5(%a0),%d0                 | +0x8e57: the Part link
+    andi.l  #3,%d0
+    move.b  %d0,0x80000003              | the playing pattern's Part (mirror, as stock's pattern change)
+tp2_out:
+    rts
+
+| cl_mrate (a0 = a slab) -> d0 = the master's ticks per step, d1 = the master length (0 = INF), d2 = its
+| scale: NORMAL the pattern's length / scale, PER TRACK the master's (+0x8e50 u16, 0xffff = INF / +0x8e52).
+| Uses a0-a1 (RELOAD's rl_mrate).
+cl_mrate:
+    movea.l %a0,%a1
+    adda.l  #TRAILER,%a1
+    tst.b   T_SMODE(%a1)
+    bne.b   mr3_pt
+    moveq   #0,%d1
+    move.b  T_LEN(%a1),%d1
+    moveq   #0,%d2
+    move.b  T_SCALE(%a1),%d2
+    bra.b   mr3_t
+mr3_pt:
+    moveq   #0,%d1
+    move.w  (%a1),%d1
+    cmpi.l  #0xffff,%d1
+    bne.b   mr3_l
+    moveq   #0,%d1
+mr3_l:
+    moveq   #0,%d2
+    move.b  2(%a1),%d2
+mr3_t:
+    move.l  %d2,%d0
+    jmp     cl_tps
+
+| cl_trate (a0 = a slab, d0 = t) -> d0 = t's ticks per step there (its record's bytes in PER TRACK, the
+| pattern's in NORMAL). Uses d0-d2/a0-a1.
+cl_trate:
+    movea.l %a0,%a1
+    adda.l  #TRAILER,%a1
+    tst.b   T_SMODE(%a1)
+    bne.b   tr2_pt
+    moveq   #0,%d0
+    move.b  T_SCALE(%a1),%d0
+    jmp     cl_tps
+tr2_pt:
+    move.l  %d0,%d2
+    move.l  %a0,-(%sp)
+    move.l  %d2,-(%sp)
+    jsr     cl_toff
+    addq.l  #4,%sp
+    movea.l (%sp)+,%a0
+    adda.l  %d0,%a0
+    moveq   #0x51,%d1
+    cmpi.l  #8,%d2
+    bcs.b   tr2_a
+    moveq   #0x29,%d1
+tr2_a:
+    moveq   #0,%d0
+    move.b  (%a0,%d1.l),%d0
+    jmp     cl_tps
+
+| cl_ctr (d6 = t, d7 = t0): t's counters phase-continuous at its rate in the playing pattern (after the
+| landing): STEP = (t0 / tps + 1) mod len, STEP-1, TICKS = t0 mod tps, the scale cache (RELOAD's rl_ctr).
+| Uses d0-d2/d5/a0-a1; keeps d5.
+cl_ctr:
+    move.l  %d5,-(%sp)
+    moveq   #0,%d0
+    move.b  ACT_PAT,%d0
+    move.l  %d0,-(%sp)
+    move.b  PLAY_BANK,%d0
+    move.l  %d0,-(%sp)
+    move.l  %d6,-(%sp)
+    jsr     cl_srcrec                   | d0 = len, d1 = scale (resolved: NORMAL the pattern's)
+    lea     12(%sp),%sp
+    tst.l   %d0
+    bne.b   ct_len
+    moveq   #16,%d0                     | never divide by a zero length
+ct_len:
+    move.l  %d0,%a1                     | a1 = len
+    move.l  %d1,%d2                     | d2 = scale
+    move.l  %d2,%d0
+    jsr     cl_tps
+    move.l  %d0,%d5                     | d5 = tps
+    lea     TSCALE_ARR,%a0
+    move.b  %d2,(%a0,%d6.l)
+    move.l  %d7,%d0
+    divu.l  %d5,%d0
+    addq.l  #1,%d0
+    move.l  %a1,%d1
+    remu.l  %d1,%d2:%d0                 | d2 = STEP
+    lea     STEP_ARR,%a0
+    move.b  %d2,(%a0,%d6.l)
+    add.l   %d1,%d2
+    subq.l  #1,%d2
+    remu.l  %d1,%d0:%d2
+    lea     STEPM1_ARR,%a0
+    move.b  %d0,(%a0,%d6.l)
+    move.l  %d7,%d0
+    remu.l  %d5,%d2:%d0
+    lea     TICKS_ARR,%a0
+    move.b  %d2,(%a0,%d6.l)
+    move.l  (%sp)+,%d5
+    rts
+
+| cl_mreph (d7 = t0): the pattern's own rate changed -- the master goes where the new pattern would be
+| had it played since this master cycle began: step = (t0 / tps_M) mod its length + 1, its tick = t0 mod
+| tps_M, the master scale cache (RELOAD's rl_rephase). Uses d0-d2/a0-a1.
+cl_mreph:
+    bsr.w   cl_live
+    bsr.w   cl_mrate                    | d0 = tps_M, d1 = length (0 = INF), d2 = scale
+    move.b  %d2,SCALE_IX
+    move.l  %d0,-(%sp)
+    move.l  %d7,%d2
+    divu.l  %d0,%d2                     | master steps since the cycle began
+    tst.l   %d1
+    beq.b   mp_inf
+    remu.l  %d1,%d0:%d2
+    move.l  %d0,%d2
+mp_inf:
+    addq.l  #1,%d2
+    move.w  %d2,MASTER_STEP
+    move.l  (%sp)+,%d1
+    move.l  %d7,%d0
+    remu.l  %d1,%d2:%d0
+    move.b  %d2,TICK_CTR
+    rts
+
+| cl_spdo (the sequencer tick, phase D's end; every register saved): a landed slice reaches the engine one
+| step after its landing -- when the new sequence's first step sounds (see cl_fullone). Armed (0xff) at the
+| landing, the count starts here at the track's new rate (set by the landing just before); it runs one per
+| tick; at 0 TRK_APPLY / cl_mapply and a new machine's restart.
+cl_spdo:
+    tst.b   cl_spn
+    beq.b   sd_out
+    moveq   #0,%d6
+    moveq   #0,%d3                      | d3 = one is still pending
+sd_l:
+    lea     cl_spd,%a0
+    moveq   #0,%d0
+    move.b  (%a0,%d6.l),%d0
+    beq.b   sd_n
+    cmpi.l  #0xff,%d0
+    bne.b   sd_dec
+    lea     TSCALE_ARR,%a1
+    move.b  (%a1,%d6.l),%d0
+    jsr     cl_tps
+    lea     cl_spd,%a0
+    move.b  %d0,(%a0,%d6.l)
+    moveq   #1,%d3
+    bra.b   sd_n
+sd_dec:
+    subq.l  #1,%d0
+    move.b  %d0,(%a0,%d6.l)
+    beq.b   sd_go
+    moveq   #1,%d3
+    bra.b   sd_n
+sd_go:
+    bsr.b   cl_sppub
+sd_n:
+    addq.l  #1,%d6
+    cmpi.l  #16,%d6
+    bne.b   sd_l
+    move.b  %d3,cl_spn
+sd_out:
+    rts
+
+| cl_sppub (d6 = t): its pending slice to the engine now (and a new machine's restart). Keeps d2-d7.
+cl_sppub:
+    lea     cl_spd,%a0
+    clr.b   (%a0,%d6.l)
+    cmpi.l  #8,%d6
+    bcc.b   sp_m
+    move.b  cl_spr,%d0
+    btst    %d6,%d0
+    beq.b   sp_a
+    bclr    %d6,%d0
+    move.b  %d0,cl_spr
+    moveq   #1,%d0
+    lsl.l   %d6,%d0
+    move.b  ENG_RESTART,%d1
+    or.l    %d1,%d0
+    move.b  %d0,ENG_RESTART
+sp_a:
+    move.l  %d6,-(%sp)
+    lea     cl_spp,%a0
+    moveq   #0,%d0
+    move.b  (%a0,%d6.l),%d0
+    move.l  %d0,-(%sp)
+    moveq   #0,%d0
+    move.b  PLAY_BANK,%d0
+    move.l  %d0,-(%sp)
+    jsr     TRK_APPLY
+    lea     12(%sp),%sp
+    rts
+sp_m:
+    move.l  %d6,%d0
+    subq.l  #8,%d0
+    move.l  %d0,-(%sp)
+    lea     cl_spp,%a0
+    moveq   #0,%d0
+    move.b  (%a0,%d6.l),%d0
+    move.l  %d0,-(%sp)
+    moveq   #0,%d0
+    move.b  PLAY_BANK,%d0
+    move.l  %d0,-(%sp)
+    jsr     cl_mapply
+    lea     12(%sp),%sp
+    rts
+
+| cl_spflush (UI task, the transport stopped): every pending slice to the engine at once.
+cl_spflush:
+    move.l  %d6,-(%sp)
+    moveq   #0,%d6
+sf_l:
+    lea     cl_spd,%a0
+    tst.b   (%a0,%d6.l)
+    beq.b   sf_n
+    bsr.w   cl_sppub
+sf_n:
+    addq.l  #1,%d6
+    cmpi.l  #16,%d6
+    bne.b   sf_l
+    clr.b   cl_spn
+    move.l  (%sp)+,%d6
+    rts
 
 | d0 = scale index -> d0 = ticks per step (out-of-range scale reads as 1x, as DIRECT JUMP does)
 cl_tps:
@@ -4254,6 +4964,15 @@ cl_landone:
     move.l  %d6,-(%sp)
     jsr     cl_apply
     lea     16(%sp),%sp
+    move.l  %d6,%d0
+    add.l   %d0,%d0
+    lea     cl_cue,%a0
+    move.b  (%a0,%d0.l),%d0
+    cmpi.b  #SRC_CARD,%d0
+    bne.b   lo1_nc
+    moveq   #1,%d0
+    move.b  %d0,cl_ctoast               | the card's toast at the landing (the user, 2026-11-08)
+lo1_nc:
     jsr     cl_dropone
     move.w  cl_post,%d0
     moveq   #1,%d1
@@ -4262,8 +4981,14 @@ cl_landone:
     move.w  %d0,cl_post                 | the UI side writes the SRAM mirror + dirty flags
     rts
 
-| cl_dropone (d6 = track): forget its cue
+| cl_dropone (d6 = track): forget its cue (and its place in a together landing)
 cl_dropone:
+    move.w  cl_tog,%d0
+    bclr    %d6,%d0
+    move.w  %d0,cl_tog
+    bne.b   do_tg
+    clr.b   cl_togr
+do_tg:
     move.l  %d6,%d0
     add.l   %d0,%d0
     lea     cl_cue,%a0
@@ -4274,6 +4999,9 @@ cl_dropone:
     bra.w   cl_count
 
 cl_dropall:
+    clr.w   cl_tog                      | no together landing either
+    clr.b   cl_togr
+    clr.b   cl_togp
     lea     cl_cue,%a0
     moveq   #-1,%d1
     moveq   #16,%d0
@@ -4312,8 +5040,18 @@ cl_uitail:
     beq.b   ut_ng
     jsr     cl_ptnswitch
 ut_ng:
+    tst.b   cl_ctoast                   | a card reload landed: its toast (the user, 2026-11-08)
+    beq.b   ut_nct
+    clr.b   cl_ctoast
+    jsr     cl_rqtoast
+ut_nct:
+    jsr     cl_rqidle                   | a card generation with nothing left pending is over
     tst.l   RUNNING
     bne.b   ut_run
+    tst.b   cl_spn                      | stopped with a slice still on its way: now
+    beq.b   ut_nsp
+    jsr     cl_spflush
+ut_nsp:
     clr.b   cl_self                     | stopped before it landed: ORIG PTN+PART's request goes
 ut_run:
     tst.b   cl_open
@@ -6407,6 +7145,9 @@ cl_ledrec:  .long 0, cl_paint, cl_blink
 cl_win:     .long 0
 cl_gmask:   .long 0                     | the painters' group test (cl_gupd): 0 = none, else 0x10000 | members
 cl_tabsig:  .long 0                     | the tabs' last group / active / side (cl_tabhook)
+cl_xc:      .fill 16, 4, 0xffffffff     | cl_exec: each target's code (pass 1), -1 = none
+cl_xany:    .byte 0                     | ... one of them loads (not a restore): all cued
+            .byte 0
 cl_fcode:   .short 0                    | the load confirmation's slot: bank << 8 | slot (cl_exec -> cl_draw)
 cl_pclose:  .byte 0                     | a project load: close Clyps at the UI tail
             .byte 0
@@ -6482,6 +7223,19 @@ cl_pwhole:  .byte 0                     | ORIG PTN/PART pending: the first landi
 cl_post:    .short 0                    | tracks whose landing the UI side has not followed up yet
 cl_bph:     .byte 0                     | the cue flash phase (cl_blink)
 cl_nq:      .byte 0                     | cues pending (the tick's fast path)
+            .align 2
+cl_tog:     .short 0                    | tracks landing TOGETHER (a pattern reload / restore of the pattern you
+                                        | are on, or a NORMAL track reload changing the pattern's rate)
+cl_togr:    .byte 0                     | ... and the landing changes the pattern's own rate: every track and
+                                        | the master re-phased (RELOAD's rt3_all / rl_rephase)
+cl_togs:    .byte 0                     | ... their source kind (SRC_CARD / SRC_ORIG): its slab has the new trailer
+cl_togp:    .byte 0                     | ... a whole pattern: its trailer lands first (cl_togpre)
+cl_ctoast:  .byte 0                     | a card reload landed: its toast at the UI tail (the user, 2026-11-08)
+cl_noskip:  .byte 0                     | arming: load even what already plays (a pattern whose Part link changes)
+cl_spn:     .byte 0                     | a landed slice waits for its step (cl_spdo)
+cl_spr:     .byte 0                     | ... audio tracks whose new machine restarts with it
+cl_spd:     .space 16                   | per track: ticks until its slice reaches the engine (0xff armed, 0 none)
+cl_spp:     .space 16                   | ... its Part index
             .align 2
 
     .section .dram,"ax"

@@ -52,12 +52,11 @@
 | t = 0..15 (MIDI 8..15) for the track kinds; the pattern is in the PLAYING bank.
     .global cl_rlreq
 cl_rlreq:
-    lea     -12(%sp),%sp
-    movem.l %d2-%d4,(%sp)
-    move.l  16(%sp),%d2                 | kind
-    move.l  20(%sp),%d3                 | pattern
-    move.l  24(%sp),%d4                 | t
-    move.b  %d3,rq_pat
+    lea     -16(%sp),%sp
+    movem.l %d2-%d5,(%sp)
+    move.l  20(%sp),%d2                 | kind
+    move.l  24(%sp),%d3                 | pattern
+    move.l  28(%sp),%d4                 | t
     move.b  %d4,rq_t
 |   the message: line 1 / line 2 (one line for the pattern)
     lea     rq_s_proj,%a0               | line 2 for every kind (the user, 2026-10-30; "RELOADED FROM
@@ -88,9 +87,129 @@ rr_k:
     jsr     SPRINTF                     | (no % in either string)
     addq.l  #8,%sp
 rr_post:
+|   GENERATIONS (the user, 2026-11-08 / 09; RELOAD's rl_req): one target (bank, pattern) and what is wanted
+|   of it -- the whole pattern, or tracks (the latest kind per track wins). A pattern reload, a pending
+|   pattern one, another target, or nothing alive starts a new generation: what was pending goes (its card
+|   cues, a superseded pattern's switch). The card is read ONCE per generation; a chord for a target already
+|   staged arms that track at once. A job is never posted while one is queued: a second post of stock's one
+|   message would reach the 0x14 case with rq_kind consumed and run stock's whole-bank reload.
+    moveq   #0,%d5                      | d5 = the target: bank << 8 | (the pattern / the one you are on)
+    move.b  PLAY_BANK,%d5
+    lsl.l   #8,%d5
+    cmpi.l  #RQ_PTN,%d2
+    beq.b   rr_tp
+    move.b  ACT_PAT,%d5
+    bra.b   rr_tg
+rr_tp:
+    move.b  %d3,%d5
+rr_tg:
+    cmpi.l  #RQ_PTN,%d2
+    beq.b   rr_new
+    tst.b   rq_ptnr
+    bne.b   rr_new
+    cmp.w   rq_tgt,%d5
+    bne.b   rr_new
+    tst.b   rq_live
+    bne.b   rr_same
+rr_new:
+    moveq   #0,%d0
+    move.b  rq_gen,%d0
+    addq.l  #1,%d0
+    move.b  %d0,rq_gen
+    move.w  %d5,rq_tgt
+    clr.w   rq_seqm
+    clr.w   rq_fullm
+    clr.b   rq_ptnr
+    clr.b   rq_stok
+    clr.b   cl_ptngo                    | a superseded pattern job may not switch any more (2026-11-09, HW)
+    jsr     cl_dropcard                 | the old generation's pending landings go
     moveq   #1,%d0
-    move.b  %d0,rq_msg                  | armed before the post (S93)
-    move.b  %d2,rq_kind
+    move.b  %d0,rq_live
+    move.b  %d0,rq_need                 | this target must be read
+rr_same:
+    cmpi.l  #RQ_PTN,%d2
+    bne.b   rr_trk2
+    moveq   #1,%d0
+    move.b  %d0,rq_ptnr
+    move.b  %d3,rq_pat
+    moveq   #0,%d0                      | the pattern you are on while another is cued: that cue goes, by
+    move.b  ACT_PAT,%d0                 | stock's own cue (as [PTN] + its trig does; 2026-11-09, HW) --
+    cmp.l   %d3,%d0                     | and every track's pending load: nothing cued may land after it
+    bne.w   rr_msgx                     | (item 11)
+    jsr     cl_dropall
+    jsr     cl_ptncancel
+    bra.w   rr_msgx
+rr_trk2:
+    move.l  %d6,-(%sp)                  | the track's pending load goes now: the card's copy lands in place,
+    move.l  %d4,%d6                     | nothing cued may land after it (item 11, the user 2026-11-09)
+    jsr     cl_dropone
+    move.l  (%sp)+,%d6
+    move.b  ACT_PAT,%d0
+    move.b  %d0,rq_pat
+    moveq   #1,%d0
+    lsl.l   %d4,%d0                     | d0 = the track's bit, d1 = the others
+    move.l  %d0,%d1
+    not.l   %d1
+    cmpi.l  #RQ_TRKFULL,%d2
+    beq.b   rr_f
+    move.w  rq_seqm,%d3
+    or.l    %d0,%d3
+    move.w  %d3,rq_seqm
+    move.w  rq_fullm,%d3
+    and.l   %d1,%d3
+    move.w  %d3,rq_fullm
+    moveq   #0,%d2                      | d2 = full
+    bra.b   rr_st
+rr_f:
+    move.w  rq_fullm,%d3
+    or.l    %d0,%d3
+    move.w  %d3,rq_fullm
+    move.w  rq_seqm,%d3
+    and.l   %d1,%d3
+    move.w  %d3,rq_seqm
+    moveq   #1,%d2
+rr_st:
+    tst.b   rq_stok                     | this generation is staged already: the track lands at once
+    beq.b   rr_msgx
+    move.b  rq_sgen,%d0
+    cmp.b   rq_gen,%d0
+    bne.b   rr_msgx
+    moveq   #1,%d0
+    move.b  %d0,rq_msg
+    move.l  %d4,%d0
+    move.l  %d2,%d1
+    jsr     cl_rqarm1
+    bra.b   rr_out
+rr_msgx:
+    moveq   #1,%d0
+    move.b  %d0,rq_msg                  | its toast: at the landing (a pattern you are not on: the job's end)
+    tst.b   rq_need
+    beq.b   rr_out
+    tst.b   rq_kind                     | posted, not started: it reads this target when it starts
+    beq.b   rr_nq
+    jsr     rq_setkind
+    bra.b   rr_out
+rr_nq:
+    tst.b   rq_busy                     | running (an older target): cl_rldone posts again
+    bne.b   rr_out
+    jsr     rq_post
+rr_out:
+    movem.l (%sp),%d2-%d5
+    lea     16(%sp),%sp
+    rts
+
+| rq_setkind: the job's kind for the generation -- the pattern, or tracks (their Part is always read: a
+| FULL chord may join). rq_post: that, then the type-0x14 storage job for the playing bank. UI task.
+rq_setkind:
+    moveq   #RQ_TRKFULL,%d0
+    tst.b   rq_ptnr
+    beq.b   rk_k
+    moveq   #RQ_PTN,%d0
+rk_k:
+    move.b  %d0,rq_kind
+    rts
+rq_post:
+    bsr.b   rq_setkind
     moveq   #0,%d0
     move.b  PLAY_BANK,%d0
     moveq   #1,%d1
@@ -98,8 +217,6 @@ rr_post:
     move.l  %d1,-(%sp)
     jsr     RL_JOBPOST                  | FUN_40022778(1 << bank)
     addq.l  #4,%sp
-    movem.l (%sp),%d2-%d4
-    lea     12(%sp),%sp
     rts
 
 | ================================================================ the job (worker task)
@@ -128,6 +245,11 @@ rj_ours:
     moveq   #0,%d7
     move.b  rq_kind,%d7                 | d7 = kind
     clr.b   rq_kind                     | consumed: a re-entrant stock job must not see it
+    move.b  rq_gen,%d0                  | the generation this read serves
+    move.b  %d0,rq_jgen
+    clr.b   rq_need
+    moveq   #1,%d0
+    move.b  %d0,rq_busy
     clr.b   rq_own                      | set only on success (S90)
     clr.b   rq_varm
     move.w  RL_CKSUM,%d0
@@ -309,120 +431,35 @@ rj_nt:
     addq.l  #1,%d0
     cmpi.l  #PATSTRIDE,%d0
     bcs.b   rj_nt
+|   2026-11-09 (the user, matching RELOAD): what the card brought is STAGED here (RQ_SLAB / RQ_PART) and
+|   lands like temp reload -- a track at its next step start, in phase, its slice in the same tick; the
+|   pattern you are on on the first step its tracks share (cl_togarm). cl_rldone arms them (UI task).
+|   Only a pattern you are NOT on is written now, and the OT goes to it (stock's cue). A read a newer
+|   request has replaced lands nothing.
+    move.b  rq_jgen,%d0
+    cmp.b   rq_gen,%d0
+    bne.w   rj_stale
     cmpi.l  #RQ_PTN,%d7
-    beq.w   rj_ptn
-|   ---- a track: its record (and, for a NORMAL pattern, the pattern's own length / scale) ----
+    bne.w   rj_stage
     moveq   #0,%d0
-    move.b  rq_t,%d0
-    move.l  %d0,-(%sp)
-    jsr     cl_toff                     | d0 = offset, d1 = length
-    addq.l  #4,%sp
-    move.l  %d0,rq_voff
-    move.l  %d1,-(%sp)
-    move.l  #RQ_SLAB,%d1
-    add.l   %d0,%d1
-    move.l  %d1,-(%sp)
-    move.l  %a4,%d1
-    add.l   %d0,%d1
-    move.l  %d1,-(%sp)
-    jsr     MEMCPY
-    lea     12(%sp),%sp
-    movea.l #RQ_SLAB,%a0                | the trig masks as reloaded (the finish verifies them)
-    adda.l  rq_voff,%a0
-    lea     rq_vsnap,%a1
-    moveq   #16,%d0
-rj_sn:
-    move.b  (%a0)+,(%a1)+
-    subq.l  #1,%d0
-    bne.b   rj_sn
+    move.b  ACT_PAT,%d0
+    cmp.l   %d5,%d0
+    beq.w   rj_stage
+    bra.w   rj_ptn
+rj_stage:
+    move.b  rq_jgen,%d0
+    move.b  %d0,rq_sgen
     moveq   #1,%d0
-    move.b  %d0,rq_varm
-    movea.l %a4,%a0
-    adda.l  #TRAILER,%a0
-    tst.b   T_SMODE(%a0)
-    beq.b   rj_tnorm
-    movea.l #RQ_SLAB,%a1
-    adda.l  #TRAILER,%a1
-    tst.b   T_SMODE(%a1)
-    bne.w   rj_tfull                    | PER TRACK, saved so too: the record's own bytes
-|   PER TRACK now, NORMAL as saved: a Clyps load converted it (the user, 2026-11-05: an edited "x" was left).
-|   The track plays the saved pattern's length / scale; when every track equals its original again, the
-|   conversion is undone (cl_back: the slab as loaded) and the mirror owes the whole slab.
-    moveq   #0x50,%d1
-    moveq   #0,%d0
-    move.b  rq_t,%d0
-    cmpi.l  #8,%d0
-    bcs.b   rj_tla
-    moveq   #0x28,%d1
-rj_tla:
-    add.l   rq_voff,%d1
-    move.b  T_LEN(%a1),%d0
-    move.b  %d0,(%a4,%d1.l)
-    move.b  T_SCALE(%a1),%d0
-    move.b  %d0,1(%a4,%d1.l)
-    movea.l %a4,%a2
-    jsr     cl_back
+    move.b  %d0,rq_stok
+    move.b  %d0,rq_arm                  | cl_rldone arms the landings
+    move.b  %d0,rq_own                  | success: doneFn skips its whole-bank reload once
+    bsr.w   rq_names                    | the names as saved, staged (rq_nst): they land with the tracks
     moveq   #1,%d0
-    move.b  %d0,cl_wslab
-    bra.w   rj_tfull
-rj_tnorm:
-    movea.l #RQ_SLAB,%a1
-    adda.l  #TRAILER,%a1
-    move.b  T_LEN(%a1),%d0
-    move.b  %d0,T_LEN(%a0)
-    move.b  T_SCALE(%a1),%d0
-    move.b  %d0,T_SCALE(%a0)
-    cmp.b   SCALE_IX,%d0
-    beq.b   rj_tfull
-    move.b  %d0,SCALE_IX                | the saved rate differs: apply it (as RELOAD does)
-rj_tfull:
-    cmpi.l  #RQ_TRKFULL,%d7
-    bne.w   rj_ok
-|   FULL: the track's slice from the card's Part, published for that track (Clyps' FULL load)
-    moveq   #0,%d6
-    move.b  rq_t,%d6                    | d6 = t
-    cmpi.l  #8,%d6
-    bcc.b   rj_fcopy
-    movea.l #RQ_PART,%a0
-    move.b  0x22(%a0,%d6.l),%d0
-    cmp.b   0x22(%a3,%d6.l),%d0
-    beq.b   rj_fcopy
-    moveq   #1,%d0                      | a new machine: restart the voice, PICKUP setup owed
-    lsl.l   %d6,%d0
-    move.b  ENG_RESTART,%d1
-    or.l    %d1,%d0
-    move.b  %d0,ENG_RESTART
-    lea     cl_postm,%a0
+    bra.w   rj_exit
+rj_stale:
     moveq   #1,%d0
-    move.b  %d0,(%a0,%d6.l)
-rj_fcopy:
-    pea     RQ_PART
-    move.l  %a3,-(%sp)
-    move.l  %d6,-(%sp)
-    jsr     cl_slice
-    lea     12(%sp),%sp
-    move.l  %d6,%d0
-    cmpi.l  #8,%d0
-    bcs.b   rj_ft
-    subq.l  #8,%d0
-rj_ft:
-    move.l  %d0,-(%sp)
-    move.l  %d2,-(%sp)
-    moveq   #0,%d0
-    move.b  PLAY_BANK,%d0
-    move.l  %d0,-(%sp)
-    cmpi.l  #8,%d6
-    bcc.b   rj_fm
-    jsr     TRK_APPLY
-    bra.b   rj_fp
-rj_fm:
-    jsr     cl_mapply
-rj_fp:
-    lea     12(%sp),%sp
-    lea     cl_postf,%a0                | the UI side: SRAM Part, edited flags, PICKUP, pages
-    moveq   #1,%d0
-    move.b  %d0,(%a0,%d6.l)
-    bra.w   rj_ok
+    move.b  %d0,rq_own                  | ours all the same: never stock's whole-bank reload
+    bra.w   rj_exit
 |   ---- the pattern: its whole slab (with its saved Part link) and that whole Part ----
 rj_ptn:
     pea     PATSTRIDE
@@ -585,7 +622,8 @@ rj_lt:
     jsr     MEMCPY
     lea     12(%sp),%sp
 rj_lv:
-    bsr.w   rq_names                    | the reloaded sequences' names, as saved
+    bsr.w   rq_names                    | the reloaded sequences' names, as saved (staged) ...
+    bsr.w   rq_ncopy                    | ... a pattern you are not on: they land with it now
     moveq   #1,%d0
 rj_exit:
     move.w  rq_cksum,%d1
@@ -610,23 +648,9 @@ rq_names:
     lea     -16(%sp),%sp
     movem.l %d2-%d4/%a2,(%sp)
     move.l  %d5,%d4
-    lsl.l   #4,%d4                      | d4 = the first index in the bank
+    lsl.l   #4,%d4                      | d4 = the first index in the bank: pattern P's 16 names
     moveq   #16,%d3                     | d3 = how many
-    cmpi.l  #RQ_PTN,%d7
-    beq.b   rn2_n
-    moveq   #0,%d0
-    move.b  rq_t,%d0
-    add.l   %d0,%d4
-    moveq   #1,%d3
-rn2_n:
-    moveq   #0,%d0
-    move.b  PLAY_BANK,%d0
-    lsl.l   #8,%d0
-    add.l   %d4,%d0
-    moveq   #NAME_W,%d1
-    muls.l  %d1,%d0
-    movea.l #NAMES,%a2
-    adda.l  %d0,%a2                     | a2 = the first name
+    lea     rq_nst,%a2                  | a2 = the stage (they land with the tracks, cl_nload)
     moveq   #NAME_W,%d2
     muls.l  %d3,%d2                     | d2 = the bytes
     movea.l %a2,%a0                     | none, until the file says otherwise
@@ -796,6 +820,23 @@ cl_rldone:
     jmp     RL_DONERES
 rd_ours:
     clr.b   rq_own
+    clr.b   rq_busy
+    tst.b   rq_arm
+    beq.b   rd_na
+    clr.b   rq_arm
+    jsr     cl_rqarm                    | the staged generation's landings (this is the UI task: msg 0x2b)
+    bra.b   rd_more
+rd_na:
+    move.b  rq_jgen,%d0                 | a read a newer request replaced: nothing to show
+    cmp.b   rq_gen,%d0
+    bne.b   rd_more
+    bsr.w   rd_old                      | a pattern you are not on: written, its toast now
+rd_more:
+    tst.b   rq_need                     | a newer target waits for its read
+    beq.w   rd_done
+    jsr     rq_post
+    bra.w   rd_done
+rd_old:
     tst.b   rq_varm
     beq.b   rd_msg
     clr.b   rq_varm
@@ -825,7 +866,7 @@ rd_lost:
     bra.b   rd_show
 rd_msg:
     tst.b   rq_msg
-    beq.w   rd_done
+    beq.b   rt_out
     lea     rq_line1,%a0
     move.l  %a0,rq_lines
     move.l  rq_l2p,%a0
@@ -838,8 +879,197 @@ rd_show:
     pea     rq_lines
     jsr     cl_toast2
     addq.l  #8,%sp
+    rts
 rd_done:
     jmp     RL_DONEEPI                  | skip the whole-bank reload
+
+| cl_rqtoast (UI tail, after a card landing): the request's toast, once.
+    .global cl_rqtoast
+cl_rqtoast:
+    tst.b   rq_msg
+    beq.b   rt_out
+    lea     rq_line1,%a0
+    move.l  %a0,rq_lines
+    move.l  rq_l2p,%a0
+    move.l  %a0,rq_lines+4
+    moveq   #0,%d0
+    move.b  rq_nl,%d0
+    bra.w   rd_show
+rt_out:
+    rts
+
+| cl_rqarm (UI task, the job's end): the staged generation's landings -- the pattern you are on lands
+| together (cl_togarm); tracks each at their next step start, in phase (cl_rqarm1), as a batch.
+cl_rqarm:
+    tst.b   rq_stok
+    beq.w   qa_out
+    move.b  rq_sgen,%d0
+    cmp.b   rq_gen,%d0
+    bne.w   qa_out
+    tst.b   rq_ptnr
+    beq.b   qa_trk
+    move.b  rq_pat,%d0
+    cmp.b   ACT_PAT,%d0
+    bne.w   qa_out                      | no longer the pattern you are on (a stock change landed): drop it
+    pea     SRC_CARD
+    jsr     cl_togarm
+    addq.l  #4,%sp
+    clr.b   rq_ptnr
+    bra.w   qa_out
+qa_trk:
+    move.l  %d2,-(%sp)
+    jsr     cl_bbeg
+    moveq   #0,%d2
+qa_l:
+    move.w  rq_seqm,%d0
+    btst    %d2,%d0
+    beq.b   qa_f
+    moveq   #0,%d1
+    bra.b   qa_go
+qa_f:
+    move.w  rq_fullm,%d0
+    btst    %d2,%d0
+    beq.b   qa_n
+    moveq   #1,%d1
+qa_go:
+    move.l  %d2,%d0
+    jsr     cl_rqarm1
+qa_n:
+    addq.l  #1,%d2
+    cmpi.l  #16,%d2
+    bne.b   qa_l
+    jsr     cl_bend
+    clr.w   rq_seqm
+    clr.w   rq_fullm
+    move.l  (%sp)+,%d2
+qa_out:
+    rts
+
+| cl_rqarm1 (d0 = t, d1 = 1 FULL / 0 the sequence): the card's copy of t, at its next step start, in phase
+| (cl_cueload now = 1: Clyps' temp reload path); stopped: at once. A NORMAL pattern whose saved length /
+| scale differ changes the pattern's own rate: t lands with every track and the master re-phased
+| (cl_tog / cl_togr, the user 2026-11-08: RELOAD's rl_rephase). Keeps d2-d7/a2-a6.
+cl_rqarm1:
+    move.l  %d2,-(%sp)
+    move.l  %d0,%d2                     | d2 = t
+    pea     1                           | now
+    move.l  #SRC_CARD<<8,%d0
+    tst.l   %d1
+    beq.b   q1_s
+    ori.l   #0x10000,%d0
+q1_s:
+    move.l  %d0,-(%sp)
+    move.l  %d2,-(%sp)
+    jsr     cl_cueload
+    lea     12(%sp),%sp
+    move.l  %d2,%d0                     | its name as saved, even when nothing needed to land
+    jsr     cl_cardname
+    tst.l   RUNNING
+    bne.b   q1_run
+    moveq   #1,%d0                      | stopped: it landed now -- its toast at the UI tail
+    move.b  %d0,cl_ctoast
+    bra.b   q1_out
+q1_run:
+    move.l  %d2,%d0
+    add.l   %d0,%d0
+    lea     cl_cue,%a0
+    move.b  (%a0,%d0.l),%d0
+    cmpi.b  #SRC_CARD,%d0
+    bne.b   q1_out                      | nothing to land (it already plays)
+    jsr     cl_live
+    adda.l  #TRAILER,%a0
+    tst.b   T_SMODE(%a0)
+    bne.b   q1_out                      | PER TRACK: the track's own rate lands with it
+    movea.l #RQ_SLAB+TRAILER,%a1
+    move.b  T_LEN(%a0),%d0
+    cmp.b   T_LEN(%a1),%d0
+    bne.b   q1_rate
+    move.b  T_SCALE(%a0),%d0
+    cmp.b   T_SCALE(%a1),%d0
+    beq.b   q1_out
+q1_rate:
+    move.w  cl_tog,%d0
+    bset    %d2,%d0
+    move.w  %d0,cl_tog
+    moveq   #1,%d0
+    move.b  %d0,cl_togr
+    move.b  #SRC_CARD,%d0
+    move.b  %d0,cl_togs
+q1_out:
+    move.l  (%sp)+,%d2
+    rts
+
+| cl_dropcard (UI task): every pending card landing goes (a new generation replaced it). Keeps d2-d7.
+cl_dropcard:
+    move.l  %d6,-(%sp)
+    moveq   #0,%d6
+dc_l:
+    move.l  %d6,%d0
+    add.l   %d0,%d0
+    lea     cl_cue,%a0
+    move.b  (%a0,%d0.l),%d0
+    cmpi.b  #SRC_CARD,%d0
+    bne.b   dc_n
+    jsr     cl_dropone
+dc_n:
+    addq.l  #1,%d6
+    cmpi.l  #16,%d6
+    bne.b   dc_l
+    move.l  (%sp)+,%d6
+    rts
+
+| rq_ncopy (worker, a pattern you are not on): its staged names -> its names now.
+rq_ncopy:
+    moveq   #0,%d0
+    move.b  PLAY_BANK,%d0
+    lsl.l   #4,%d0
+    add.l   %d5,%d0
+    lsl.l   #4,%d0
+    moveq   #NAME_W,%d1
+    muls.l  %d1,%d0
+    movea.l #NAMES,%a1
+    adda.l  %d0,%a1
+    lea     rq_nst,%a0
+    move.l  #16*NAME_W,%d0
+nc_l:
+    move.b  (%a0)+,(%a1)+
+    subq.l  #1,%d0
+    bne.b   nc_l
+    rts
+
+| cl_rqidle (UI tail): a generation is over once nothing of it is queued, read or pending -- the next chord
+| reads the card again (a SAVE in between must never land the older copy).
+    .global cl_rqidle
+cl_rqidle:
+    tst.b   rq_live
+    beq.b   qi_out
+    tst.b   rq_kind
+    bne.b   qi_out
+    tst.b   rq_busy
+    bne.b   qi_out
+    tst.b   rq_need
+    bne.b   qi_out
+    tst.b   rq_arm
+    bne.b   qi_out
+    tst.b   rq_ptnr
+    bne.b   qi_out
+    tst.w   rq_seqm
+    bne.b   qi_out
+    tst.w   rq_fullm
+    bne.b   qi_out
+    lea     cl_cue,%a0
+    moveq   #16,%d1
+qi_l:
+    move.b  (%a0),%d0
+    cmpi.b  #SRC_CARD,%d0
+    beq.b   qi_out
+    addq.l  #2,%a0
+    subq.l  #1,%d1
+    bne.b   qi_l
+    clr.b   rq_live
+    clr.b   rq_stok
+qi_out:
+    rts
 
 | cl_toast2(lines[], n): stock's block toast grown to n lines (RELOAD's rl3_toast2, unchanged in
 | effect): width = widest + 15, height 0x12 + 7(n-1), line 0 on top through stock's own drawer.
@@ -960,6 +1190,20 @@ rq_nl:      .byte 0
 rq_msg:     .byte 0                     | armed before the post
 rq_own:     .byte 0                     | the job succeeded: doneFn's next success is ours
 rq_varm:    .byte 0
+rq_gen:     .byte 0                     | the generation (cl_rlreq) ...
+rq_jgen:    .byte 0                     | ... the one the running read serves
+rq_sgen:    .byte 0                     | ... the one staged in RQ_SLAB / RQ_PART
+rq_stok:    .byte 0                     | the stage holds the current generation's copy
+rq_live:    .byte 0                     | a generation is alive (queued, read, or landings pending)
+rq_need:    .byte 0                     | its target must still be read
+rq_busy:    .byte 0                     | a read is running
+rq_arm:     .byte 0                     | the read staged: cl_rldone arms the landings
+rq_ptnr:    .byte 0                     | the generation is a whole pattern
+            .align 2
+rq_tgt:     .short 0xffff               | bank << 8 | pattern
+rq_seqm:    .short 0                    | tracks wanted, sequence only
+rq_fullm:   .short 0                    | tracks wanted with their slice
+rq_nst:     .space 16*NAME_W            | the staged names (cl_nload)
             .align 2
 rq_vsnap:   .space 16
 rq_hdr:     .space 32
