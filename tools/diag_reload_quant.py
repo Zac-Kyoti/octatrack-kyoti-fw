@@ -100,10 +100,13 @@ def main(argv):
 
     # ---- instrumentation: where each landing happens, and what the sequencer state was then
     events = []
-    state = {"in_tick": False, "count": None, "applies": 0}
+    state = {"in_tick": False, "count": None, "applies": 0, "tick": 0}
+    applies = []                              # (tick, track) of every TRK_APPLY (2026-11-09: when it sounds)
+    u.hook_add(er.eb.UC_HOOK_CODE, lambda uc, ad, sz, ud: state.__setitem__("tick", state["tick"] + 1),
+               begin=0x400A1F72, end=0x400A1F72)
 
     def snap(where):
-        return dict(where=where, ms=rd(MSTEP, 2), tc=rd(TICK_CTR, 1), sc=rd(SCALE_IX, 1),
+        return dict(where=where, tick=state["tick"], ms=rd(MSTEP, 2), tc=rd(TICK_CTR, 1), sc=rd(SCALE_IX, 1),
                     step=list(u.mem_read(STEP_ARR, 16)), stepm1=list(u.mem_read(STEPM1_ARR, 16)),
                     ticks=list(u.mem_read(TICKS_ARR, 16)), tscale=list(u.mem_read(TSCALE_ARR, 16)),
                     toast=rd(TOAST, 4))
@@ -129,6 +132,7 @@ def main(argv):
     def on_apply(uc, ad, sz, ud):
         if state["in_tick"]:
             state["applies"] += 1
+        applies.append((state["tick"], rd(uc.reg_read(er.eb.UC_M68K_REG_A7) + 12, 4)))
 
     u.hook_add(er.eb.UC_HOOK_CODE, on_put, begin=syms["rl_put"], end=syms["rl_put"])
     u.hook_add(er.eb.UC_HOOK_CODE, on_tick_in, begin=syms["rl_tick"], end=syms["rl_tick"])
@@ -162,6 +166,7 @@ def main(argv):
 
     def gesture(keys, ms=3000):
         events.clear()
+        applies.clear()
         state["applies"] = 0
         pre = snap("pre")
         for k, ev in keys:
@@ -215,8 +220,11 @@ def main(argv):
         e, t0, old_ok = res
         out = e["out"]
         check(e["where"] == "tick" and old_ok, "C: in phase D, at a step start of T1")
-        check(out is not None and out["applies"] == 1, f"C: T1's slice published in that same tick "
-              f"(TRK_APPLY x{out['applies'] if out else '?'})")
+        exp = e["tick"] + tps(out["tscale"][0]) if out else None
+        print(f"      C: landing tick {e['tick']}; TRK_APPLY at {applies}; expected T1 at {exp}", flush=True)
+        check(out is not None and out["applies"] == 0, "C: no engine apply in the landing tick (2026-11-09)")
+        check(applies == [(exp, 0)], "C: T1's slice reaches the engine exactly when its first new step sounds "
+              "(landing tick + tps of its new scale)")
     check(same_rec(rec(0), card_slab[:TRAC_A]) and bytes(u.mem_read(pb + 0x2A, 30)) == card_part[0x2A:0x2A + 30],
           "C: T1's record and slice from the card")
     check(bytes(u.mem_read(pb + 0x2A + 30, 30)) == e2, "C: T2's slice untouched")
@@ -240,8 +248,10 @@ def main(argv):
         out = e["out"]
         check(e["where"] == "tick" and old_ok, "D: one tick, a step start of all 16 tracks")
 
-        check(out is not None and out["applies"] == 8, f"D: the Part published track by track in that tick "
-              f"(TRK_APPLY x{out['applies'] if out else '?'})")
+        late = [(t_, k) for t_, k in applies if t_ != e["tick"] + tps(out["tscale"][k])] if out else ["?"]
+        print(f"      D: landing tick {e['tick']}; TRK_APPLY at {applies}", flush=True)
+        check(out is not None and out["applies"] == 0 and applies and not late,
+              f"D: no apply in the landing tick; each changed track's at landing + tps of its scale ({late})")
         print(f"      D: instructions in the landing tick's hook: {counter['n']:,}", flush=True)
     check(same_slab(slab(), card_slab) and part() == card_part, "D: the whole pattern and its Part from the card")
     check(rd(ACT, 1) == act, "D: still on the same pattern")
@@ -294,6 +304,83 @@ def main(argv):
     gesture([(PTN, 1), (0x10, 1), (0x10, 0), (PTN, 0), (BANK, 1), (0x10, 1), (0x10, 0), (BANK, 0)])
     check(same_rec(rec(0), card_slab[:TRAC_A]) and bytes(u.mem_read(pb + 0x2A, 30)) == card_part[0x2A:0x2A + 30],
           "H: T1's record and its slice from the card (FULL won)")
+
+    # ---- I: on P1, reload P2 (a pattern change: cued), then reload P1 during the cue: P2 must NOT land
+    #      (hardware 2026-11-09). The project's CHAIN AFTER = 4 steps (RAM) so the cue would land soon.
+    q = next(x for x in range(16) if x != act)
+    qt = [rd(0x400D80DC + 4 * i, 4) for i in range(17)]
+    u.mem_write(0x8000004E, bytes([qt.index(16)]))  # 16 steps: 1.5 s is still inside the cue
+    u.mem_write(slab_ad + 0x8E56, bytes([0xFF]))           # the pattern follows the project default
+    for delay in (300, 1500):                                # P2's card read still running / P2 already cued
+        print(f"I: on {act + 1}, [PTN] + [BANK] + trig {q + 1}, then trig {act + 1} {delay} ms later", flush=True)
+        seen = set()
+        events.clear()
+        key(PTN, 1); key(BANK, 1); key(q, 1); key(q, 0)
+        settle(delay)
+        p_mid = (rd(0x800065BF, 1), rd(0x800065C0, 1))
+        check(rd(ACT, 1) == act, f"I ({delay} ms): still on P{act + 1} when it is pressed (inside the cue)")
+        key(act, 1); key(act, 0); key(BANK, 0); key(PTN, 0)
+        for _ in range(80):                                 # > 8 steps at 1x
+            settle(34)
+            seen.add(rd(ACT, 1))
+        print(f"      queued when P{act + 1} was pressed {p_mid}; patterns played since "
+              f"{sorted(x + 1 for x in seen)}; queued now ({rd(0x800065BF, 1)}, {rd(0x800065C0, 1)})", flush=True)
+        check(seen == {act} and rd(0x800065C0, 1) == act,
+              f"I ({delay} ms): the P{act + 1} reload cancelled P{q + 1} -- it never played")
+
+    # ---- W: a FULL track reload landing at the MASTER WRAP. The tick would land it on T1's next step first,
+    #      so once it is armed the gate hides it from the tick (rl_arm = 0), cuts the master length to a wrap two
+    #      steps away, and re-arms it at the wrap body's entry -- the real rl_wrap landing then runs. Its slice
+    #      must reach the engine at the new cycle's first tick + tps (CLYPS' derived rule), never in the wrap.
+    print("W: [BANK] + [TRACK 1] landing at the master wrap", flush=True)
+    pb = bb + PART_OFF + link() * PARTSZ
+    flip(pb + 0x2A, 0x55)
+    ml = rd(slab_ad + 0x8E50, 2)
+    force = {"on": False}
+    hide = {"on": True, "caught": False}
+    wraps = []
+
+    def on_tick_hide(uc, ad, sz, ud):          # the tick's entry: an armed reload is hidden from it
+        if hide["on"] and uc.mem_read(syms["rl_arm"], 1) == b"\x01":
+            uc.mem_write(syms["rl_arm"], b"\x00")
+            hide["caught"] = True
+    hh = u.hook_add(er.eb.UC_HOOK_CODE, on_tick_hide, begin=syms["rl_tick"], end=syms["rl_tick"])
+
+    def on_wrap(uc, ad, sz, ud):
+        wraps.append(state["tick"])
+        if force["on"]:
+            force["on"] = False
+            hide["on"] = False
+            uc.mem_write(syms["rl_arm"], b"\x01")       # the armed reload, back for the wrap body to land
+            state["in_wrap"] = True                     # (on_wrap_in ran first and saw it hidden)
+    hw = u.hook_add(er.eb.UC_HOOK_CODE, on_wrap, begin=syms["rl_wrap"], end=syms["rl_wrap"])
+    events.clear()
+    applies.clear()
+    for k, ev in ((BANK, 1), (0x10, 1), (0x10, 0), (BANK, 0)):
+        key(k, ev)
+    for _ in range(400):                    # until the card read has armed it (the tick hides it)
+        if hide["caught"]:
+            break
+        rt.run(ms=20)
+    check(hide["caught"], "W: the reload armed (and hidden from the tick)")
+    u.mem_write(slab_ad + 0x8E50, (rd(MSTEP, 2) + 2).to_bytes(2, "big"))   # the master wraps in 2 steps
+    force["on"] = True
+    settle(2500)
+    u.hook_del(hw)
+    u.hook_del(hh)
+    res = landing("W", [0])
+    if res:
+        e = res[0]
+        wt = next((x for x in wraps if x >= e["tick"]), None)
+        tsc = rd(TSCALE_ARR, 1)
+        exp = (wt + 1 + tps(tsc)) if wt is not None else None
+        print(f"      W: landed in {e['where']} at tick {e['tick']}; wrap ticks {wraps[:4]}; T1 scale {tsc}; "
+              f"TRK_APPLY at {applies}; expected {exp}", flush=True)
+        check(e["where"] == "wrap", "W: landed in the wrap body")
+        check(applies == [(exp, 0)], "W: no apply in the wrap; the slice reaches the engine at the new cycle's "
+              "first tick + tps")
+    check(bytes(u.mem_read(pb + 0x2A, 30)) == card_part[0x2A:0x2A + 30], "W: T1's slice from the card")
+    u.mem_write(slab_ad + 0x8E50, ml.to_bytes(2, "big"))
 
     # ---- F: stopped
     print("F: STOP, [PTN] + [TRACK 1]", flush=True)

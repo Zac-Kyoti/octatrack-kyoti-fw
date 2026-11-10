@@ -100,6 +100,10 @@ def main(argv):
                lambda uc, ad_, sz, ud: jobs.append(1) if uc.reg_read(er.eb.UC_M68K_REG_D0) & 0xFF == 5 else None,
                begin=syms["rl_put"], end=syms["rl_put"])
 
+    ipl = []                                 # 2026-11-09: the interrupt mask when a landing copies (a task
+    u.hook_add(er.eb.UC_HOOK_CODE,           # context here: stopped) -- masked = the audio frame held off
+               lambda uc, ad_, sz, ud: ipl.append((uc.reg_read(er.eb.UC_M68K_REG_SR) >> 8) & 7),
+               begin=syms["rl_landall"], end=syms["rl_landall"])
     act = rd(0x800065BE, 1)
     q = next((x for x in range(16) if x != act and link(x) != link(act)), None)
     if q is None:
@@ -157,8 +161,8 @@ def main(argv):
     key(q, 1); key(q, 0, ms=5000); key(PTN, 0); key(BANK, 0, ms=1500)
     print(f"      calls {calls}; CUR_PART {rd(0x80000003, 1) + 1}", flush=True)
     check(same_slab(slab(q), card_q) and part(link(q)) == card_pq, f"C: pattern {q + 1} and its Part from the card")
-    check(calls["apply"] >= 8 and calls["rfrsh"] >= 1 and rd(0x80000003, 1) == link(q),
-          "C: the playing pattern's Part applied (per track: TRK_APPLY x8) and current, the page redraw ran")
+    check(calls["apply"] >= 1 and calls["rfrsh"] >= 1 and rd(0x80000003, 1) == link(q),
+          "C: the playing pattern's Part applied (per track, the changed ones: TRK_APPLY) and current, the redraw ran")
     after("C")
 
     print("D: the chord with no trig", flush=True)
@@ -174,6 +178,8 @@ def main(argv):
     check(slab(q) == e, "E: the TRACK key reloaded nothing")
     after("E")
 
+    print(f"      interrupt mask at each landing: {ipl}", flush=True)
+    check(ipl and max(ipl) < 7, "the landings copy with interrupts ON (hardware: a masked 43 KB copy clicked)")
     print("F: a plain [PTN] tap", flush=True)
     key(PTN, 1); key(PTN, 0, ms=300)
     check(rd(WIN_SLOT, 4) != 0, "F: stock's SELECT PATTERN opens on the release")

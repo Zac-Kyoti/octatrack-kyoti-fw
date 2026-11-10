@@ -743,6 +743,39 @@ rl3_do_pat:
     bne.w   r3d_out
     tst.l   POPUP
     bne.w   r3d_out
+|   2026-11-09 (hardware): the pattern you are on, while another one is cued, cancels that cue -- as
+|   stock's [PTN] + the playing pattern's trig does, through stock's own calls (0x40056b58..0x40056b8c):
+|   the chain off, the cue 0x400a1030(bank, the playing pattern) (the queued pair becomes the playing one),
+|   then stock's refreshes. DIRECT JUMP sees exactly what stock's own key would have done.
+    move.l  %d0,-(%sp)
+    move.b  ACT_PAT,%d1
+    cmp.b   %d0,%d1
+    bne.b   r3d_req
+    move.b  PEND_PAT,%d1
+    cmp.b   ACT_PAT,%d1
+    bne.b   r3d_cx
+    move.b  PEND_BANK,%d1
+    cmp.b   PLAY_BANK,%d1
+    beq.b   r3d_req
+r3d_cx:
+    moveq   #0,%d0
+    move.b  ACT_PAT,%d0
+    move.l  %d0,-(%sp)
+    jsr     CHAIN_OFF
+    moveq   #0,%d0
+    move.b  PLAY_BANK,%d0
+    move.l  %d0,-(%sp)
+    jsr     PAT_CUE                    | 0x400a1030(bank, the playing pattern)
+    jsr     0x400418e0                 | stock's refreshes after it
+    pea     -1
+    jsr     0x40083bc0
+    jsr     0x40032208
+    jsr     0x400486cc
+    jsr     0x4004b528
+    jsr     0x4004b08c
+    lea     12(%sp),%sp
+r3d_req:
+    move.l  (%sp)+,%d0
 |   2026-11-08 (3): through rl_req -- a new generation; the toast is chosen when it lands
     moveq   #RQ_PTN,%d1
     jsr     rl_req
@@ -1511,19 +1544,7 @@ rld_lv:
     move.l  %d0,-(%sp)
     jsr     LIVE_REFRESH               | FUN_4000faf0(bank): RAM->RAM, no card
     addq.l  #4,%sp
-|   the playing pattern's Part link changed under it: stock's whole-Part apply too (UI context: it
-|   posts a kernel message, which the tick may not)
-    tst.b   rl_lnk
-    beq.b   rld_pf
-    clr.b   rl_lnk
-    moveq   #0,%d0
-    move.b  CUR_PART,%d0
-    move.l  %d0,-(%sp)
-    moveq   #0,%d0
-    move.b  PLAY_BANK,%d0
-    move.l  %d0,-(%sp)
-    jsr     PARTAPPLY                  | FUN_40009094(bank, part)
-    addq.l  #8,%sp
+|   (a changed Part link's whole-Part apply: rl_uitick, once the deferred publishes are out)
 rld_pf:
     moveq   #1,%d0
     move.l  %d0,RDRAW                  | Session 93: repaint after the data has landed
@@ -1721,11 +1742,6 @@ rlj_nt:
     moveq   #1,%d0
     move.b  %d0,rl_nopart              | the sequences land, the Part does not
 rlj_staged:
-    move.b  rq_ptn,%d0
-    beq.b   rlj_arm
-    move.l  %d5,%d0
-    ori.l   #0x80,%d0
-    move.b  %d0,rl_ptngo               | rl_follow: the OT goes to it (nothing if it already plays)
 rlj_arm:
     move.b  rl_jgen,%d0
     bsr.w   rl_stdone                  | arm (playing) or land now (stopped / not playing)
@@ -1926,6 +1942,7 @@ rq_fresh:
     clr.b   rl_lp
     clr.b   rl_arm
     clr.b   st_ok
+    clr.b   rl_ptngo                   | 2026-11-09: a switch an older request owed is forgotten
     rts
 
 | rl_stdone (the worker, at the end of a staging job): arm what the generation wants, or land it now
@@ -1948,8 +1965,13 @@ rl_stdone:
     move.w  %d0,rl_lf
     move.b  rq_ptn,%d0
     move.b  %d0,rl_lp
-    moveq   #1,%d0
-    move.b  %d0,rl_arm
+    beq.b   sd_ng
+|   2026-11-09: the switch is owed only by a CURRENT pattern request (a superseded job's never reaches
+|   here) -- hardware: P2 requested, then P1 (the pattern you are on): P2's job still set it, and P2 landed
+    move.b  rl_tpat,%d0
+    ori.l   #0x80,%d0
+    move.b  %d0,rl_ptngo               | rl_follow: the OT goes to it (nothing if it already plays)
+sd_ng:
     tst.l   RUNNING
     beq.b   sd_now
     move.b  rl_tpat,%d0
@@ -1957,17 +1979,26 @@ rl_stdone:
     bne.b   sd_now
     move.b  rl_tbank,%d0
     cmp.b   PLAY_BANK,%d0
-    beq.b   sd_out                     | playing: the tick lands it
-sd_now:
-    bsr.w   rl_landall                 | stopped / not playing: no phase to keep
+    bne.b   sd_now
+    moveq   #1,%d0
+    move.b  %d0,rl_arm                 | playing: the tick lands it
 sd_out:
     move.w  (%sp)+,%d1
     move.w  %d1,%sr
     move.l  (%sp)+,%d2
     rts
+|   stopped / not playing: no phase to keep, nothing reads the target -- land it now, with
+|   interrupts ON (2026-11-09, hardware: a ~43 KB copy with them masked held off the audio frame
+|   interrupt and clicked on every [PTN] + [BANK] + trig). rl_arm stays 0, so the tick leaves it alone.
+sd_now:
+    move.w  (%sp)+,%d1
+    move.w  %d1,%sr
+    move.l  (%sp)+,%d2
+    bra.w   rl_landall
 
 | rl_landall: land everything pending now, data only (no counters: the caller sets them, stock
-| re-homes, or nothing plays). Any context; a task context calls it with interrupts masked.
+| re-homes, or nothing plays). Any context. Never with interrupts masked from a task: the copy is
+| long (2026-11-09) -- a task claims the landing first (rl_arm 0), so the tick cannot race it.
 rl_landall:
     lea     -12(%sp),%sp
     movem.l %d0-%d2,(%sp)
@@ -2202,13 +2233,24 @@ ry2_no:
     .global rl_tick
 rl_tick:
     tst.b   rl_arm
-    beq.w   rt3_out                    | nothing armed: one byte test per tick
+    bne.b   rt3_any
+    tst.b   rl_spn
+    beq.w   rt3_out                    | nothing armed or pending: two byte tests per tick
+rt3_any:
     tst.l   TICK_GATE
     bne.w   rt3_out
     tst.l   RUNNING
-    beq.w   rt3_out                    | stopped: the UI tick lands it
+    beq.w   rt3_out                    | stopped: the UI tick lands it / flushes the publishes
     lea     -60(%sp),%sp
     movem.l %d0-%d7/%a0-%a6,(%sp)
+    tst.b   rl_spn
+    beq.b   rt3_land
+    bsr.w   rl_spcount                 | the deferred publishes (2026-11-09)
+rt3_land:
+    tst.b   rl_arm
+    beq.w   rt3_done
+    moveq   #1,%d0
+    move.b  %d0,rl_defer               | an in-phase landing: its publishes wait for the new step to sound
     move.b  rl_tpat,%d0
     cmp.b   ACT_PAT,%d0
     bne.w   rt3_off
@@ -2300,8 +2342,14 @@ rt3_cl:
     bra.b   rt3_done
 rt3_off:
 |   the target no longer plays (a pattern change, a DIRECT JUMP): no phase to keep, land it now
+    clr.b   rl_defer
     bsr.w   rl_landall
 rt3_done:
+    clr.b   rl_defer
+    tst.b   rl_spn
+    beq.b   rt3_rest
+    bsr.w   rl_spcount0                | the ones armed in THIS tick get their count now
+rt3_rest:
     movem.l (%sp),%d0-%d7/%a0-%a6
     lea     60(%sp),%sp
 rt3_out:
@@ -2320,21 +2368,30 @@ rl_wrap:
     beq.b   rw2_out
     lea     -60(%sp),%sp
     movem.l %d0-%d7/%a0-%a6,(%sp)
-    bsr.w   rl_landall
-    move.b  PEND_PAT,%d1
+    moveq   #2,%d0                     | a stock pattern change lands here: no publish (stock applies
+    move.b  PEND_PAT,%d1               | the new pattern's Part itself)
     cmp.b   ACT_PAT,%d1
-    bne.b   rw2_done
+    bne.b   rw2_off
     move.b  PEND_BANK,%d1
     cmp.b   PLAY_BANK,%d1
-    bne.b   rw2_done
+    bne.b   rw2_off
+    moveq   #0,%d0                     | the target no longer plays: data only, published now
     move.b  rl_tpat,%d1
     cmp.b   ACT_PAT,%d1
-    bne.b   rw2_done
+    bne.b   rw2_off
     move.b  rl_tbank,%d1
     cmp.b   PLAY_BANK,%d1
-    bne.b   rw2_done
-    bsr.w   rl_scales                  | it plays on: the scale caches before stock's re-home
+    bne.b   rw2_off
+    moveq   #1,%d0                     | it plays on: published when its first new step sounds
+    move.b  %d0,rl_defer
+    bsr.w   rl_landall
+    bsr.w   rl_scales                  | the scale caches before stock's re-home
+    bra.b   rw2_done
+rw2_off:
+    move.b  %d0,rl_defer
+    bsr.w   rl_landall
 rw2_done:
+    clr.b   rl_defer
     movem.l (%sp),%d0-%d7/%a0-%a6
     lea     60(%sp),%sp
 rw2_out:
@@ -2353,33 +2410,59 @@ rl_uitick:
     beq.b   ru2_post
     tst.l   RUNNING
     bne.b   ru2_post
-    move.w  %sr,%d0
-    move.w  %d0,-(%sp)
+    move.w  %sr,%d0                    | claim it (the tick then leaves it alone), then land it with
+    move.w  %d0,-(%sp)                 | interrupts ON (2026-11-09: a long masked copy clicks)
     ori.l   #0x0700,%d0
     move.w  %d0,%sr
-    bsr.w   rl_landall
+    move.b  rl_arm,%d1
+    clr.b   rl_arm
     move.w  (%sp)+,%d0
     move.w  %d0,%sr
+    tst.b   %d1
+    beq.b   ru2_post
+    bsr.w   rl_landall
 ru2_post:
+    tst.b   rl_spn
+    beq.b   ru2_p2
+    tst.l   RUNNING
+    bne.b   ru2_p2
+    bsr.w   rl_spflush                 | stopped with publishes pending: now (2026-11-09)
+ru2_p2:
     tst.b   rl_post
-    beq.b   ru2_out
+    beq.b   ru2_lnk
     bsr.w   rl_follow
+ru2_lnk:
+|   the playing pattern's Part link changed: stock's whole-Part apply (it posts a kernel message: UI
+|   context only) once the track publishes are out -- not a step before the new pattern sounds
+    tst.b   rl_lnk
+    beq.b   ru2_out
+    tst.b   rl_spn
+    bne.b   ru2_out
+    tst.b   rl_arm
+    bne.b   ru2_out
+    clr.b   rl_lnk
+|   only if the reloaded pattern still plays (a pattern change since applied its own Part); the Part is
+|   the playing pattern's own link, not the UI mirror (CLYPS' session, 2026-11-09)
+    move.b  rl_tpat,%d0
+    cmp.b   ACT_PAT,%d0
+    bne.b   ru2_out
+    move.b  rl_tbank,%d0
+    cmp.b   PLAY_BANK,%d0
+    bne.b   ru2_out
+    bsr.w   rl_live
+    adda.l  #PAT_PART,%a0
+    moveq   #0,%d0
+    move.b  (%a0),%d0
+    andi.l  #3,%d0
+    move.l  %d0,-(%sp)
+    moveq   #0,%d0
+    move.b  PLAY_BANK,%d0
+    move.l  %d0,-(%sp)
+    jsr     PARTAPPLY                  | FUN_40009094(bank, part)
+    addq.l  #8,%sp
 ru2_out:
     move.l  TOAST_CD,%d0               | displaced; stock's beq follows on these flags
     jmp     UITICK_RES
-
-| rl_putm (d0 = kind): rl_put with interrupts masked, for a task context while the sequencer may run
-rl_putm:
-    move.l  %d1,-(%sp)
-    move.w  %sr,%d1
-    move.w  %d1,-(%sp)
-    ori.l   #0x0700,%d1
-    move.w  %d1,%sr
-    bsr.w   rl_put
-    move.w  (%sp)+,%d1
-    move.w  %d1,%sr
-    move.l  (%sp)+,%d1
-    rts
 
 | rl_put(d0 = kind) -- land what the worker staged (RQ_SLAB, RQ_PART) on the target (rl_tbank,
 | rl_tpat; a track: rl_t). No counters (the caller's). Writes RAM only (the slab, the Part, engine
@@ -2426,12 +2509,48 @@ rl_put:
     move.b  (%a0),%d2
     andi.l  #3,%d2                     | d2 = its Part (the saved link)
     bsr.w   rl_partp                   | a3 = that Part
+    clr.b   rl_lnk1
     bsr.w   rl_sounds                  | d4 = 1: it is sounding (CUR_PART becomes it when playing)
+|   2026-11-09: which tracks' slices change (rl_chg) -- only those go to the engine. Re-applying an
+|   unchanged Part to all 16 tracks on every reload did needless engine work. A changed Part LINK puts
+|   every track on another Part: all of them go, machines judged against the Part that was sounding.
+    movea.l %a3,%a2                    | a2 = the Part the engine plays now (for machine changes)
+    clr.w   rl_chg
+    moveq   #0,%d3
+rp_cg:
+    pea     RQ_PART
+    move.l  %a3,-(%sp)
+    move.l  %d3,-(%sp)
+    bsr.w   rl_slcmp
+    lea     12(%sp),%sp
+    tst.l   %d0
+    beq.b   rp_cn
+    moveq   #1,%d0
+    lsl.l   %d3,%d0
+    move.w  rl_chg,%d1
+    or.l    %d0,%d1
+    move.w  %d1,rl_chg
+rp_cn:
+    addq.l  #1,%d3
+    cmpi.l  #16,%d3
+    bne.b   rp_cg
+    tst.b   rl_lnk1
+    beq.b   rp_nl
+    move.w  #-1,%d0
+    move.w  %d0,rl_chg                 | another Part: every track
+    moveq   #0,%d0
+    move.b  rl_oldp,%d0
+    move.l  #PARTSZ,%d1
+    muls.l  %d1,%d0
+    movea.l %a5,%a2
+    adda.l  #PART_OFF,%a2
+    adda.l  %d0,%a2                    | a2 = the Part that was sounding
+rp_nl:
     tst.l   %d4
     beq.b   rp_pcopy
     moveq   #0,%d3                     | machine changes: the voices restart (audio)
 rp_mc:
-    move.b  0x22(%a3,%d3.l),%d0
+    move.b  0x22(%a2,%d3.l),%d0
     movea.l #RQ_PART,%a0
     cmp.b   0x22(%a0,%d3.l),%d0
     beq.b   rp_mn
@@ -2450,14 +2569,21 @@ rp_pcopy:
     move.b  %d0,rl_pfull
     tst.l   %d4
     beq.w   rp_out
-    moveq   #0,%d3                     | publish it, track by track
+    moveq   #0,%d3                     | publish it, track by track -- the changed ones
 rp_pub:
-    move.l  %d3,-(%sp)
-    move.l  %d2,-(%sp)
-    move.l  %d6,-(%sp)
-    jsr     TRK_APPLY                  | audio t
-    bsr.w   rl_mapply                  | MIDI m (same arguments)
-    lea     12(%sp),%sp
+    move.w  rl_chg,%d1
+    btst    %d3,%d1
+    beq.b   rp_pm
+    move.l  %d3,%d0
+    bsr.w   rl_pubt                    | audio t: now, or when its first new step sounds
+rp_pm:
+    move.l  %d3,%d0
+    addq.l  #8,%d0
+    move.w  rl_chg,%d1
+    btst    %d0,%d1
+    beq.b   rp_pn
+    bsr.w   rl_pubt                    | MIDI m
+rp_pn:
     addq.l  #1,%d3
     cmpi.l  #8,%d3
     bne.b   rp_pub
@@ -2532,28 +2658,21 @@ rp_fcopy:
     pea     RQ_PART
     move.l  %a3,-(%sp)
     move.l  %d3,-(%sp)
+    bsr.w   rl_slcmp                   | 2026-11-09: unchanged -> nothing to copy or publish
+    tst.l   %d0
+    beq.b   rp_fsame
     bsr.w   rl_slice
+    moveq   #1,%d0                     | it changed (rl_slice leaves d0 undefined)
+rp_fsame:
     lea     12(%sp),%sp
+    tst.l   %d0
+    beq.w   rp_out
     moveq   #1,%d0
     move.b  %d0,rl_pfull
     tst.l   %d4
     beq.b   rp_out
     move.l  %d3,%d0
-    cmpi.l  #8,%d0
-    bcs.b   rp_ft
-    subq.l  #8,%d0
-rp_ft:
-    move.l  %d0,-(%sp)                 | t / m
-    move.l  %d2,-(%sp)                 | part
-    move.l  %d6,-(%sp)                 | bank
-    cmpi.l  #8,%d3
-    bcc.b   rp_fm
-    jsr     TRK_APPLY
-    bra.b   rp_fp
-rp_fm:
-    bsr.w   rl_mapply
-rp_fp:
-    lea     12(%sp),%sp
+    bsr.w   rl_pubt                    | now, or when its first new step sounds
 rp_out:
     moveq   #1,%d0
     move.b  %d0,rl_post                | the UI half is owed (rl_follow)
@@ -2585,9 +2704,11 @@ rl_sounds:
     move.b  CUR_PART,%d0
     cmp.b   %d2,%d0
     beq.b   rs2_out
+    move.b  %d0,rl_oldp                | 2026-11-09: the Part that was sounding (machine changes vs it)
     move.b  %d2,CUR_PART
     moveq   #1,%d0
     move.b  %d0,rl_lnk
+    move.b  %d0,rl_lnk1                | ... in THIS landing: every track goes to the engine
     rts
 rs2_sh:
     move.b  rl_tbank,%d0
@@ -2604,11 +2725,225 @@ rs2_out:
 rl_restart:
     moveq   #1,%d0
     lsl.l   %d3,%d0
+    tst.b   rl_defer
+    beq.b   rr3_now
+    move.b  rl_spr,%d1                 | 2026-11-09: deferred with the track's publish (rl_pubt)
+    or.l    %d1,%d0
+    move.b  %d0,rl_spr
+    bra.b   rr3_m
+rr3_now:
     move.b  ENG_RESTART,%d1
     or.l    %d1,%d0
     move.b  %d0,ENG_RESTART
+rr3_m:
     moveq   #1,%d0
-    move.b  %d0,rl_mch
+    move.b  %d0,rl_mch                 | PICKUP setup at the UI half: stock runs it BEFORE the restart
+    rts
+
+| ================= 2026-11-09: the Part slice reaches the engine when the new step SOUNDS =================
+| (Found in CLYPS by its session, kyoti-m4-ac, trkseq 4a0e54f; the user heard it there.) The scheduler
+| builds each step one step AHEAD: a record landed at a step start is first HEARD one track-step later.
+| Publishing the slice (TRK_APPLY / the MIDI apply) or restarting a new machine's voice in the landing
+| tick changed the sound a step early, on the old sequence. Stock's own switch stamps its Part change
+| one master step later too (0x800019e4). So an in-phase landing (rl_defer 1) copies the slice into the
+| Part at once -- the builder reads it there -- but only ARMS the publish: rl_sp[t] = 0xff, its bank /
+| Part, a pending restart bit. At the end of the next phase D (rl_spcount; the landing tick's own, or
+| after a wrap the next one, when stock's re-home has set TSCALE_ARR) the count becomes tps(t's scale);
+| at 0 the publish runs (restart bit first, then the apply: stock's machine-edit order). Stopped, or the
+| target not playing: at once (rl_defer 0). A stock pattern change landing: none (rl_defer 2: stock
+| applies the new pattern's Part). A publish whose Part no longer sounds by then is dropped; a stop with
+| one pending flushes it from the UI tick.
+| rl_pubt (d0 = t 0..15, d2 = the Part, d6 = the bank). Keeps every register.
+rl_pubt:
+    lea     -16(%sp),%sp
+    movem.l %d0-%d1/%a0-%a1,(%sp)
+    move.b  rl_defer,%d1
+    beq.b   pt3_now
+    cmpi.b  #2,%d1
+    beq.b   pt3_out
+    lea     rl_spp,%a0
+    move.b  %d2,(%a0,%d0.l)
+    lea     rl_spbk,%a0
+    move.b  %d6,(%a0,%d0.l)
+    lea     rl_sp,%a0
+    moveq   #-1,%d1
+    move.b  %d1,(%a0,%d0.l)            | armed: the count is set at the end of a phase D
+    moveq   #1,%d1
+    move.b  %d1,rl_spn
+    bra.b   pt3_out
+pt3_now:
+    move.l  %d6,%d1
+    bsr.w   rl_pub1
+pt3_out:
+    movem.l (%sp),%d0-%d1/%a0-%a1
+    lea     16(%sp),%sp
+    rts
+| rl_pub1 (d0 = t 0..15, d1 = bank, d2 = Part): the restart bit (if pending) and the apply. Keeps every
+| register.
+rl_pub1:
+    lea     -16(%sp),%sp
+    movem.l %d0-%d1/%a0-%a1,(%sp)
+    cmpi.l  #8,%d0
+    bcc.b   p1_m
+    move.b  rl_spr,%d1
+    btst    %d0,%d1
+    beq.b   p1_a
+    bclr    %d0,%d1
+    move.b  %d1,rl_spr
+    moveq   #1,%d1
+    lsl.l   %d0,%d1
+    move.b  ENG_RESTART,%d0
+    or.l    %d1,%d0
+    move.b  %d0,ENG_RESTART
+    move.l  (%sp),%d0
+p1_a:
+    move.l  4(%sp),%d1                 | the bank (saved d1)
+    move.l  %d0,-(%sp)                 | t
+    move.l  %d2,-(%sp)                 | part
+    move.l  %d1,-(%sp)                 | bank
+    jsr     TRK_APPLY
+    lea     12(%sp),%sp
+    bra.b   p1_out
+p1_m:
+    subq.l  #8,%d0
+    move.l  4(%sp),%d1                 | the bank (saved d1)
+    move.l  %d0,-(%sp)                 | m
+    move.l  %d2,-(%sp)                 | part
+    move.l  %d1,-(%sp)                 | bank
+    bsr.w   rl_mapply
+    lea     12(%sp),%sp
+p1_out:
+    movem.l (%sp),%d0-%d1/%a0-%a1
+    lea     16(%sp),%sp
+    rts
+| rl_spcount (tick: phase D, first, every tick while one is pending): counts the armed publishes down
+| and runs those that reach 0 -- if their Part still sounds -- (rl_spcount0 gives the newly armed their
+| count at the end of the tick). Uses d0-d7/a0-a1 (the tick saved every register; t0 is computed after).
+rl_spcount:
+|   the Part that sounds: the PLAYING pattern's own link (slab(PLAY_BANK, ACT_PAT) + 0x8e57) -- not the UI's
+|   mirror 0x80000003, which stock's switch reaches a UI pass later (CLYPS' session, 2026-11-09)
+    moveq   #0,%d0
+    move.b  PLAY_BANK,%d0
+    move.l  %d0,%d7                    | d7 = the playing bank
+    move.l  #BANKSTRIDE,%d1
+    muls.l  %d1,%d0
+    movea.l #BLOB,%a0
+    adda.l  %d0,%a0
+    moveq   #0,%d0
+    move.b  ACT_PAT,%d0
+    move.l  #PATSTRIDE,%d1
+    muls.l  %d1,%d0
+    adda.l  %d0,%a0
+    adda.l  #PAT_PART,%a0
+    moveq   #0,%d6
+    move.b  (%a0),%d6
+    andi.l  #3,%d6                     | d6 = the sounding Part
+    moveq   #0,%d3                     | d3 = 1: something still pending
+    moveq   #0,%d4
+sp3_l:
+    lea     rl_sp,%a0
+    moveq   #0,%d5
+    move.b  (%a0,%d4.l),%d5
+    beq.b   sp3_n
+    cmpi.l  #0xff,%d5
+    beq.b   sp3_k                      | armed, not counting yet: still pending
+    subq.l  #1,%d5
+    move.b  %d5,(%a0,%d4.l)
+    bne.b   sp3_k
+|   its new step sounds now: publish, if its Part is still the sounding one
+    lea     rl_spbk,%a0
+    moveq   #0,%d1
+    move.b  (%a0,%d4.l),%d1
+    cmp.l   %d7,%d1
+    bne.b   sp3_drop
+    lea     rl_spp,%a0
+    moveq   #0,%d2
+    move.b  (%a0,%d4.l),%d2
+    cmp.l   %d6,%d2
+    bne.b   sp3_drop
+    andi.l  #0xff,%d1
+    move.l  %d4,%d0
+    bsr.w   rl_pub1
+    bra.b   sp3_n
+sp3_drop:
+    move.b  rl_spr,%d1
+    bclr    %d4,%d1
+    move.b  %d1,rl_spr
+    bra.b   sp3_n
+sp3_k:
+    moveq   #1,%d3
+sp3_n:
+    addq.l  #1,%d4
+    cmpi.l  #16,%d4
+    bne.b   sp3_l
+    move.b  %d3,rl_spn
+    rts
+| rl_spcount0: the newly armed (0xff) get their count, tps(the track's scale cache, as the landing
+| or stock's re-home set it). End of phase D. Uses d0/d3-d4/a0.
+rl_spcount0:
+    moveq   #0,%d3
+    lea     rl_sp,%a0
+    moveq   #0,%d4
+sp3_any:
+    tst.b   (%a0,%d4.l)
+    beq.b   sp3_an0
+    moveq   #1,%d3                     | something is pending
+sp3_an0:
+    addq.l  #1,%d4
+    cmpi.l  #16,%d4
+    bne.b   sp3_any
+    moveq   #0,%d4
+sp3_a:
+    lea     rl_sp,%a0
+    move.b  (%a0,%d4.l),%d0
+    cmpi.b  #-1,%d0
+    bne.b   sp3_an
+    lea     TSCALE_ARR,%a0
+    moveq   #0,%d0
+    move.b  (%a0,%d4.l),%d0
+    bsr.w   rl_tps
+    tst.l   %d0
+    bne.b   sp3_c
+    moveq   #1,%d0
+sp3_c:
+    cmpi.l  #254,%d0
+    bls.b   sp3_s
+    move.l  #254,%d0
+sp3_s:
+    lea     rl_sp,%a0
+    move.b  %d0,(%a0,%d4.l)
+    moveq   #1,%d3
+sp3_an:
+    addq.l  #1,%d4
+    cmpi.l  #16,%d4
+    bne.b   sp3_a
+    move.b  %d3,rl_spn
+    rts
+| rl_spflush: every pending publish now (the transport stopped with one pending). UI task.
+rl_spflush:
+    lea     -12(%sp),%sp
+    movem.l %d0-%d2,(%sp)
+    moveq   #0,%d0
+sf3_l:
+    lea     rl_sp,%a0
+    tst.b   (%a0,%d0.l)
+    beq.b   sf3_n
+    clr.b   (%a0,%d0.l)
+    lea     rl_spbk,%a0
+    moveq   #0,%d1
+    move.b  (%a0,%d0.l),%d1
+    lea     rl_spp,%a0
+    moveq   #0,%d2
+    move.b  (%a0,%d0.l),%d2
+    bsr.w   rl_pub1
+sf3_n:
+    addq.l  #1,%d0
+    cmpi.l  #16,%d0
+    bne.b   sf3_l
+    clr.b   rl_spn
+    clr.b   rl_spr
+    movem.l (%sp),%d0-%d2
+    lea     12(%sp),%sp
     rts
 | rl_toff (d0 = t 0..15) -> d0 = the record's offset in a slab, d1 = its length
 rl_toff:
@@ -2919,6 +3254,58 @@ sl_out:
     lea     20(%sp),%sp
     rts
 
+| rl_slcmp(t, A, B) -> d0 = 1 when track t's slice differs between Parts A and B (rl_slice's tables,
+| compared instead of copied). Uses d0-d1/a0-a1. 2026-11-09.
+rl_slcmp:
+    lea     -24(%sp),%sp
+    movem.l %d2-%d6/%a2,(%sp)
+    move.l  28(%sp),%d2
+    lea     rl_slA,%a2
+    cmpi.l  #8,%d2
+    bcs.b   cm2_seg
+    subq.l  #8,%d2
+    lea     rl_slM,%a2
+cm2_seg:
+    moveq   #0,%d0
+    move.w  (%a2)+,%d0                 | offset
+    cmpi.l  #0xffff,%d0
+    beq.b   cm2_same
+    moveq   #0,%d1
+    move.w  (%a2)+,%d1                 | stride
+    muls.l  %d2,%d1
+    add.l   %d1,%d0
+    moveq   #0,%d3
+    move.w  (%a2)+,%d3                 | size
+    moveq   #0,%d4
+    move.w  (%a2)+,%d4                 | count
+    moveq   #0,%d1
+    move.w  (%a2)+,%d1                 | step
+cm2_rep:
+    movea.l 32(%sp),%a0
+    adda.l  %d0,%a0
+    movea.l 36(%sp),%a1
+    adda.l  %d0,%a1
+    move.l  %d3,%d5
+cm2_b:
+    move.b  (%a0)+,%d6
+    cmp.b   (%a1)+,%d6
+    bne.b   cm2_diff
+    subq.l  #1,%d5
+    bne.b   cm2_b
+    add.l   %d1,%d0
+    subq.l  #1,%d4
+    bne.b   cm2_rep
+    bra.b   cm2_seg
+cm2_diff:
+    moveq   #1,%d0
+    bra.b   cm2_out
+cm2_same:
+    moveq   #0,%d0
+cm2_out:
+    movem.l (%sp),%d2-%d6/%a2
+    lea     24(%sp),%sp
+    rts
+
 | rl_mapply(bank, part, m): one MIDI track's Part values -> the engine -- CLYPS' cl_mapply, unchanged:
 | stock's whole-Part apply 0x40009094 does this for every m (0x400094b0..0x400095e0), RAM writes only.
 rl_mapply:
@@ -3122,6 +3509,25 @@ rl_lm:
     .space 2                           | tracks pending (tick-visible)
 rl_lf:
     .space 2                           | ... with their slice
+rl_chg:
+    .space 2                           | tracks whose slice a pattern landing changes (2026-11-09)
+rl_sp:
+    .space 16                          | per track: 0 none, 0xff armed, else ticks until its publish
+rl_spp:
+    .space 16                          | ... its Part
+rl_spbk:
+    .space 16                          | ... its bank
+rl_spn:
+    .space 1                           | 1: a publish is pending
+rl_spr:
+    .space 1                           | audio tracks whose voice restart waits for the publish
+rl_oldp:
+    .space 1                           | the Part that was sounding before a landing changed the link
+rl_lnk1:
+    .space 1                           | 1: this landing changed the link
+rl_defer:
+    .space 1                           | rl_put's publishes: 0 now, 1 deferred, 2 none
+    .align 2
 rl_ldm:
     .space 2                           | tracks landed (for the UI half)
 rl_ldf:
