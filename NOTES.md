@@ -37743,3 +37743,13 @@ Now 936 / 932 (<= 945): the pair fits, SC's donor becomes PLATE REV.
 - **Re-pinned FINAL (the 11-06 pins were the buggy build), NOT flashed:** standalone mainos `60e97fb3…`
   (syx `0c289ab5…`), BUG_RTM `dac87abd…` (syx `9582710c…`), KYOTI V1.7 `e7cadcca…` (syx `f50ece8d…`).
   A Clyps image needs Clyps's own merge of this. Scope §21. octabam #1066 updated to the new pin.
+
+## 2026-11-09 (`rec-trig-mute`) — REC_TRIG_MUTE: the T1–T4 top-dot fix (`91a58e9`) confirmed on hardware
+
+- **Hardware (user, MKI):** the dots show as designed in KYOTI V1.7 + Clyps **CL22** (trkseq `29bc52b`,
+  merged `91a58e9` at `9dd4287`), running 9 Nov; also seen 8 Nov in an earlier V1.7 + Clyps image
+  (CL21 or CL22, both after the merge). The standalone, BUG_RTM, and the FINAL KYOTI V1.7 `e7cadcca…` were not flashed on their own.
+- **octabam:** Sam asked on #1066 (merged 9 Nov) for a line in the proof note once `91a58e9` was flashed.
+  Branch `Zac-Kyoti/octabam:rec-trig-mute-proof-cl22` (`7b4d50e7`, base `1adbd491`): proof_note,
+  docstring, module README (also its stale `553d8d2` pin and edge-icon text, left from #1066), `make docs`;
+  verify-docs clean. Opened as sambanks/octabam#1078, waiting on Sam.
