@@ -68,16 +68,25 @@ def main(argv):
         if not ok:
             fails.append(what)
 
-    def tail():
+    def main_call(addr, *args):
+        # emu_rtos's call_as_main leaves the arguments on main's stack (it pops only the return address):
+        # 8 bytes per 2-argument call. This gate posts a UI-tail message every ~17 ms, so after a few
+        # seconds main's stack had grown into its own TCB and the emulator crashed in the scheduler
+        # (2026-11-09, found with CLYPS_TCBWATCH). Restore main's SP after every borrowed call.
         rt.run(until=lambda x: x.pc == er.MAIN_SPIN)
+        sp0 = u.reg_read(er.eb.UC_M68K_REG_A7)
+        r_ = rt.call_as_main(addr, args=args, budget=600000)
+        u.reg_write(er.eb.UC_M68K_REG_A7, sp0)
+        return r_
+
+    def tail():
         u.mem_write(er.SYS_MSG_SCRATCH, bytes([0, 0]))
-        rt.post_message(er.SYS_QUEUE, er.SYS_MSG_SCRATCH)
+        main_call(er.KERNEL_POST, er.SYS_QUEUE, er.SYS_MSG_SCRATCH)
 
     def key(code, ev, ms=40):
-        rt.run(until=lambda x: x.pc == er.MAIN_SPIN)
         if ev and 0x10 <= code <= 0x17:
             u.mem_write(0x460D5DE0, (100).to_bytes(4, "big"))     # no double tap (as diag_clyps_ui.py)
-        rt.call_as_main(SET_KEY, args=(code, ev), budget=600000)
+        main_call(SET_KEY, code, ev)
         tail()
         rt.run(ms=ms)
 
@@ -89,8 +98,7 @@ def main(argv):
         # route A runs no UI tick (cl_uitick, 0x40056c28) nor a UI pass of its own: call / post them
         for _ in range(max(1, ms // 17)):
             rt.run(ms=17)
-            rt.run(until=lambda x: x.pc == er.MAIN_SPIN)
-            rt.call_as_main(0x40056C28, budget=600000)
+            main_call(0x40056C28)
             tail()
 
     if rd(0x80000012, 4):
@@ -111,8 +119,7 @@ def main(argv):
     print(f"bank {bank + 1} pattern {act + 1} Part {link() + 1}; mode {'PER TRACK' if mode else 'NORMAL'}, "
           f"length {rd(slab_ad + 0x8E53, 1)}, master len {rd(slab_ad + 0x8E50, 2)}", flush=True)
     print("A: SAVE PROJECT, PLAY, open Clyps", flush=True)
-    rt.run(until=lambda x: x.pc == er.MAIN_SPIN)
-    rt.call_as_main(SAVE_PROJECT, budget=600000)
+    main_call(SAVE_PROJECT)
     rt.run(ms=8000)
     card_slab, card_part = slab(), part()
     orig_slab, orig_part = slab(), part()           # the project was loaded = saved: originals = card
@@ -204,7 +211,86 @@ def main(argv):
     pending = lambda: rd(syms["cl_nq"], 1) == 0 and rd(syms["cl_tog"], 2) == 0
     pb = lambda: bb + PART_OFF + link() * PARTSZ
 
+    ring = None
+    if os.environ.get("CLYPS_RING"):               # a crash hunt: the last instructions executed
+        import collections
+        ring = collections.deque(maxlen=int(os.environ["CLYPS_RING"]))
+
+    def ring_on():
+        if ring is not None:
+            u.hook_add(er.eb.UC_HOOK_CODE, lambda uc, ad, sz, ud: ring.append((ad, uc.reg_read(er.eb.UC_M68K_REG_A7))))
+    names = sorted((v, k) for k, v in syms.items())
+    import bisect
+
+    def where(ad):
+        i = bisect.bisect_right([x for x, _ in names], ad) - 1
+        return f"{names[i][1]}+{ad - names[i][0]:#x}" if i >= 0 and ad - names[i][0] < 0x400 else f"{ad:#010x}"
+
+    import atexit
+
+    def dump():
+        if ring:
+            print("last instructions (pc, sp):", flush=True)
+            for ad, sp in list(ring)[-120:]:
+                print(f"   {ad:#010x} {where(ad):32s} sp {sp:#010x}", flush=True)
+    atexit.register(dump)
+
+    if os.environ.get("CLYPS_TCBWATCH"):       # the crash hunt: who writes a bad saved SP into a task record
+        sane = lambda v: 0x40000000 <= v < 0x48000000
+        def on_tcbw(uc, acc, ad, sz, val, ud):
+            if sz == 4 and not sane(val & 0xFFFFFFFF):
+                pc = uc.reg_read(er.eb.UC_M68K_REG_PC)
+                print(f"  !! bad SP {val & 0xFFFFFFFF:#010x} written to TCB {ad - er.TCB_A7:#010x}+0x48 by pc "
+                      f"{pc:#010x} ({where(pc)}), ring tail:", flush=True)
+                for ad2, sp2 in list(ring or [])[-60:]:
+                    print(f"     {ad2:#010x} {where(ad2)} sp {sp2:#010x}", flush=True)
+        for tcb in er.ALL_TCBS:
+            u.hook_add(er.eb.UC_HOOK_MEM_WRITE, on_tcbw, begin=tcb + er.TCB_A7, end=tcb + er.TCB_A7 + 3)
+
+        def on_disp(uc, ad, sz, ud):
+            a0 = uc.reg_read(er.eb.UC_M68K_REG_A0)
+            spv = rd(a0 + er.TCB_A7, 4)
+            if a0 not in er.ALL_TCBS or not sane(spv):
+                print(f"  !! dispatch to {a0:#010x} (a TCB: {a0 in er.ALL_TCBS}), saved SP {spv:#010x}; ready head "
+                      f"{rd(0x800068D8, 4):#010x} -> {rd(rd(0x800068D8, 4), 4):#010x}", flush=True)
+        u.hook_add(er.eb.UC_HOOK_CODE, on_disp, begin=0x400005A0, end=0x400005A0)
+
+    if os.environ.get("CLYPS_STACK"):          # how deep the tick's landing goes (cl_land entry -> lowest SP)
+        sk = {"sp0": None, "min": None, "max_depth": 0, "where": None}
+        def on_lin(uc, ad, sz, ud):
+            sk["sp0"] = sk["min"] = uc.reg_read(er.eb.UC_M68K_REG_A7)
+        def on_any(uc, ad, sz, ud):
+            if sk["sp0"] is not None:
+                spv = uc.reg_read(er.eb.UC_M68K_REG_A7)
+                if spv < sk["min"]:
+                    sk["min"] = spv
+                    d = sk["sp0"] - spv
+                    if d > sk["max_depth"]:
+                        sk["max_depth"], sk["where"] = d, (ad, where(ad), rd(syms["cl_tog"], 2))
+        def on_lout(uc, ad, sz, ud):
+            sk["sp0"] = None
+        u.hook_add(er.eb.UC_HOOK_CODE, on_lin, begin=syms["cl_land"], end=syms["cl_land"])
+        u.hook_add(er.eb.UC_HOOK_CODE, on_lout, begin=syms["la_out"], end=syms["la_out"])
+        u.hook_add(er.eb.UC_HOOK_CODE, on_any)
+        import atexit
+        atexit.register(lambda: print(f"  STACK: deepest under cl_land {sk['max_depth']} B at {sk['where']}", flush=True))
+
+    if "cl_rlreq" in syms:                      # what the OT plays when a card request arrives
+        u.hook_add(er.eb.UC_HOOK_CODE, lambda uc, ad, sz, ud: print(
+            f"  .. cl_rlreq: act {rd(ACT, 1)} pend {rd(0x800065C0, 1)} (master step {rd(MSTEP, 2)} tick "
+            f"{rd(TICK_CTR, 1)}) kind {rd(uc.reg_read(er.eb.UC_M68K_REG_A7) + 4, 4)} pattern "
+            f"{rd(uc.reg_read(er.eb.UC_M68K_REG_A7) + 8, 4)}", flush=True), begin=syms["cl_rlreq"], end=syms["cl_rlreq"])
+        u.hook_add(er.eb.UC_HOOK_CODE, lambda uc, ad, sz, ud: print(
+            f"  .. a pattern landed: act {rd(ACT, 1)} (master step {rd(MSTEP, 2)})", flush=True),
+            begin=0x400A45BA, end=0x400A45BA)
+    if "pk_go" in syms:                         # the cancel's stock cue (cl_ptncancel) -- when does it run?
+        u.hook_add(er.eb.UC_HOOK_CODE, lambda uc, ad, sz, ud: print(
+            f"  .. cl_ptncancel cues: act {rd(ACT, 1)} pend {rd(0x800065C0, 1)} bank {rd(0x800065BD, 1)}/"
+            f"{rd(0x800065BF, 1)}", flush=True), begin=syms["pk_go"], end=syms["pk_go"])
+
     if "B" in a.only:
+        if os.environ.get("CLYPS_RINGALL"):
+            ring_on()
         print("B: [PTN] + [TRACK 1]", flush=True)
         flip(slab_ad, 0x81)
         gesture([(PTN, 1), (0x10, 1), (0x10, 0), (PTN, 0)])
@@ -253,6 +339,9 @@ def main(argv):
             flip(slab_ad + t * TRAC_A, 0x81)
         flip(p_ + 0x2A + 60, 0x55)
         sw0 = stock_sw["n"]
+        print(f"      D: before -- act {rd(ACT, 1)} pend {rd(0x800065C0, 1)} rq_live {rd(syms['rq_live'], 1)} "
+              f"rq_busy {rd(syms['rq_busy'], 1)} rq_kind {rd(syms['rq_kind'], 1)} spn {rd(syms['cl_spn'], 1)}", flush=True)
+        ring_on()
         gesture([(PTN, 1), (BANK, 1), (act, 1), (act, 0), (BANK, 0), (PTN, 0)])
         res = landing("D", list(range(16)))
         if res:
@@ -347,7 +436,9 @@ def main(argv):
         res = landing("O", list(range(16)))
         if res:
             e, t0, old_ok = res
-            check(e["where"] == "tick" and old_ok and e["one_tick"], f"O: one tick, a step start of all ({e['n']})")
+            # the first step start ALL its tracks share may be the master wrap (tracks of other scales: OT DEMO's T3)
+            check(e["where"] in ("tick", "wrap") and old_ok and e["one_tick"],
+                  f"O: all at one point, a step start of every track ({e['n']}, in the {e['where']})")
         check(same_slab(slab(), orig_slab) and part() == orig_part, "O: the pattern and its Part as loaded")
         check(stock_sw["n"] == sw0 and rd(ACT, 1) == act, "O: no stock pattern switch (not a pattern change)")
         check(pending(), "O: nothing left pending")
@@ -386,20 +477,27 @@ def main(argv):
     if "I" in a.only:
         q = next(x for x in range(16) if x != act)
         qt = [rd(0x400D80DC + 4 * i, 4) for i in range(17)]
-        u.mem_write(0x8000004E, bytes([qt.index(4)]))
-        u.mem_write(slab_ad + 0x8E56, bytes([0xFF]))
+        u.mem_write(0x8000004E, bytes([0]))              # CHAIN AFTER off: the cue waits for the pattern's end, so
+        u.mem_write(slab_ad + 0x8E56, bytes([0xFF]))     # it is still pending when P1 is pressed (4 / 16 steps
+        print("      CHAIN AFTER off (the pattern's end)", flush=True)   # landed P2 first: not exercised)
         for delay in (300, 1500):
             print(f"I: on {act + 1}, [PTN] + [BANK] + trig {q + 1}, then trig {act + 1} {delay} ms later", flush=True)
             seen = set()
             key(PTN, 1); key(BANK, 1); key(q, 1); key(q, 0)
             settle(delay)
             p_mid = (rd(0x800065BF, 1), rd(0x800065C0, 1))
+            pre_ok = rd(ACT, 1) == act and p_mid[1] == q          # P2 cued, not landed yet: the case under test
             key(act, 1); key(act, 0); key(BANK, 0); key(PTN, 0)
             for _ in range(80):
                 settle(34)
                 seen.add(rd(ACT, 1))
             print(f"      queued when {act + 1} was pressed {p_mid}; patterns played {sorted(x + 1 for x in seen)}",
                   flush=True)
+            if a.dj:
+                print(f"      I ({delay} ms): DIRECT JUMP lands a cue on the next step -- the cancel window is not "
+                      f"reachable here (cued and pending at the press: {pre_ok})", flush=True)
+                continue
+            check(pre_ok, f"I ({delay} ms): the case is exercised -- pattern {q + 1} cued, not yet landed, at the press")
             check(seen == {act} and rd(0x800065C0, 1) == act, f"I ({delay} ms): pattern {q + 1} never played")
 
     if "F" in a.only:

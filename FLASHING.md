@@ -210,6 +210,26 @@ quick check for each:
   responsive.
 - **PART_CHANGE_CARRYOVER_FIX** — a track that is PICKUP on one Part and FLEX on
   another: switching patterns across the Parts plays the FLEX sample, not the old loop.
+- **KYOTI CL23 walk-through** (WIP; `out/KYOTI_WIP/KYOTI_V1.7_WITH_CLYPS/OCTATRACK_OS1.40C_KYOTI_V1.7_WITH_CLYPS.syx`)
+  = CL22 (its list below still applies) + card reloads and ORIG restores land in place (RELOAD_FROM_PROJECT's rules),
+  and FULL loads change the sound with the new sequence. Transport running unless said:
+  1. **FULL load timing (OT DEMO, P1 T1 <- [FUNC] + trig 5):** P5 T1's track volume / machine / FX arrive WITH its
+     first step, not a step before (any FULL landing: slot loads, [FUNC]+[NO], [BANK]+TRACK, ORIG SEQ+MCH/FX).
+  2. **Card track reload** ([PTN] alone or [BANK] alone + TRACK, inside Clyps): lands on the track's next step, in
+     phase (no restart); its toast at the landing. Several chords before it lands: all land; the same track twice =
+     the later kind wins.
+  3. **Card reload of the pattern you are ON** ([PTN]+[BANK] + its trig): every changed track lands together on the
+     next step they all share, in phase; no "cued" toast, no pattern change. A pattern you are NOT on: the OT goes to
+     it (CHAIN AFTER, or DIRECT JUMP's next step).
+  4. **Cancel:** on P1, reload P2 (cued), then reload P1 before P2 lands -> P2 never plays (try early and late).
+  5. **NORMAL pattern, length edited, [PTN] + TRACK:** the length comes back and every track stays on the beat.
+  6. **ORIG restores in place:** [PAGE] / [FUNC]+[PAGE] / [YES] on ORIG land on the track's next step (not at the
+     CHAIN AFTER point); ORIG PTN+PRT (chord + [PAGE]) lands every changed track together, in place -- no pattern
+     change, DIRECT JUMP on or off (no restarts, conditional trigs keep counting).
+  7. **Mixed [YES] in a group:** one member's arrows on its own slot (a restore), another's on another slot (a load):
+     both land together at the cued point.
+  8. Stopped: card reloads and restores land at once, as before.
+
 - **KYOTI CL22 walk-through** (WIP; `out/KYOTI_WIP/KYOTI_V1.7_WITH_CLYPS/OCTATRACK_OS1.40C_KYOTI_V1.7_WITH_CLYPS.syx`)
   = CL21 (its list below still applies) + persistent arrows, stock picks keep Clyps, a project load closes it:
   1. Move the arrows to a slot, then load anything (a trig, [YES], [FUNC]+trig, [PAGE], a group load, a temp

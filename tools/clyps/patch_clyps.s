@@ -2962,6 +2962,9 @@ fo_norest:
     beq.b   fo_now
     lea     cl_spp,%a0
     move.b  %d4,(%a0,%d6.l)
+    lea     cl_spb,%a0
+    move.b  PLAY_BANK,%d0
+    move.b  %d0,(%a0,%d6.l)
     lea     cl_spd,%a0
     moveq   #-1,%d0
     move.b  %d0,(%a0,%d6.l)             | armed: its rate after the landing sets the count
@@ -3717,6 +3720,7 @@ ta_lk:
     beq.b   ta_p
     moveq   #1,%d0
     move.b  %d0,cl_noskip
+    move.b  %d0,cl_lnkp                 | the engine's own current Part follows once all is out (cl_uitail)
 ta_p:
     moveq   #1,%d0
     move.b  %d0,cl_togp
@@ -4849,10 +4853,34 @@ sd_n:
 sd_out:
     rts
 
-| cl_sppub (d6 = t): its pending slice to the engine now (and a new machine's restart). Keeps d2-d7.
+| cl_sppub (d6 = t): its pending slice to the engine now (and a new machine's restart) -- unless that Part no
+| longer sounds (a pattern change or DIRECT JUMP landed within the step: its Part is the engine's now; the
+| RELOAD session's parity point, 2026-11-09). Keeps d2-d7.
 cl_sppub:
     lea     cl_spd,%a0
     clr.b   (%a0,%d6.l)
+    lea     cl_spb,%a0
+    move.b  (%a0,%d6.l),%d0
+    cmp.b   PLAY_BANK,%d0
+    bne.b   sp_drop
+    jsr     cl_live
+    move.l  #TRAILER+7,%d0
+    move.b  (%a0,%d0.l),%d0             | the playing pattern's Part link
+    andi.l  #3,%d0
+    lea     cl_spp,%a0
+    move.b  (%a0,%d6.l),%d1
+    andi.l  #3,%d1
+    cmp.l   %d1,%d0
+    beq.b   sp_go
+sp_drop:
+    cmpi.l  #8,%d6
+    bcc.b   sp_dx
+    move.b  cl_spr,%d0
+    bclr    %d6,%d0
+    move.b  %d0,cl_spr
+sp_dx:
+    rts
+sp_go:
     cmpi.l  #8,%d6
     bcc.b   sp_m
     move.b  cl_spr,%d0
@@ -4999,6 +5027,7 @@ do_tg:
     bra.w   cl_count
 
 cl_dropall:
+    clr.b   cl_lnkp
     clr.w   cl_tog                      | no together landing either
     clr.b   cl_togr
     clr.b   cl_togp
@@ -5045,6 +5074,25 @@ ut_ng:
     clr.b   cl_ctoast
     jsr     cl_rqtoast
 ut_nct:
+    tst.b   cl_lnkp                     | a landing changed the playing pattern's Part link: once it has
+    beq.b   ut_nlk                      | landed and every slice is out, stock's whole-Part apply -- it
+    tst.w   cl_tog                      | also moves the engine's own current bank / Part (0x80001828/29,
+    bne.b   ut_nlk                      | read throughout the engine); per-track applies do not (the
+    tst.b   cl_spn                      | RELOAD session's finding, checked at 0x400090aa, 2026-11-09)
+    bne.b   ut_nlk
+    clr.b   cl_lnkp
+    jsr     cl_live
+    move.l  #TRAILER+7,%d0
+    moveq   #0,%d1
+    move.b  (%a0,%d0.l),%d1
+    andi.l  #3,%d1
+    move.l  %d1,-(%sp)                  | the playing pattern's Part (its link, landed)
+    moveq   #0,%d0
+    move.b  PLAY_BANK,%d0
+    move.l  %d0,-(%sp)
+    jsr     RL_PARTAPP                  | 0x40009094(bank, part)
+    addq.l  #8,%sp
+ut_nlk:
     jsr     cl_rqidle                   | a card generation with nothing left pending is over
     tst.l   RUNNING
     bne.b   ut_run
@@ -7232,10 +7280,12 @@ cl_togs:    .byte 0                     | ... their source kind (SRC_CARD / SRC_
 cl_togp:    .byte 0                     | ... a whole pattern: its trailer lands first (cl_togpre)
 cl_ctoast:  .byte 0                     | a card reload landed: its toast at the UI tail (the user, 2026-11-08)
 cl_noskip:  .byte 0                     | arming: load even what already plays (a pattern whose Part link changes)
+cl_lnkp:    .byte 0                     | a landing changed the Part link: stock's whole-Part apply owed (cl_uitail)
 cl_spn:     .byte 0                     | a landed slice waits for its step (cl_spdo)
 cl_spr:     .byte 0                     | ... audio tracks whose new machine restarts with it
 cl_spd:     .space 16                   | per track: ticks until its slice reaches the engine (0xff armed, 0 none)
 cl_spp:     .space 16                   | ... its Part index
+cl_spb:     .space 16                   | ... and bank (a publish whose Part no longer sounds is dropped)
             .align 2
 
     .section .dram,"ax"

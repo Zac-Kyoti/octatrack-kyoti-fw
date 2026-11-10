@@ -38147,3 +38147,18 @@ Now 936 / 932 (<= 945): the pair fits, SC's donor becomes PLATE REV.
   Rebuilt unchanged: KYOTI CL22 df2d4a1d…, default KYOTI V1.7 mainos e7cadcca… (the pin); Bugbuilds DJV7 / RL3 clean
   (a full Bugbuild run here stops at BLACKPYRAMIDS_303's dsp_asm, not built in this worktree). octabam / Modwerk:
   conflicts in Clyps' manifest at port time (scope §1.27).
+- **KYOTI CL23** (2026-11-10, NOT flashed; CL22 on the unit): Clyps matches RELOAD_FROM_PROJECT's final rules (scope
+  §1.28; RELOAD itself is in reload-slice, unpushed -- ported from its source as a reference, not merged): card reloads
+  staged (`SRC_CARD`) and landed like temp reload; the pattern you are on together on the next shared step, rate
+  changes re-phased (`cl_togarm` / `cl_togland`, RELOAD's rl_rephase); generations, one card read per target, never
+  two jobs queued; a superseded pattern job cannot switch; reloading / restoring the pattern you are on cancels a
+  cued change (`cl_ptncancel`); ORIG SEQ / FULL / [PAGE] in place, ORIG PTN+PRT together in place (DJ or not); a mixed
+  execution lands at the cued point. The user's FULL-timing report (P5 T1's volume on P1 T1's sample a step early, DJ
+  off): the scheduler builds a step ahead -- the slice now reaches the engine one step after the landing
+  (`cl_spdo`), dropped if its Part no longer sounds; a Part-link change owes 0x40009094 (both from the RELOAD session,
+  checked in our image). Same fix sent to the RELOAD session (it adopted it: reload-slice 8942cfd). Gates on CL23
+  (0a1f677f…): full 120, T 21, F+Q 27, L 17, J 8, M+U 38, X+O+W 15, V+Z+I 35, H 3; new tools/diag_clyps_quant.py
+  B C D E G H P O M F, DJ off and on, I (cancel at 300 / 1500 ms, DJ off; DJ on lands a cue on the next step). Slice
+  published at t0 198 -> 204 (one step). TRAPS: emu_rtos `call_as_main` leaves its arguments on main's stack (8 B per
+  2-argument call): a gate posting every 17 ms overflowed main into its TCB -> `main_call` restores SP; Clyps' tick
+  landing measured <= 220 B. The cancel test needs a cue still pending at the press: CHAIN AFTER off.

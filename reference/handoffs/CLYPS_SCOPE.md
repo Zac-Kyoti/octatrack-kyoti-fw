@@ -1333,6 +1333,42 @@ the chord reads `PTN LOAD:`, a group `MULTI LOAD:` ("ORIGS FULL"'s box to x 86).
   through [PAGE] / a trig / a track swap / the chord); I and F updated (the arrows stay where a load or reload left
   them); V starts from no arrows (they persist across scenarios now).
 
+### 1.28 Clyps matches RELOAD_FROM_PROJECT's final rules; FULL slices land with the sequence (the user, 2026-11-08 / 09; KYOTI CL23)
+
+The rule: restoring what the pattern you are on IS lands in place on the next step, in phase; bringing in something else
+is cued like a pattern change (CHAIN AFTER / DIRECT JUMP's next master step). Ported from RELOAD's logic, not its sites.
+- **Card reloads staged** (`clyps_reload.s`): the job parses into RQ_SLAB / RQ_PART and never writes the live pattern
+  (except a pattern you are NOT on, written offline, then stock's cue). New source `SRC_CARD` (0xfc) in cl_srcrec /
+  cl_slsame / cl_apply (`ap_card`: the old job's NORMAL / PER TRACK rules) / cl_fullone / cl_nload (`rq_nst`,
+  `cl_cardname`). The done handler (UI task) arms: tracks via `cl_rqarm1` (cl_cueload now = 1), the pattern you are
+  on via `cl_togarm(SRC_CARD)`; toasts at the landing (`cl_ctoast` -> `cl_rqtoast`).
+- **Generations** (`cl_rlreq`, RELOAD's rl_req): one target; a pattern reload / another target / nothing alive starts
+  a new one (pending card cues dropped, `cl_ptngo` cleared); one card read per generation; a track chord for a staged
+  generation lands at once; never two jobs queued (`rq_kind` / `rq_busy` / `rq_need`); a generation ends when nothing
+  of it is pending (`cl_rqidle`), so a later chord re-reads the card.
+- **Together landing** (`cl_togland` in cl_land, `cl_togpre` / `cl_wrap`): every member on the first tick that starts
+  a step of each at its old and new rate; a change of the pattern's own rate (`cl_togr`: trailer +0x8e50..55, or a
+  NORMAL track reload's length / scale) waits for every track and the master and re-phases them (`cl_mrate`,
+  `cl_ctr`, `cl_mreph` = RELOAD's rl_mrate / rl_ctr / rl_rephase). A Part-link change lands every track
+  (`cl_noskip`) and owes stock's whole-Part apply 0x40009094 once all is out (`cl_lnkp`: it moves the engine's own
+  bank / Part 0x80001828/29 -- RELOAD's finding, checked at 0x400090aa).
+- **ORIG in place:** `cl_restore` now = 1; `cl_restorepat` = cl_ptncancel + cl_togarm(SRC_ORIG) (CL9's self-switch is
+  inert); `cl_exec` two passes: a mixed execution (a restore and a load) lands everything at the cued point (`cl_xany`).
+- **Cancel:** reloading / restoring the pattern you are on cancels a cued pattern change by stock's own cue
+  (`cl_ptncancel`, sharing cl_ptnswitch's body) and drops every pending track cue; a card track reload drops that
+  track's pending cue at once.
+- **FULL timing (the user's report, 2026-11-09):** the scheduler builds a step one step ahead, so a sequence landed at a
+  step start is heard one track-step later; TRK_APPLY in the landing tick put the new slice on the old sound a step
+  early (Clyps' own landing, DJ off -- the user's case; RELOAD's quantized landing had it too, DIRECT JUMP's landing
+  does not). Now the slice lands in the Part at once (the builder reads it) and `cl_spdo` publishes it (TRK_APPLY /
+  cl_mapply + a new machine's restart) one step of the track's new rate later; dropped if that Part no longer sounds
+  (bank / slab link, not the UI mirror 0x80000003); stopped = immediate, a stop flushes. PICKUP_SET stays at the UI
+  follow-up (stock's machine edit order 0x400973b0: PICKUP_SET, restart, TRK_APPLY). Gate: C publishes at t0 198 + 6.
+- **Gate** `tools/diag_clyps_quant.py` (RELOAD's diag_reload_quant.py as template): B..F. Harness trap found on the way:
+  emu_rtos's `call_as_main` pops only the return address -- 8 B of main's stack lost per 2-argument call; a gate that
+  posts a UI message every 17 ms overflows main into its own TCB within seconds (the scheduler then dispatches a bad
+  SP). `main_call` restores main's SP. Clyps' tick landing measured at most 220 B deep (148 B for one track).
+
 ### 1.27 Combinations that must never ship (the user, 2026-11-07)
 
 - Clyps + RELOAD_FROM_PROJECT never; Clyps + DIRECT_JUMP_KYOTI only as KYOTI's integrated pair (SUPERSEDE).
