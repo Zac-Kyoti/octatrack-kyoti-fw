@@ -80,6 +80,10 @@ MEASURED: hardware-confirmed on the author's MKI from ROM (the standalone image 
 KYOTI V1.0), including that the sequencer and the internal metronome keep their phase
 (RELOAD_NOW is not armed on any path), and from DRAM in an octabam-built image with all
 six KYOTI modules (2026-10-01: both chords, the FINISHED toast, the knob repaint).
+The 2026-11-08/09 card reloads (Part slice, pattern reload, quantized landing) are
+hardware-confirmed from DRAM in the KYOTI V1.7 image (2026-11-09: next-step landing in
+time, the Part change with the first new step, no chord click, the cue cancel); this
+octabam form is not yet flashed.
 The standalone image is tools/build_reload_from_project.py.
 """
 
@@ -110,10 +114,10 @@ HOOKS = (
 # ---- the author's oracle -------------------------------------------------------
 # patch_reload3.s, m68k-elf-as -mcpu=5407 or 54455 (identical bytes; RL_DONE is the
 # source's default), linked at 0x400d6500 -- the address the standalone image uses:
-# 48948 bytes: ~5.6 KB of code + the 43 KB staging buffers of the quantized landing (2100 before the
+# 50044 bytes: ~6.7 KB of code + the 43 KB staging buffers of the quantized landing (2100 before the
 # 8 Nov 2026 Part-slice, pattern and quantized reloads). octabam re-links it there on every build
 # and compares.
-REFERENCE = (0x400d6500, "bc64fee862d3d7edb6885d4a71ad6306bbc7d85d3b351530c06c884187f18430")
+REFERENCE = (0x400d6500, "62953b358f29a7f933c3d04b3c28e7af00fd15edb14ab9082c4d4eed0c64d981")
 
 MODULE = Module(
     name="reload-from-project",

@@ -111,7 +111,6 @@ unit that boots; if it doesn't, use §3b.
 |---|---|
 | MUTE_MODES, SIDECHAIN_COMPRESSOR, RELOAD_FROM_PROJECT, QUANTIZE_LIVE_REC_TOGGLE | `140C_KYOTI` |
 | SIDECHAIN_COMPRESSOR light (the earlier version, WIP) | `140C_SCLT` |
-| RELOAD_FROM_PROJECT Part-slice + pattern-reload + quantized-landing test build (WIP, 2026-11-08) | `140C_RLQ3` |
 | KYOTI V1.7 (the features in one image) | `KYOTI V1.7` |
 | KYOTI V1.6 (the previous one) | `KYOTI V1.6` |
 | KYOTI V1.5 (the previous one) | `KYOTI V1.5` |
@@ -161,8 +160,8 @@ quick check for each:
   (`[MIDI]`), `[PTN]` + `[TRACK 2]` → `TRK SEQ` / `RELOADED FROM PROJ`: M2 is back to its saved
   trigs, and audio T2 (back on the audio side) still has your unsaved change. On the audio side
   `[PTN]` + `[TRACK 2]` still reloads T2 only.
-  **Part-slice + pattern-reload + quantized-landing walk-through (WIP 2026-11-08; standalone
-  `140C_RLQ3`, `BUG_RL3`, `KYOTI V1.7` rebuilt — none flashed yet).** `[BANK]` + `[TRACK n]` now brings back track n's sequence AND
+  **Part-slice + pattern-reload + quantized-landing walk-through (FINAL 2026-11-09; passed on the
+  author's MKI with KYOTI V1.7).** `[BANK]` + `[TRACK n]` now brings back track n's sequence AND
   track n's machine / FX / pages / scene locks / LFO designer *as the project was saved*; no
   other track changes. Start each step from a SAVE PROJECT, on a pattern whose Part T1 and T2
   share, with the transport running.
@@ -215,6 +214,10 @@ quick check for each:
       come back. `[PTN]` + `[TRACK 1]` then `[BANK]` + `[TRACK 1]`: T1 comes back with its sound
       (the later one wins). **Stopped:** a reload applies at once; press STOP while one waits: it
       still applies.
+  18. **No click.** Hold `[PTN]` + `[BANK]` and tap trigs on a running pattern: no click on any press,
+      whether the pattern is cued or reloads.
+  19. **Cancel a cue.** On A01, cue A02 with `[PTN]` + trig 2, then before it lands `[PTN]` + `[BANK]` +
+      trig 1: A01 reloads and A02 never comes in.
 - **QUANTIZE_LIVE_REC_TOGGLE** — hold `[REC]`, tap `[PLAY]` → toast `LIVE REC: QUANTIZED` or
   `LIVE REC: UNQUANTIZED`; tap `[PLAY]` again while it is up → the setting inverts. With
   PROJECT → PERSONALIZE open, the QUANTIZE LIVE REC check mark changes at the same moment.

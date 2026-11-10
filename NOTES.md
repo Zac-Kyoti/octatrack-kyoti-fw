@@ -37902,3 +37902,28 @@ Now 936 / 932 (<= 945): the pair fits, SC's donor becomes PLATE REV.
 - **Builds (WIP, NOT flashed; supersede 140C_RLQ1):** standalone mainos `c0f2a1b0…`, syx `ab82698c…` (`140C_RLQ3`,
   DRAM 10 pages); BUG_RL3 mainos `5a3fbdb7…`, syx `f8aa363d…`; KYOTI V1.7 mainos `aa1d5e83…`, syx `935db5b2…` (10
   pages). octabam REFERENCE `bc64fee8…` (48,948 B), 11 detours.
+
+## 2026-11-09 (`reload-slice`) — RELOAD_FROM_PROJECT: the Part change lands with the first new step; chord click, cue cancel; PROMOTED FINAL
+
+- **Bug (peer report from the Clyps session, the user approved the fix):** a running landing called the per-track
+  apply `0x40001f18` and set the engine restart in the landing tick, but the scheduler builds one step ahead, so the
+  new Part settings sounded a step early, on the old step. Now the slice goes into the Part at the landing and the
+  engine publish waits `tps(TSCALE_ARR[t])` ticks (`rl_spcount0` at the end of the landing tick's phase D,
+  `rl_spcount` each phase D, `rl_spflush` when the transport stops). It is dropped unless the armed bank is
+  `PLAY_BANK` and the Part is the playing pattern's slab link (`+0x8e57 & 3`; `0x80000003` is not it). A link change
+  publishes every track; the deferred whole-Part apply waits until no publish is pending and runs only if the target
+  still plays.
+- **Hardware fixes (the user's report):** the click on `[PTN]` + `[BANK]` + trig was the 43 KB pattern copy run
+  with interrupts masked (it held off the audio frame); the copy now runs unmasked and only changed slices are
+  published. On P1, cue P2, reload P1 → P2 landed (a stale `rl_ptngo` and no cancel); reloading the pattern you are
+  on now cancels a cued change (stock's `CHAIN_OFF 0x4009a404` + the cue refreshes).
+- **Emulator, standalone and KYOTI V1.7:** `diag_reload_quant.py` C (landing tick 193 → apply 199), D (349 → 355,
+  changed tracks only), I (cancel at 300 and 1500 ms), and `diag_reload_wrap.py` (new: landing in the wrap body at
+  tick 48 → apply 55); `_ptn`, `_full`, `_midi`, `_oracle` PASS. The wrap case forces its landing by hiding `rl_arm`
+  at `rl_tick`'s entry and restoring it at `rl_wrap`'s (a poll never sees it: the tick lands it in the same slice).
+- **Hardware:** KYOTI V1.7 syx `dd21ef01…` flashed 2026-11-09 — the author: "Everything works well" (after the
+  checks: Part change on the new step, no chord click, the cue cancel). **Promoted FINAL** on the author's
+  instruction: standalone mainos `22a6a9ff…` (syx `7a8b53d4…`, `140C_KYOTI`; the earlier test wrap `140C_RLQ5` was
+  `86ec750b…`, same mainos), `BUG_RL3` mainos `cd480be6…` (syx `ebea05b5…`), KYOTI V1.7 mainos `ee151d9c…` (syx
+  `dd21ef01…`). octabam REFERENCE `62953b35…` (50,044 B). The BLACKPYRAMIDS_303 / VARISPEED Bugbuilds were not
+  rebuilt here (the BP DSP assembler lives in its own worktree); their pins are unchanged.

@@ -82,7 +82,7 @@ trig does (`0x4009a404`, `0x400a1030`). Toast: `PATTERN A05` / `RELOADED FROM PR
 
 **Quantized** (8 Nov 2026, the author's request: CLYPS' temp-reload landing for card
 reloads). The worker no longer writes the playing pattern: it stages the card's data in the
-unit (a pattern slab and its Part, ~43 KB — why the unit is 48 KB) and the sequencer tick lands
+unit (a pattern slab and its Part, ~43 KB — why the unit is 49 KB) and the sequencer tick lands
 it. In phase D (`0x400a2530`, where every path of phase D meets, one site after DIRECT JUMP
 KYOTI's `0x400a1f72`), a track lands on the first tick that starts a step at both its old and its
 new rate, with phase-continuous counters (CLYPS' measured rule). Reloading the pattern you are
@@ -90,7 +90,10 @@ on, every track lands on the first such tick they all share. A reload that chang
 own length or scale re-phases the master and every track to where the saved pattern would be
 since the master cycle began; an emulator oracle (a run that played the saved pattern from the
 start) matches it tick for tick. The wrap body (`0x400a43a0`) lands anything pending at a master
-wrap. The slice and the Part reach the engine in that same tick, per track. The UI task's 1/60 s
+wrap. The slice goes into the Part in that tick, but reaches the engine (the per-track apply
+`0x40001f18`, the engine restart) one of the track's new steps later, when its first new step
+sounds -- the scheduler builds a step ahead -- and only if its bank and Part still play; only
+the tracks whose slice changed are applied. The UI task's 1/60 s
 tick (`0x40056c28`) then runs the UI half, and lands a reload still pending when the transport
 stops. Stopped, or the target not playing: at once. A pattern you are *not* on is a pattern
 change: stock's cue, so CHAIN AFTER (or DIRECT JUMP when it is on) decides when. Several chords
@@ -143,9 +146,9 @@ confirmed from the ROM cave (the standalone image and KYOTI V1.0), and from DRAM
 octabam-built image with all six KYOTI modules (2026-10-01): both chords, the FINISHED
 toast, the transport kept running, and the knob repaint. Nothing tested on an MKII.
 
-48948 bytes (code + staging buffers), sha256 `bc64fee862d3d7ed…` linked at `0x400d6500` (`-mcpu=5407` or `54455`, identical); octabam re-links it there on every build and compares.
+50044 bytes (code + staging buffers), sha256 `62953b358f29a7f9…` linked at `0x400d6500` (`-mcpu=5407` or `54455`, identical); octabam re-links it there on every build and compares.
 
-The `[BANK]` + `[TRACK n]` Part-slice reload, the `[PTN]` + `[BANK]` + trig pattern reload and the quantized landing (8 Nov 2026) are emulator-checked; they are not yet hardware-confirmed.
+The `[BANK]` + `[TRACK n]` Part-slice reload, the `[PTN]` + `[BANK]` + trig pattern reload and the quantized landing (8–9 Nov 2026) are hardware-confirmed on the author's MKI from DRAM in the KYOTI V1.7 image (9 Nov 2026): reloads land on the next step in time, a reloaded track's Part settings change with its first new step, no click on `[PTN]` + `[BANK]` + trig, and reloading the playing pattern cancels a cued change. Not yet run in an octabam-built image or with Octakit.
 
 ## Licence
 
