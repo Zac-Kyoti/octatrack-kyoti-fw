@@ -267,6 +267,13 @@ quick check for each:
   responsive.
 - **PART_CHANGE_CARRYOVER_FIX** — a track that is PICKUP on one Part and FLEX on
   another: switching patterns across the Parts plays the FLEX sample, not the old loop.
+- **KYOTI CL24 walk-through** (WIP; `out/KYOTI_WIP/KYOTI_V1.7_WITH_CLYPS/OCTATRACK_OS1.40C_KYOTI_V1.7_WITH_CLYPS.syx`)
+  = CL23 (never flashed; its list below is CL24's too) + the last two RELOAD_FROM_PROJECT rules:
+  1. A pattern landing that changes the Part link (the pattern's Part was changed since the save, then the card reload
+     or ORIG PTN+PRT brings it back): every track lands, and a track whose machine differs from the one that SOUNDED
+     restarts its voice.
+  2. A landing whose track slice did not change sends nothing to the engine for that track (no needless re-apply).
+
 - **KYOTI CL23 walk-through** (WIP; `out/KYOTI_WIP/KYOTI_V1.7_WITH_CLYPS/OCTATRACK_OS1.40C_KYOTI_V1.7_WITH_CLYPS.syx`)
   = CL22 (its list below still applies) + card reloads and ORIG restores land in place (RELOAD_FROM_PROJECT's rules),
   and FULL loads change the sound with the new sequence. Transport running unless said:

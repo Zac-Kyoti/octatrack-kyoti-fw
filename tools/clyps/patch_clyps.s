@@ -2861,6 +2861,58 @@ sc_out:
     lea     20(%sp),%sp
     rts
 
+| cl_slcmp(t, A, B) -> d0 = 1 when track t's slice differs between Parts A and B (cl_slice's tables, compared).
+| Uses d0-d1/a0-a1.
+cl_slcmp:
+    lea     -24(%sp),%sp
+    movem.l %d2-%d6/%a2,(%sp)
+    move.l  28(%sp),%d2
+    lea     cl_slA,%a2
+    cmpi.l  #8,%d2
+    bcs.b   sk_seg
+    subq.l  #8,%d2
+    lea     cl_slM,%a2
+sk_seg:
+    moveq   #0,%d0
+    move.w  (%a2)+,%d0                  | offset
+    cmpi.l  #0xffff,%d0
+    beq.b   sk_eq
+    moveq   #0,%d1
+    move.w  (%a2)+,%d1                  | stride
+    muls.l  %d2,%d1
+    add.l   %d1,%d0
+    moveq   #0,%d3
+    move.w  (%a2)+,%d3                  | size
+    moveq   #0,%d4
+    move.w  (%a2)+,%d4                  | count
+    moveq   #0,%d1
+    move.w  (%a2)+,%d1                  | step
+sk_rep:
+    movea.l 32(%sp),%a0
+    adda.l  %d0,%a0
+    movea.l 36(%sp),%a1
+    adda.l  %d0,%a1
+    move.l  %d3,%d5
+sk_b:
+    move.b  (%a0)+,%d6
+    cmp.b   (%a1)+,%d6
+    bne.b   sk_ne
+    subq.l  #1,%d5
+    bne.b   sk_b
+    add.l   %d1,%d0
+    subq.l  #1,%d4
+    bne.b   sk_rep
+    bra.b   sk_seg
+sk_eq:
+    moveq   #0,%d0
+    bra.b   sk_out
+sk_ne:
+    moveq   #1,%d0
+sk_out:
+    movem.l (%sp),%d2-%d6/%a2
+    lea     24(%sp),%sp
+    rts
+
 | cl_fullone (d6 = t, d2 = sbank or SRC_*, d7 = spat): the source's slice of t -> the playing
 | pattern's Part, published for t. Sources: a slot's Part; SRC_ORIG: the playing pattern's Part as
 | loaded (the snapshot); SRC_SAVED: the Part saved with t's saved sequence. Keeps d2-d7/a2-a6.
@@ -2914,10 +2966,28 @@ fo_src:
     movea.l %a0,%a2                     | a2 = the playing pattern's Part
     move.l  %d0,%d4                     | d4 = its index
 |   audio: a new machine restarts the voice (as stock's machine edit, 0x400973b4) and owes the
-|   PICKUP setup (UI tail)
+|   PICKUP setup (UI tail). Judged against the machine that SOUNDS: when a pattern landing changes the
+|   Part link (cl_lnkon), that is the old linked Part's, not the new one's (RELOAD_FROM_PROJECT's rule).
     cmpi.l  #8,%d6
-    bcc.b   fo_copy
-    move.b  0x22(%a2,%d6.l),%d0
+    bcc.w   fo_copy
+    movea.l %a2,%a0
+    tst.b   cl_lnkon
+    beq.b   fo_mc
+    move.l  %d1,-(%sp)
+    moveq   #0,%d0
+    move.b  PLAY_BANK,%d0
+    move.l  #BANKSTRIDE,%d1
+    muls.l  %d1,%d0
+    movea.l #BLOB+PART_OFF,%a0
+    adda.l  %d0,%a0
+    moveq   #0,%d0
+    move.b  cl_oldlnk,%d0
+    move.l  #PARTSZ,%d1
+    muls.l  %d1,%d0
+    adda.l  %d0,%a0                     | a0 = the Part that was sounding
+    move.l  (%sp)+,%d1
+fo_mc:
+    move.b  0x22(%a0,%d6.l),%d0
     cmp.b   0x22(%a3,%d6.l),%d0
     beq.b   fo_copy
     moveq   #1,%d0
@@ -2937,10 +3007,28 @@ fo_rsx:
     moveq   #1,%d0
     move.b  %d0,(%a0,%d6.l)
 fo_copy:
+|   a slice already the source's: nothing to copy or publish (RELOAD_FROM_PROJECT's rl_slcmp rule, 2026-11-09:
+|   re-applying unchanged slices was needless engine work) -- except on a Part-link change, where every track goes
+    clr.b   cl_fsame
+    tst.b   cl_lnkon
+    bne.b   fo_cp
     move.l  %a3,-(%sp)
     move.l  %a2,-(%sp)
     move.l  %d6,-(%sp)
+    bsr.w   cl_slcmp
+    lea     12(%sp),%sp
+    tst.l   %d0
+    bne.b   fo_cp
+    moveq   #1,%d0
+    move.b  %d0,cl_fsame
+fo_cp:
+    move.l  %a3,-(%sp)
+    move.l  %a2,-(%sp)
+    move.l  %d6,-(%sp)
+    tst.b   cl_fsame
+    bne.b   fo_cs
     bsr.w   cl_slice
+fo_cs:
     tst.b   cl_pwhole                   | ORIG PTN/PART or the card's pattern: the first landing
     beq.b   fo_norest                   | brings the rest of the Part too (cl_restorepat, cl_togarm)
     cmpi.l  #SRC_ORIG,%d2
@@ -2954,6 +3042,8 @@ fo_rest:
     bsr.w   cl_slrest
 fo_norest:
     lea     12(%sp),%sp
+    tst.b   cl_fsame                    | unchanged: nothing reaches the engine
+    bne.w   fo_out
 |   playing (the user, 2026-11-09): the slice reaches the engine when the new sequence SOUNDS -- the
 |   scheduler builds a step one step ahead, so a sequence landed at a step start is heard a step later;
 |   TRK_APPLY now put the new volume etc. on the old sound a step early. The Part holds the slice now (the
@@ -3748,6 +3838,10 @@ ta_l:
     bne.b   ta_l
     jsr     cl_bend
     clr.b   cl_noskip
+    tst.l   RUNNING                     | stopped: every track landed above
+    bne.b   ta_lr
+    clr.b   cl_lnkon
+ta_lr:
     cmpi.l  #SRC_CARD,%d3               | the card's names for every track it did not need to land (a
     bne.b   ta_nn                       | landing brings its own, cl_nload)
     moveq   #0,%d2
@@ -4521,6 +4615,7 @@ wr_n:
     jsr     cl_mrate
     move.b  %d2,SCALE_IX
 wr_tc:
+    clr.b   cl_lnkon
     clr.w   cl_tog
     clr.b   cl_togr
     bra.b   wr_done
@@ -4613,6 +4708,7 @@ tl_ln:
     addq.l  #1,%d6
     cmpi.l  #16,%d6
     bne.b   tl_l
+    clr.b   cl_lnkon
     clr.w   cl_tog
     clr.b   cl_togr
     moveq   #0,%d6                      | counters at the new rates: the members, or every track on a
@@ -4684,6 +4780,14 @@ cl_togpre:
     bsr.w   cl_live
     adda.l  #TRAILER,%a0
     movea.l (%sp)+,%a1
+    move.b  7(%a0),%d0                  | the link that sounds until now ...
+    andi.l  #3,%d0
+    move.b  %d0,cl_oldlnk
+    move.b  7(%a1),%d1                  | ... and whether this landing changes it (the machine test, cl_fullone)
+    andi.l  #3,%d1
+    cmp.l   %d0,%d1
+    sne     %d0
+    move.b  %d0,cl_lnkon
     moveq   #12,%d0
 tp2_l:
     move.b  (%a1)+,(%a0)+
@@ -5028,6 +5132,7 @@ do_tg:
 
 cl_dropall:
     clr.b   cl_lnkp
+    clr.b   cl_lnkon
     clr.w   cl_tog                      | no together landing either
     clr.b   cl_togr
     clr.b   cl_togp
@@ -7281,6 +7386,9 @@ cl_togp:    .byte 0                     | ... a whole pattern: its trailer lands
 cl_ctoast:  .byte 0                     | a card reload landed: its toast at the UI tail (the user, 2026-11-08)
 cl_noskip:  .byte 0                     | arming: load even what already plays (a pattern whose Part link changes)
 cl_lnkp:    .byte 0                     | a landing changed the Part link: stock's whole-Part apply owed (cl_uitail)
+cl_lnkon:   .byte 0                     | ... and is landing now: machine changes judged against cl_oldlnk's Part
+cl_oldlnk:  .byte 0                     | ... the link that was sounding
+cl_fsame:   .byte 0                     | cl_fullone: this slice is already the source's (nothing to publish)
 cl_spn:     .byte 0                     | a landed slice waits for its step (cl_spdo)
 cl_spr:     .byte 0                     | ... audio tracks whose new machine restarts with it
 cl_spd:     .space 16                   | per track: ticks until its slice reaches the engine (0xff armed, 0 none)

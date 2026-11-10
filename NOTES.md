@@ -38350,3 +38350,10 @@ Now 936 / 932 (<= 945): the pair fits, SC's donor becomes PLATE REV.
   upstream `6a2da8d` → `27ab725`, eleven detours, FREE LOOP declared a conflict in octabam's wrapper (its
   `fl_ui_stub` detours the same `0x40056c28`), usage page rewritten. Gates green (verify-docs, test/reload-from-project,
   octabam-bus, octabam, test/mods, reach); test remix mainos `ec12c327…`. This octabam form is not flashed.
+- **KYOTI CL24** (2026-11-10, NOT flashed; CL23 never flashed; CL22 on the unit): origin/main merged (6af5299: RELOAD
+  FINAL 27ab725 + pin PR #1079; build_kyoti B2 conflict resolved -- Clyps' jmps when CLYPS is in, else RELOAD's; CL23
+  rebuilt identical, default KYOTI V1.7 still its FINAL ee151d9c). Reading RELOAD's final dated rules, two were missing
+  in Clyps and are in now: machine changes on a Part-link change judged against the Part that was sounding (gate K:
+  CL23 missed T8's restart, CL24 restarts it), and unchanged slices neither copied nor published (`cl_slcmp`) except
+  on a link change. Gates on CL24 (ecb90715…): full 120, T 21, F+Q 27, L 17, J 8, M+U 38, X+O+W 15, V+Z+I 35, H 3;
+  diag_clyps_quant 43 (DJ off, B..K..I) / 39 (DJ on, no I).

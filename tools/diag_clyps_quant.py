@@ -45,7 +45,7 @@ def main(argv):
     ap.add_argument("--project", required=True, type=lambda p: str(pathlib.Path(p).expanduser().resolve()))
     ap.add_argument("--name", required=True)
     ap.add_argument("--dj", action="store_true", help="DIRECT JUMP on for the run (a KYOTI image)")
-    ap.add_argument("--only", default="BCDEGHPOMIF")
+    ap.add_argument("--only", default="BCDEKGHPOMIF")
     a = ap.parse_args(argv)
     sp = os.environ.get("CLYPS_SYMS", str(ROOT / "out/clyps_syms.txt"))
     syms = {k: int(v, 16) for k, v in (l.split() for l in pathlib.Path(sp).read_text().splitlines())}
@@ -394,6 +394,43 @@ def main(argv):
                       f"E: re-phased -- master step {out['ms'] if out else '?'} (expected {exp})")
             check(rd(slab_ad + 0x8E50, 2) == ml and same_slab(slab(), card_slab), "E: the pattern from the card")
         check(pending(), "E: nothing left pending")
+
+    if "K" in a.only:
+        # a pattern landing that changes the Part link (the user, 2026-11-10: as RELOAD_FROM_PROJECT): the playing
+        # pattern is moved to another Part q (and the engine told, so q sounds); the card reload brings the saved
+        # link back -- every track lands, a voice restarts where the card's machine differs from q's (the one that
+        # SOUNDS), and stock's whole-Part apply runs once, after every slice is out
+        L0 = link()
+        pa = lambda i: bytes(u.mem_read(bb + PART_OFF + i * PARTSZ, PARTSZ))
+        q = next((x for x in range(4) if x != L0 and any(pa(x)[0x22 + t] != card_part[0x22 + t] for t in range(8))),
+                 next(x for x in range(4) if x != L0))
+        mdiff = [t for t in range(8) if pa(q)[0x22 + t] != card_part[0x22 + t]]
+        print(f"K: link {L0 + 1} -> Part {q + 1} (machines differ from the card's on {[t + 1 for t in mdiff]}), "
+              f"then the pattern reloaded", flush=True)
+        u.mem_write(slab_ad + 0x8E57, bytes([(rd(slab_ad + 0x8E57, 1) & ~3) | q]))
+        main_call(0x40009094, bank, q)
+        settle(300)
+        restarts, papp = set(), []
+        def on_rs(uc, acc, ad, sz, val, ud):
+            v = val & 0xFF
+            restarts.update(t for t in range(8) if v >> t & 1)
+        h1 = u.hook_add(er.eb.UC_HOOK_MEM_WRITE, on_rs, begin=0x8000184C, end=0x8000184C)
+        h2 = u.hook_add(er.eb.UC_HOOK_CODE, lambda uc, ad, sz, ud: papp.append((
+            rd(uc.reg_read(er.eb.UC_M68K_REG_A7) + 4, 4), rd(uc.reg_read(er.eb.UC_M68K_REG_A7) + 8, 4),
+            rd(syms["cl_spn"], 1))), begin=0x40009094, end=0x40009094)
+        gesture([(PTN, 1), (BANK, 1), (act, 1), (act, 0), (BANK, 0), (PTN, 0)])
+        u.hook_del(h1)
+        u.hook_del(h2)
+        lands = [e for e in events if e["where"] in ("tick", "wrap", "now")]
+        print(f"      K: {len(lands)} landing(s); restarts {sorted(t + 1 for t in restarts)}; whole-Part applies {papp}",
+              flush=True)
+        check(link() == L0 and part() == card_part, f"K: the link back to Part {L0 + 1}, its Part from the card")
+        check(len(lands) == 16, f"K: every track lands on a link change ({len(lands)})")
+        check(set(mdiff) <= restarts, f"K: a voice restart where the card's machine differs from the sounding Part's "
+              f"({[t + 1 for t in mdiff]} in {sorted(t + 1 for t in restarts)})")
+        check(len(papp) == 1 and papp[0][:2] == (bank, L0) and papp[0][2] == 0,
+              "K: stock's whole-Part apply once, for the landed link, after every slice is out")
+        check(pending() and rd(syms["cl_lnkp"], 1) == 0, "K: nothing left pending")
 
     if "G" in a.only:
         print("G: [PTN] + [TRACK 1], then [TRACK 2]", flush=True)

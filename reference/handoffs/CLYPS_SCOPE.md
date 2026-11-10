@@ -1369,6 +1369,14 @@ is cued like a pattern change (CHAIN AFTER / DIRECT JUMP's next master step). Po
   posts a UI message every 17 ms overflows main into its own TCB within seconds (the scheduler then dispatches a bad
   SP). `main_call` restores main's SP. Clyps' tick landing measured at most 220 B deep (148 B for one track).
 
+- **CL24 (2026-11-10), the two rules of RELOAD's final code Clyps lacked** (found reading RELOAD's dated rules after
+  origin/main was merged): on a Part-link change, machine changes are judged against the Part that was sounding
+  (`cl_togpre` notes `cl_oldlnk` / `cl_lnkon`; `cl_fullone` compares there) -- CL23 compared against the new link and
+  missed the restart (gate K on CL23: T8's machine differed, no restart; CL24: restart); a slice already the source's
+  is neither copied nor published (`cl_slcmp`), except on a link change. Gate K added (the link moved to another Part
+  whose machines differ, the engine told, the pattern reloaded: 16 landings, the restart, one whole-Part apply after
+  every publish).
+
 ### 1.27 Combinations that must never ship (the user, 2026-11-07)
 
 - Clyps + RELOAD_FROM_PROJECT never; Clyps + DIRECT_JUMP_KYOTI only as KYOTI's integrated pair (SUPERSEDE).
