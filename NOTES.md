@@ -38357,3 +38357,17 @@ Now 936 / 932 (<= 945): the pair fits, SC's donor becomes PLATE REV.
   CL23 missed T8's restart, CL24 restarts it), and unchanged slices neither copied nor published (`cl_slcmp`) except
   on a link change. Gates on CL24 (ecb90715…): full 120, T 21, F+Q 27, L 17, J 8, M+U 38, X+O+W 15, V+Z+I 35, H 3;
   diag_clyps_quant 43 (DJ off, B..K..I) / 39 (DJ on, no I).
+
+## 2026-11-10 (`reload-slice`) — RELOAD_FROM_PROJECT beside FREE LOOP: octabam HOOKS bridge `ui_tick` (PR sambanks/octabam#1083)
+
+- Sam merged #1079 (`d01cf1c3`) and asked for the HOOKS chain at `0x40056c28` in place of the FREE LOOP conflict.
+- `ui_tick` is codeless, as `rec_gate`: FREE LOOP's `fl_ui_stub` stays and, assembled with `HK_UI_TICK`, jumps to
+  `rl_uitick` where it replayed stock (`0x40056c28` is a leaf, the toast countdown, `d0` its only register);
+  RELOAD's detour there is overridden. Our source and pin are unchanged; nothing to rebuild here. On a tick where
+  FREE LOOP shows a toast it returns early (as alone), so RELOAD's UI half waits one 1/60 s tick.
+- octabam side: hooks manifest + spec row, FREE LOOP `hooks.s` / regenerated `free_loop.s` / `generate.py` allow-list /
+  `select`, RELOAD wrapper conflict dropped, `verify_hooks` (selection, ledger, 4 Unicorn cases, installed), new test
+  remix `hooks-reload`. FREE LOOP alone `fa40b0f3…` and RELOAD alone `05f65807…` byte-identical to main; `hooks-reload`
+  `e855f6ca…`: verify_hooks + make check (32 FREE LOOP port scenarios) pass; octabam check + reach pass on `f7d72906`.
+- Trap: a FREE LOOP test remix must carry RLEN PLEN (the port fixture's recorder setups); without it undo / undoto /
+  undostep / replace fail. Not flashed.
