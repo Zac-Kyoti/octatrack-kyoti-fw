@@ -1,0 +1,225 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Zac Kyoti
+"""
+CLYPS -- the REF-LOCK oracle (DIRECT JUMP V7's, tools/diag_reflock.py + tools/model_reflock.py) applied to
+Clyps' landings, recorder half (the user's CL24 report, 2026-11-11: "sometimes the incoming sequence gets
+offset by a step"; and: use DIRECT JUMP's logic, look deeply -- lengths, scales, master lengths / scales).
+
+Runs the real OT DEMO export, varies it IN RAM after the load (--poke, stock-style: the pattern blob's own
+bytes), plays, opens Clyps on T1 and runs --ops: each op is a Clyps gesture at a chosen time. Records, per
+tick (phase-G entry 0x400a3fdc, t = 1 on the first running tick -- model_reflock's sample point): master
+step / tick / scale, every track's STEP / TICKS / TRK_SCALE; every audio builder call (tick, track, step);
+every Clyps landing (cl_landone: tick, track, the tick path) and request (cl_cueload: tick, track, code);
+the slab's per-track length / scale and the master's after every landing. tools/check_clyps_lock.py
+grades it against DIRECT JUMP's position model.
+
+  CLYPS_SYMS=out/clyps/kyoti_cl24_syms.txt python3 tools/diag_clyps_lock.py --image IMG --project DIR \
+      --name N --out out/clyps/lock/N.json [--dj] [--chain STEPS] [--poke P:OFF=VAL[:SIZE] ...] \
+      [--ops s1,s15,o@m0,...] [--track 0]
+  ops: sK = slot K (pattern K of the playing bank, 0-based), fK = FULL slot K, o = ORIG SEQ, of = ORIG
+       SEQ/MCH/FX; a suffix @mK waits for master step K first (0 = the cycle's last audible step), @kN
+       waits N ms; without one, an irregular delay walks the press through every tick of a step.
+"""
+import argparse, json, os, pathlib, sys
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+OCTABAM = ROOT / "refs" / "octabam"
+SET_KEY = 0x40031734
+BLOB, BANKSTRIDE, PATSTRIDE, TRAC_A = 0x400E21E0, 0x9B340, 0x8ED8, 0x91A
+ACT, RUNNING, MSTEP, TICK_CTR, SCALE_IX = 0x800065BE, 0x800065B8, 0x800065B2, 0x800065B6, 0x8000663D
+STEP_ARR, TICKS_ARR, TSCALE_ARR = 0x800064D0, 0x800064F0, 0x8000663E
+TICK_PC = 0x400A3FDC
+BUILDER_A, BUILDER_A_RET = 0x4009D1E8, 0x400A2D82
+FIRE_STORE = 0x400A2E18          # audio fire time store: d0 = time, a1 = track + slot*8, d7 = ahead * 0x285ff0
+SCLK = 0x4610757C
+PAGE, FUNC = 0x1B, 0x2D
+
+
+def main(argv):
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--image", required=True, type=lambda p: str(pathlib.Path(p).resolve()))
+    ap.add_argument("--project", required=True, type=lambda p: str(pathlib.Path(p).expanduser().resolve()))
+    ap.add_argument("--name", required=True)
+    ap.add_argument("--out", required=True)
+    ap.add_argument("--dj", action="store_true")
+    ap.add_argument("--chain", type=int, default=None)
+    ap.add_argument("--poke", action="append", default=[])
+    ap.add_argument("--ops", default="s1,s15")
+    ap.add_argument("--track", type=int, default=0, help="the active track (0-based audio)")
+    ap.add_argument("--start", type=int, default=None, help="the pattern to play (0-based), default: as loaded")
+    ap.add_argument("--stride", type=int, default=29)
+    ap.add_argument("--tail", type=int, default=800, help="ms after the last landing")
+    a = ap.parse_args(argv)
+    sp = os.environ.get("CLYPS_SYMS", str(ROOT / "out/clyps_syms.txt"))
+    syms = {k: int(v, 16) for k, v in (l.split() for l in pathlib.Path(sp).read_text().splitlines())}
+    out = pathlib.Path(a.out)
+    if not out.is_absolute():
+        out = ROOT / out
+    os.chdir(OCTABAM)
+    sys.path.insert(0, str(OCTABAM / "tools"))
+    import toolpath  # noqa: F401
+    sys.path.insert(0, str(OCTABAM / "tools" / "emu"))
+    import emu_rtos as er
+    card, staged = er.stage_project(a.project, "OCTABAM", a.name, tree=f"out/_emu_clyps_lock_{a.name}")
+    r, rt = er.attach(a.image, card, ips=3990.0, pit_clock_hz=264e6, quantum=4096, step_quantum=32, tick=True)
+    if not rt.gate_m6a()[0]:
+        rt.run(ms=1000, until=lambda x: x.gate_m6a()[0])
+    bank = rt.load_project_live("OCTABAM", staged, run_ms=6000)[3]
+    u = rt.uc
+    rd = lambda ad, n: int.from_bytes(bytes(u.mem_read(ad, n)), "big")
+
+    def main_call(addr, *args):
+        rt.run(until=lambda x: x.pc == er.MAIN_SPIN)
+        sp0 = u.reg_read(er.eb.UC_M68K_REG_A7)
+        r_ = rt.call_as_main(addr, args=args, budget=600000)
+        u.reg_write(er.eb.UC_M68K_REG_A7, sp0)
+        return r_
+
+    def tail():
+        u.mem_write(er.SYS_MSG_SCRATCH, bytes([0, 0]))
+        main_call(er.KERNEL_POST, er.SYS_QUEUE, er.SYS_MSG_SCRATCH)
+
+    def key(code, ev, ms=0):
+        if ev and 0x10 <= code <= 0x17:
+            u.mem_write(0x460D5DE0, (100).to_bytes(4, "big"))
+        main_call(SET_KEY, code, ev)
+        tail()
+        if ms:
+            rt.run(ms=ms)
+
+    def settle(ms, every=34):
+        for _ in range(max(1, ms // every)):
+            rt.run(ms=every)
+            main_call(0x40056C28)
+            tail()
+
+    if rd(0x80000012, 4):
+        key(0x35, 1, 40); key(0x35, 0, 40)
+    key(0x10 + a.track, 1, 40); key(0x10 + a.track, 0, 40)
+    bb = BLOB + bank * BANKSTRIDE
+    act = rd(ACT, 1) if a.start is None else a.start
+    slab_ad = bb + act * PATSTRIDE
+    for spec in a.poke:                       # P:OFF=VAL[:SIZE], pattern P of the playing bank
+        lhs, rhs = spec.split("=")
+        p, off = lhs.split(":")
+        val, _, sz = rhs.partition(":")
+        n = int(sz or 1)
+        ad = bb + int(p, 0) * PATSTRIDE + int(off, 0)
+        u.mem_write(ad, (int(val, 0) & ((1 << (8 * n)) - 1)).to_bytes(n, "big"))
+        print(f"poke pattern {int(p, 0) + 1} +{int(off, 0):#x} = {int(val, 0):#x} ({n} B)", flush=True)
+    if a.chain is not None:
+        qt = [rd(0x400D80DC + 4 * i, 4) for i in range(17)]
+        u.mem_write(slab_ad + 0x8E56, bytes([qt.index(a.chain)]))
+
+    def params(p):
+        base = bb + p * PATSTRIDE
+        tr = bytes(u.mem_read(base + 0x8E50, 8))
+        trk = [(rd(base + t * TRAC_A + 0x50, 1), rd(base + t * TRAC_A + 0x51, 1), rd(base + t * TRAC_A + 0x54, 1))
+               for t in range(8)]
+        return dict(mlen=int.from_bytes(tr[0:2], "big"), mscale=tr[2], len=tr[3], scale=tr[4], mode=tr[5],
+                    chain=tr[6], trk=trk)
+
+    st = dict(tick=0, q=0)
+    states, builds, lands, reqs, snaps, fires = [], [], [], [], [], []
+    ctx = {"where": None}
+
+    def on_tick(uc, ad, sz, ud):
+        st["tick"] += 1
+        states.append([st["tick"], rd(MSTEP, 2), rd(TICK_CTR, 1), rd(SCALE_IX, 1),
+                       list(u.mem_read(STEP_ARR, 16)), list(u.mem_read(TICKS_ARR, 16)),
+                       list(u.mem_read(TSCALE_ARR, 16))])
+
+    def on_build(uc, ad, sz, ud):
+        s = uc.reg_read(er.eb.UC_M68K_REG_A7)
+        if rd(s, 4) != BUILDER_A_RET:
+            return
+        st["q"] += 1
+        builds.append([st["tick"], rd(s + 4, 4), rd(s + 16, 4), st["q"]])
+
+    def on_fire(uc, ad, sz, ud):
+        idx = uc.reg_read(er.eb.UC_M68K_REG_A1)
+        d7 = uc.reg_read(er.eb.UC_M68K_REG_D7)
+        fires.append([st["tick"], idx & 7, idx >> 3, d7 // 0x285FF0, st["q"]])
+
+    def on_landin(uc, ad, sz, ud):
+        ctx["where"] = "tick"
+
+    def on_wrapin(uc, ad, sz, ud):
+        ctx["where"] = "wrap"
+
+    def on_landone(uc, ad, sz, ud):
+        st["q"] += 1
+        lands.append([st["tick"], uc.reg_read(er.eb.UC_M68K_REG_D6), ctx["where"], rd(MSTEP, 2), rd(TICK_CTR, 1),
+                      st["q"]])
+
+    def on_req(uc, ad, sz, ud):
+        s = uc.reg_read(er.eb.UC_M68K_REG_A7)
+        st["q"] += 1
+        reqs.append([st["tick"], rd(s + 4, 4), rd(s + 8, 4), rd(s + 12, 4), rd(MSTEP, 2), rd(TICK_CTR, 1), st["q"]])
+
+    u.hook_add(er.eb.UC_HOOK_CODE, on_tick, begin=TICK_PC, end=TICK_PC)
+    u.hook_add(er.eb.UC_HOOK_CODE, on_build, begin=BUILDER_A, end=BUILDER_A)
+    u.hook_add(er.eb.UC_HOOK_CODE, on_fire, begin=FIRE_STORE, end=FIRE_STORE)
+    u.hook_add(er.eb.UC_HOOK_CODE, on_landin, begin=syms["cl_land"], end=syms["cl_land"])
+    u.hook_add(er.eb.UC_HOOK_CODE, on_wrapin, begin=syms["cl_wrap"], end=syms["cl_wrap"])
+    u.hook_add(er.eb.UC_HOOK_CODE, on_landone, begin=syms["cl_landone"], end=syms["cl_landone"])
+    u.hook_add(er.eb.UC_HOOK_CODE, on_req, begin=syms["cl_cueload"], end=syms["cl_cueload"])
+    if a.dj:
+        u.mem_write(syms["DJ_MODE"], (1).to_bytes(4, "big"))
+    p0 = params(act)
+    print(f"bank {bank + 1} pattern {act + 1}: {p0}", flush=True)
+    snaps.append([0, p0])
+
+    rt.seq_select_live(bank, act)
+    rt.internal_clock()
+    rt.frame = True
+    rt.next_frame = rt.sample + er.FRAME_PERIOD
+    rt.exact_clock()
+    rt.start_transport_live()
+    rt.run(ms=600)
+    key(0x2E, 1, 40); key(0x2F, 1, 40); key(0x2F, 0, 40); key(0x2E, 0, 40)
+    print(f"running {rd(RUNNING, 4)}, Clyps open {rd(syms['cl_open'], 1)}, DJ {a.dj}", flush=True)
+    settle(200)
+
+    for i, opx in enumerate(a.ops.split(",")):
+        op, _, when = opx.partition("@")
+        if when.startswith("m"):
+            want = int(when[1:])
+            g = 0
+            while rd(MSTEP, 2) != want and g < 4000:
+                rt.run(ms=6)
+                g += 1
+        elif when.startswith("k"):
+            rt.run(ms=int(when[1:]))
+        else:
+            rt.run(ms=150 + (i * a.stride) % 400)
+        nl = len(lands)
+        if op[0] == "s":
+            key(int(op[1:]), 1); key(int(op[1:]), 0)
+        elif op[0] == "f":
+            key(FUNC, 1); key(int(op[1:]), 1); key(int(op[1:]), 0); key(FUNC, 0)
+        elif op == "o":
+            key(PAGE, 1); key(PAGE, 0)
+        elif op == "of":
+            key(FUNC, 1); key(PAGE, 1); key(PAGE, 0); key(FUNC, 0)
+        g = 0
+        while len(lands) == nl and g < 300:
+            settle(68)
+            g += 1
+        settle(300)
+        snaps.append([st["tick"], params(act)])
+        l = lands[-1] if len(lands) > nl else None
+        print(f"#{i} {opx}: requests {[x[:6] for x in reqs if x[0] >= (l[0] - 400 if l else 0)][-2:]} landing "
+              f"{l}", flush=True)
+    settle(a.tail)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(dict(meta=dict(name=a.name, dj=a.dj, chain=a.chain, pokes=a.poke, ops=a.ops,
+                                             track=a.track, pattern=act, bank=bank),
+                                   states=states, builds=builds, fires=fires, lands=lands, reqs=reqs, snaps=snaps)))
+    print(f"wrote {out}: ticks {st['tick']}, landings {len(lands)}", flush=True)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

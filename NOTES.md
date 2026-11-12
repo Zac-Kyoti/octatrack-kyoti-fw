@@ -38357,6 +38357,28 @@ Now 936 / 932 (<= 945): the pair fits, SC's donor becomes PLATE REV.
   CL23 missed T8's restart, CL24 restarts it), and unchanged slices neither copied nor published (`cl_slcmp`) except
   on a link change. Gates on CL24 (ecb90715…): full 120, T 21, F+Q 27, L 17, J 8, M+U 38, X+O+W 15, V+Z+I 35, H 3;
   diag_clyps_quant 43 (DJ off, B..K..I) / 39 (DJ on, no I).
+- **CL24 timing investigation** (2026-11-11; CL24 FLASHED by the user; no build): the user heard, with DIRECT JUMP on,
+  "sometimes the incoming sequence comes in a step off, back in phase once it wraps" (OT DEMO A01 T1 64 <-> 16-step
+  slots). New REF-LOCK harness after DIRECT JUMP's (`tools/diag_clyps_lock.py` records, `tools/check_clyps_lock.py`
+  grades every track, every tick, against model_reflock's position model + per-landing latency), runs R1-R8, R3b, R6b/c
+  (in-RAM pokes on the OT DEMO export). Findings: (1) **the user's report**: every in-phase landing (DJ on; ORIG / temp /
+  card in place) copies at a window start with normal lookahead, so the step sounding at the next boundary was built a
+  step earlier from the OLD sequence; the new one is heard a boundary later than a DJ jump (stock D2 lands on the tick
+  before the boundary with first-fire 0x80006624 + RELOAD 0x800065d3 = tps-1). Counters stay in phase (24/24 DJ-on
+  landings PASS the model); at the incoming sequence's step 1 it sounds like a start on step 2, right after its wrap.
+  The old A4..A8 oracles were blind to it ("identical from the tick after the landing"). DJ off: CHAIN AFTER points and
+  the master wrap exact for same-rate loads (the gate is evaluated one master step early). (2) a **rate-changing** load
+  at a CHAIN AFTER point misses the point's step (both windows must start a master step early; else lcm wait + the
+  lookahead loss). (3) **MASTER_STEP reads 0 in the master cycle's last audible step**; cl_land lands arm-now cues there
+  with an unsigned t0 = -tps_M + tick: ORIG / ORIG SEQ+MCH/FX pressed there land at tick 2 with STEP = 0x2AAAAAAB mod len
+  (11 of 16, 43 of 64), off-grid until the next landing / master wrap (R6b/c, 6/6, no pokes). RELOAD's rl_tick skips
+  MASTER_STEP == 0; Clyps does not (cl_togland / cl_ctr / cl_mreph share the t0). (4) **cl_back** reverts the pattern's
+  master length / scale / mode to the as-loaded snapshot when a restore makes every track original: a master edit made
+  after loading is undone, stock re-reads it at the next master step (0x400a4220) with no re-phase, and later landings
+  read a wrong master position (R3: T1 6 steps off, persistent). (5) Clyps never calls COND_RESET 0x400a539c (stock /
+  DJ reset A:B counters on a switch). PASS on every tick: 2x / 3/4x sources, master 3/4x (fast tracks, around the wrap),
+  master 48 + 12-step, INF, NORMAL 16 + 64-step conversion and ORIG back, wrap landings with a scale change (audible
+  timing right). Not covered: MIDI tracks, [CUE] groups, together landings under mixed rates, Clyps after a DJ jump.
 
 ## 2026-11-10 (`reload-slice`) — RELOAD_FROM_PROJECT beside FREE LOOP: octabam HOOKS bridge `ui_tick` (PR sambanks/octabam#1083)
 
