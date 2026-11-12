@@ -129,6 +129,14 @@
     .equ STEPM1_ARR,  0x800064e0        | byte[16]: per-track step - 1 (mod len)
     .equ TICKS_ARR,   0x800064f0        | byte[16]: per-track ticks within the step
     .equ TSCALE_ARR,  0x8000663e        | byte[16]: per-track scale cache
+    .equ CNTDN_ARR,   0x800065c3        | byte[16]: stock's per-track landing countdown, < 0 idle
+    .equ RELOAD_ARR,  0x800065d3        | byte[16]: per-track reload (first fire: tps - 1)
+    .equ FFIRE,       0x80006624        | word: first-fire mask, bit per track
+    .equ HOLD_MASK,   0x80006626        | word: skip one advance, bit per track
+    .equ SCLK,        0x4610757c        | audio-domain sample clock (fire-time base)
+    .equ MCLK,        0x46107564        | MIDI-domain clock
+    .equ COND_RESET,  0x400a539c        | (t | -1): A:B pass counters / FILL latches fresh (stock's switch)
+    .equ COND_CNT,    0x46107918        | long[16]: a track's A:B pass counter (++ at its wraps, 0x400a536c)
     .equ LAND_RESUME, 0x400a1f78        | after `move.b 0x80006687,%d0` (stock's ble.w follows)
     .equ UIT_RESUME,  0x40062d22        | after `tst.l 0x46c7c72c` (stock's beq.w follows)
     .equ WRAP_RESUME, 0x400a43a6        | after `move.l (a2),d0 ; moveq #1,d2 ; or.l d2,d0`
@@ -250,7 +258,7 @@
     tst.l   %d0
     bne.w   cl_fwdbase
     .endm
-    .global cl_ptn, cl_bankp, cl_bankr, cl_land, cl_uitail, cl_wrap, cl_projload, cl_rstall
+    .global cl_ptn, cl_bankp, cl_bankr, cl_land, cl_uitail, cl_wrap, cl_projload, cl_rstall, cl_creset
     .global cl_yes, cl_no
     .global cl_hwrite, cl_hstorep, cl_hstoreb, cl_hrestp, cl_hrestb, cl_hdel, cl_hexp
     .section .dram,"ax"
@@ -1640,6 +1648,22 @@ lo_set:
     move.w  %d0,(%a0,%d1.l)             | the pattern it is aimed at
     lea     cl_cuef,%a0
     move.b  %d5,(%a0,%d3.l)
+|   CL25 (the user, 2026-11-11): the kind of landing -- 1 in place (now: ORIG / temp / card, the track's
+|   next step), 2 DIRECT JUMP on (the next master step, armed at once as DIRECT JUMP arms at the request),
+|   0 cued (the CHAIN AFTER gate / the master wrap). It picks the step grid and the trig conditions.
+    moveq   #1,%d1
+    tst.l   %d4
+    bne.b   lo_kind
+    moveq   #0,%d1
+.ifdef DJ_MODE
+    tst.l   DJ_MODE
+    beq.b   lo_kind
+    moveq   #2,%d1
+    moveq   #1,%d4                      | armed at once
+.endif
+lo_kind:
+    lea     cl_inst,%a0
+    move.b  %d1,(%a0,%d3.l)
     lea     cl_arm,%a0
     move.b  %d4,(%a0,%d3.l)             | 0 = wait for the gate; 1 = armed already
     jsr     cl_count
@@ -2356,6 +2380,18 @@ cl_projload:
     not.l   %d0
     and.l   %d0,%d1
     move.w  %d1,cl_snapok               | no originals for these banks until the load is done
+    lea     cl_cvok,%a0                 | CL25: nor the conversions Clyps made in them (cl_back)
+    moveq   #0,%d1
+pl_cv:
+    move.w  cl_ldmask,%d0
+    btst    %d1,%d0
+    beq.b   pl_cvn
+    clr.w   (%a0)
+pl_cvn:
+    addq.l  #2,%a0
+    addq.l  #1,%d1
+    cmpi.l  #16,%d1
+    bne.b   pl_cv
     moveq   #0,%d0
     move.w  cl_ldmask,%d0
     moveq   #0,%d1                      | d1 = banks in it
@@ -2594,6 +2630,12 @@ ap_src:
     movea.l %d0,%a4                     | a4 = its length
     movea.l %d1,%a5                     | a5 = its scale
 ap_copy:
+    movea.l %a2,%a1                     | CL25: a NORMAL destination -- what a conversion would overwrite, before
+    adda.l  #TRAILER,%a1                | the copy brings the source's length / scale bytes (cl_convert marks it)
+    tst.b   T_SMODE(%a1)
+    bne.b   ap_cp2
+    jsr     cl_cvsave
+ap_cp2:
     move.l  %d5,-(%sp)
     move.l  %a3,-(%sp)
     move.l  %a2,%d0
@@ -3387,23 +3429,33 @@ bk_a:
     addq.l  #1,%d2
     cmpi.l  #16,%d2
     bne.b   bk_l
-    movea.l %a2,%a0                     | every track original: the rest comes back
-    adda.l  #TRAILER,%a0
-    movea.l %a3,%a1
+|   every track original: a NORMAL -> PER TRACK conversion Clyps made on this pattern is undone -- the bytes it
+|   overwrote come back (cl_cvsave). CL25 (the user, 2026-11-11): nothing else -- until CL24 the pattern's
+|   length / scale / mode came back from the load snapshot, undoing the user's own master edits, mid-cycle.
+    jsr     cl_cvidx                    | d0 = the playing (bank, pattern) index, a0 = its record
+    lea     cl_cvok,%a1
+    move.l  %d0,%d1
+    lsr.l   #3,%d1
+    adda.l  %d1,%a1                     | a1 -> its mark byte
+    andi.l  #7,%d0                      | its bit (a register bclr counts mod 32)
+    move.b  (%a1),%d1
+    bclr    %d0,%d1
+    beq.b   bk_out                      | Clyps did not convert it: nothing more
+    move.b  %d1,(%a1)
+    movea.l %a2,%a1
     adda.l  #TRAILER,%a1
     moveq   #6,%d0
 bk_tr:
-    move.b  (%a1)+,(%a0)+
+    move.b  (%a0)+,(%a1)+
     subq.l  #1,%d0
     bne.b   bk_tr
     moveq   #0,%d0
 bk_pa:
     move.l  #TRAC_A,%d1
     muls.l  %d0,%d1
-    lea     0x50(%a3,%d1.l),%a1
-    lea     0x50(%a2,%d1.l),%a0
-    move.b  (%a1)+,(%a0)+
-    move.b  (%a1)+,(%a0)+
+    lea     0x50(%a2,%d1.l),%a1
+    move.b  (%a0)+,(%a1)+
+    move.b  (%a0)+,(%a1)+
     addq.l  #1,%d0
     cmpi.l  #8,%d0
     bne.b   bk_pa
@@ -3412,10 +3464,9 @@ bk_pm:
     move.l  #TRAC_M,%d1
     muls.l  %d0,%d1
     addi.l  #MIDI_BASE+0x28,%d1
-    lea     (%a3,%d1.l),%a1
-    lea     (%a2,%d1.l),%a0
-    move.b  (%a1)+,(%a0)+
-    move.b  (%a1)+,(%a0)+
+    lea     (%a2,%d1.l),%a1
+    move.b  (%a0)+,(%a1)+
+    move.b  (%a0)+,(%a1)+
     addq.l  #1,%d0
     cmpi.l  #8,%d0
     bne.b   bk_pm
@@ -3424,6 +3475,89 @@ bk_out:
     lea     20(%sp),%sp
     rts
 
+    .section .dram,"ax"                 | CL25: landing-time only (the standalone cave is full)
+| cl_cvidx -> d0 = PLAY_BANK * 16 + ACT_PAT, a0 = its conversion record in CVSAVE (6 trailer bytes +0x8e50..55,
+| then the 8 audio and 8 MIDI tracks' length / scale). Uses d0-d1/a0.
+cl_cvidx:
+    moveq   #0,%d0
+    move.b  PLAY_BANK,%d0
+    lsl.l   #4,%d0
+    moveq   #0,%d1
+    move.b  ACT_PAT,%d1
+    or.l    %d1,%d0
+    moveq   #CV_W,%d1
+    muls.l  %d0,%d1
+    movea.l #CVSAVE,%a0
+    adda.l  %d1,%a0
+    rts
+
+| cl_cvmark: the playing pattern's CVSAVE record is valid (cl_convert ran). Keeps every register.
+cl_cvmark:
+    lea     -16(%sp),%sp
+    movem.l %d0-%d1/%a0-%a1,(%sp)
+    jsr     cl_cvidx
+    lea     cl_cvok,%a1
+    move.l  %d0,%d1
+    lsr.l   #3,%d1
+    adda.l  %d1,%a1
+    andi.l  #7,%d0
+    move.b  (%a1),%d1
+    bset    %d0,%d1
+    move.b  %d1,(%a1)
+    movem.l (%sp),%d0-%d1/%a0-%a1
+    lea     16(%sp),%sp
+    rts
+
+| cl_cvsave (a2 = the playing pattern's slab, NORMAL, before a load writes its track's length / scale): its
+| trailer's first six bytes and every track's length / scale into its CVSAVE record (valid once cl_convert
+| marks it). A record still marked holds a conversion not undone yet: it stays (ORIG PTN+PRT puts the
+| trailer back first, so its tracks' restores meet a NORMAL destination). Keeps every register.
+cl_cvsave:
+    lea     -16(%sp),%sp
+    movem.l %d0-%d1/%a0-%a1,(%sp)
+    jsr     cl_cvidx
+    lea     cl_cvok,%a1
+    move.l  %d0,%d1
+    lsr.l   #3,%d1
+    adda.l  %d1,%a1
+    andi.l  #7,%d0
+    move.b  (%a1),%d1
+    btst    %d0,%d1
+    bne.b   cvs_out                     | marked: keep it
+    movea.l %a2,%a1
+    adda.l  #TRAILER,%a1
+    moveq   #6,%d0
+cs_tr:
+    move.b  (%a1)+,(%a0)+
+    subq.l  #1,%d0
+    bne.b   cs_tr
+    moveq   #0,%d0
+cs_pa:
+    move.l  #TRAC_A,%d1
+    muls.l  %d0,%d1
+    lea     0x50(%a2,%d1.l),%a1
+    move.b  (%a1)+,(%a0)+
+    move.b  (%a1)+,(%a0)+
+    addq.l  #1,%d0
+    cmpi.l  #8,%d0
+    bne.b   cs_pa
+    moveq   #0,%d0
+cs_pm:
+    move.l  #TRAC_M,%d1
+    muls.l  %d0,%d1
+    addi.l  #MIDI_BASE+0x28,%d1
+    lea     (%a2,%d1.l),%a1
+    move.b  (%a1)+,(%a0)+
+    move.b  (%a1)+,(%a0)+
+    addq.l  #1,%d0
+    cmpi.l  #8,%d0
+    bne.b   cs_pm
+cvs_out:
+    movem.l (%sp),%d0-%d1/%a0-%a1
+    lea     16(%sp),%sp
+    rts
+
+    ROMSEC
     .section .dram,"ax"
 | cl_post_ui(t): what a load owes the UI side (never from the tick) -- cl_postmask(1 << t).
 cl_post_ui:
@@ -4368,18 +4502,37 @@ cl_land:
 |   it again at la_out (the same byte: Clyps never writes 0x80006687).
     jsr     DJ_LAND
 .endif
+    tst.l   RUNNING                     | d0 is dead here: la_out's displaced move writes it
+    bne.b   la_run
+    clr.l   cl_T                        | stopped: the running-tick count starts again at PLAY
+    clr.w   cl_cdm
+    clr.w   cl_fxm                      | ... and stock's start sets every track's reload itself
+    bra.w   la_out
+la_run:
+    move.l  cl_T,%d0
+    addq.l  #1,%d0
+    move.l  %d0,cl_T                    | CL25: running ticks (cl_creset notes the trig conditions' resets)
     tst.b   cl_nq
     bne.b   la_any
     tst.b   cl_spn
-    beq.w   la_out                      | nothing cued, nothing to publish: two byte tests per tick
+    bne.b   la_any
+    tst.w   cl_fxm
+    bne.b   la_any
+    tst.w   cl_cdm
+    beq.w   la_out                      | nothing cued, published or owed
 la_any:
-    tst.l   RUNNING
-    beq.w   la_out
 |   mid-function in stock's tick handler: every register may be live -- save them all
     lea     -60(%sp),%sp
     movem.l %d0-%d7/%a0-%a6,(%sp)
+    tst.w   cl_fxm
+    beq.b   la_nofx
+    jsr     cl_fixup                    | the tick after a landing: the reload a never-switched track holds
+la_nofx:
     tst.b   cl_nq
+    bne.b   la_cues
+    tst.w   cl_cdm
     beq.w   la_done                     | only a publish is pending
+la_cues:
 .ifdef DJ_STATE
 |   DIRECT JUMP lands on this tick (dj_land just committed: state LANDING): stock re-lands the
 |   whole sequencer right after us, so every pending cue is dropped (scope §1.10, O8's rule)
@@ -4387,10 +4540,12 @@ la_any:
     cmpi.b  #2,%d0                      | DJ's ST_LANDING
     bne.b   la_nodj
     jsr     cl_dropall
+    clr.w   cl_cdm                      | (its hand-off starts every track's conditions again)
     bra.w   la_done
 la_nodj:
 .endif
-|   tps_M and t0
+|   tps_M and t0 (SIGNED since CL25: in the master cycle's last step, before the wrap's first tick,
+|   MASTER_STEP reads 0 and t0 is -tps_M + tick -- the user's CL24 hunt, 2026-11-11)
     moveq   #0,%d0
     move.b  SCALE_IX,%d0
     jsr     cl_tps
@@ -4428,8 +4583,8 @@ la_q:
     lea     QUANT_TBL,%a1
     move.l  (%a1,%d0.l*4),%d1           | N
 .ifdef DJ_MODE
-|   DIRECT JUMP on (scope §1.5a / §1.10): a load lands at the next master step, phase-continuous in
-|   the playing pattern's master cycle (= DJ's clock-locked position once DJ landed that pattern)
+|   DIRECT JUMP on (scope §1.5a / §1.10): a cue made while it was off lands at the end of this master
+|   step (CL25: one made while it is on is armed at the request, cl_cueload)
     tst.l   DJ_MODE
     beq.b   la_qn
     moveq   #1,%d1
@@ -4448,7 +4603,7 @@ la_qn:
     move.b  PEND_BANK,%d0
     cmp.b   PLAY_BANK,%d0
     bne.w   la_tracks
-|   arm every cue
+|   arm every cue: it lands at the end of this master step, the point (t' = s * tps_M)
     lea     cl_cue,%a0
     lea     cl_arm,%a1
     moveq   #0,%d0
@@ -4463,9 +4618,18 @@ la_armn:
     cmpi.l  #16,%d0
     bne.b   la_arml
 
-| every armed track whose old and new rates both start a window at t0
+| CL25: every armed track lands as stock's landing (and DIRECT JUMP's) lands a track -- on the tick whose
+| t' = t0 + 1 ends a step at its old AND its new rate (DIRECT JUMP on: and the master's), the step that
+| sounds next built from the NEW record and fired at once (cl_ffland). Until CL24 the copy came one tick
+| later with stock's one-step look-ahead: the step at that boundary had been built from the OLD sequence a
+| step earlier, so the new one was heard a step after a DIRECT JUMP pattern jump (the user's report).
 la_tracks:
-    tst.w   cl_tog                      | a together landing first (d5 = tps_M, d7 = t0)
+    addq.l  #1,%d7                      | d7 = t' (signed: <= 0 in the cycle's last master step)
+    tst.w   cl_cdm
+    beq.b   la_ncd
+    jsr     cl_cdo                      | the wrap's landings: their trig conditions now
+la_ncd:
+    tst.w   cl_tog                      | a together landing first (d5 = tps_M, d7 = t')
     beq.b   la_ntog
     jsr     cl_togland
 la_ntog:
@@ -4491,15 +4655,20 @@ la_tl:
     jsr     cl_dropone                  | d6 = track
     bra.w   la_tn
 la_aimed:
+    move.l  %d6,%d0
+    jsr     cl_ffok                     | t' >= 0, no landing of stock's own pending for the track
+    tst.l   %d0
+    beq.w   la_tn
 |   old rate
     lea     TSCALE_ARR,%a0
     moveq   #0,%d0
     move.b  (%a0,%d6.l),%d0
     jsr     cl_tps                      | d0 -> ticks per step
+    movea.l %d0,%a2                     | a2 = tps_old
     move.l  %d7,%d1
     remu.l  %d0,%d2:%d1
     tst.l   %d2
-    bne.w   la_tn                       | old window not at its start: wait
+    bne.w   la_tn                       | not the end of an old step: wait
 |   new rate: the source record's (after the copy's NORMAL/PER TRACK rule -- peek it first)
     move.l  %d6,%d0
     add.l   %d0,%d0
@@ -4525,30 +4694,20 @@ la_rate:
     move.l  %d7,%d1
     remu.l  %d0,%d2:%d1
     tst.l   %d2
-    bne.w   la_tn                       | new window not at its start: wait
+    bne.w   la_tn                       | not the end of a new step: wait
+    lea     cl_inst,%a0
+    moveq   #0,%d4
+    move.b  (%a0,%d6.l),%d4             | d4 = the kind (cl_cueload)
+    cmpi.l  #2,%d4
+    bne.b   la_kind
+    move.l  %d7,%d1                     | DIRECT JUMP on: the next MASTER step, as its jumps land
+    remu.l  %d5,%d2:%d1
+    tst.l   %d2
+    bne.w   la_tn
+la_kind:
     jsr     cl_landone                  | d6 = track: copy + clear the cue
-|   phase-continuous counters
-    move.l  %d7,%d0
-    move.l  %a3,%d1
-    divu.l  %d1,%d0                     | t0 / tps
-    addq.l  #1,%d0
-    move.l  %a4,%d1
-    remu.l  %d1,%d2:%d0                 | d2 = STEP
-    lea     STEP_ARR,%a0
-    move.b  %d2,(%a0,%d6.l)
-    add.l   %d1,%d2
-    subq.l  #1,%d2
-    remu.l  %d1,%d0:%d2                 | d0 = (STEP + len - 1) mod len
-    lea     STEPM1_ARR,%a0
-    move.b  %d0,(%a0,%d6.l)
-    move.l  %d7,%d0
-    move.l  %a3,%d1
-    remu.l  %d1,%d2:%d0
-    lea     TICKS_ARR,%a0
-    move.b  %d2,(%a0,%d6.l)             | 0 at a window start
-    move.l  %a5,%d0
-    lea     TSCALE_ARR,%a0
-    move.b  %d0,(%a0,%d6.l)
+    jsr     cl_ffland                   | its counters, fired at once (d6, d7, a2-a5, d5)
+    jsr     cl_cond                     | its trig conditions (d6, d4 = the kind, d7, a3, a4, d5)
 la_tn:
     addq.l  #1,%d6
     cmpi.l  #16,%d6
@@ -4579,7 +4738,7 @@ cl_wrap:
     beq.b   wr_pl
     jsr     cl_stockown
     tst.l   %d0
-    bne.b   wr_drop
+    bne.w   wr_drop
 wr_pl:
     tst.w   cl_tog                      | a together landing at the wrap: its trailer first
     beq.b   wr_nt
@@ -4604,7 +4763,11 @@ wr_l:
     jsr     cl_dropone                  | aimed at a pattern no longer playing
     bra.b   wr_n
 wr_land:
+    lea     cl_inst,%a0
+    moveq   #0,%d4
+    move.b  (%a0,%d6.l),%d4             | d4 = the kind (cl_cueload)
     jsr     cl_landone
+    jsr     cl_wrcond                   | its trig conditions: the cycle starts with it (stock re-homes it)
 wr_n:
     addq.l  #1,%d6
     cmpi.l  #16,%d6
@@ -4641,6 +4804,8 @@ wr_out:
 cl_togland:
     lea     -40(%sp),%sp
     movem.l %d2-%d6/%a2-%a6,(%sp)
+    tst.l   %d7
+    bmi.w   tl_wait                     | t' < 0: the cycle's last master step (stock's deferred landings)
     moveq   #0,%d6
 tl_chk:
     move.w  cl_tog,%d0
@@ -4648,17 +4813,17 @@ tl_chk:
     bne.b   tl_mem
     tst.b   cl_togr
     beq.b   tl_cn                       | another track, no rate change: not concerned
-    bsr.w   tl_old
+    bsr.w   tl_ready
     tst.l   %d0
-    bne.w   tl_wait
+    beq.w   tl_wait
     bsr.w   cl_togsrc                   | its rate under the new trailer (its own record, the new mode)
     move.l  %d6,%d0
     bsr.w   cl_trate
     bra.b   tl_new
 tl_mem:
-    bsr.w   tl_old
+    bsr.w   tl_ready
     tst.l   %d0
-    bne.w   tl_wait
+    beq.w   tl_wait
     move.l  %d6,%d0                     | a member: its cue's source
     add.l   %d0,%d0
     lea     cl_cue,%a0
@@ -4697,7 +4862,8 @@ tl_cn:
     bne.w   tl_wait
 tl_go:
     move.w  cl_tog,%d3                  | d3 = the members
-    move.b  cl_togr,%d4                 | d4 = rate change
+    move.b  cl_togr,%d0
+    move.b  %d0,cl_tgr2                 | cl_tgr2 = rate change
     jsr     cl_togpre                   | a whole pattern: its trailer first (the Part link, the rates)
     moveq   #0,%d6
 tl_l:
@@ -4711,33 +4877,93 @@ tl_ln:
     clr.b   cl_lnkon
     clr.w   cl_tog
     clr.b   cl_togr
-    moveq   #0,%d6                      | counters at the new rates: the members, or every track on a
-tl_c:                                   | rate change (and the master)
-    tst.b   %d4
-    bne.b   tl_cc
+    tst.b   cl_tgr2
+    beq.b   tl_m0
+    jsr     cl_live                     | a rate change: the reloads below count from the new master's rate
+    jsr     cl_mrate
+    move.l  %d0,%d5
+tl_m0:
+    moveq   #0,%d6                      | counters at the new rates, fired at once: the members, and on a rate
+tl_c:                                   | change every track whose rate or place moves (and the master)
     btst    %d6,%d3
+    bne.b   tl_cc
+    tst.b   cl_tgr2
     beq.b   tl_cnx
 tl_cc:
-    bsr.w   cl_ctr
+    bsr.w   tl_ff
+    btst    %d6,%d3
+    beq.b   tl_cnx
+    moveq   #1,%d4                      | a member: in place
+    jsr     cl_cond
 tl_cnx:
     addq.l  #1,%d6
     cmpi.l  #16,%d6
     bne.b   tl_c
-    tst.b   %d4
+    tst.b   cl_tgr2
     beq.b   tl_wait
-    bsr.w   cl_mreph
+    jsr     cl_mreph
 tl_wait:
     movem.l (%sp),%d2-%d6/%a2-%a6
     lea     40(%sp),%sp
     rts
-tl_old:                                 | d6 = t -> d0 = 0 when t starts a step at t0 at its old rate
+tl_ready:                               | d6 = t -> d0 = 1 when t may land now: no stock landing pending for
+    lea     CNTDN_ARR,%a0               | it, and t' ends a step of its old rate
+    tst.b   (%a0,%d6.l)
+    bpl.b   tr_no
     lea     TSCALE_ARR,%a0
     moveq   #0,%d0
     move.b  (%a0,%d6.l),%d0
     jsr     cl_tps
     move.l  %d7,%d1
     remu.l  %d0,%d2:%d1
-    move.l  %d2,%d0
+    tst.l   %d2
+    bne.b   tr_no
+    moveq   #1,%d0
+    rts
+tr_no:
+    moveq   #0,%d0
+    rts
+tl_ff:                                  | d6 = t (d3 = members, d5 = tps_M): its counters at its rate in the
+                                        | playing pattern after the landing, through cl_ffland -- unless t is
+    lea     TSCALE_ARR,%a0              | no member and keeps its rate and its place (its built step is right)
+    moveq   #0,%d0
+    move.b  (%a0,%d6.l),%d0
+    jsr     cl_tps
+    movea.l %d0,%a2                     | a2 = tps_old
+    moveq   #0,%d0
+    move.b  ACT_PAT,%d0
+    move.l  %d0,-(%sp)
+    move.b  PLAY_BANK,%d0
+    move.l  %d0,-(%sp)
+    move.l  %d6,-(%sp)
+    jsr     cl_srcrec                   | d0 = len, d1 = scale (resolved: NORMAL the pattern's)
+    lea     12(%sp),%sp
+    tst.l   %d0
+    bne.b   tf_len
+    moveq   #16,%d0                     | never divide by a zero length
+tf_len:
+    movea.l %d0,%a4                     | a4 = len
+    movea.l %d1,%a5                     | a5 = scale
+    move.l  %d1,%d0
+    jsr     cl_tps
+    movea.l %d0,%a3                     | a3 = tps_new
+    btst    %d6,%d3
+    bne.b   tf_go
+    cmpa.l  %a2,%a3
+    bne.b   tf_go
+    move.l  %d7,%d0                     | the same rate: the step it would sound next?
+    move.l  %a3,%d1
+    divu.l  %d1,%d0
+    move.l  %a4,%d1
+    remu.l  %d1,%d2:%d0
+    lea     STEP_ARR,%a0
+    moveq   #0,%d0
+    move.b  (%a0,%d6.l),%d0
+    cmp.l   %d0,%d2
+    beq.b   tf_out                      | yes: nothing to do
+tf_go:
+    jsr     cl_ffland
+tf_out:
     rts
 
 | cl_togsrc -> a0 = the together landing's source slab (the card's staged copy, or the playing pattern as
@@ -4852,55 +5078,14 @@ tr2_a:
     move.b  (%a0,%d1.l),%d0
     jmp     cl_tps
 
-| cl_ctr (d6 = t, d7 = t0): t's counters phase-continuous at its rate in the playing pattern (after the
-| landing): STEP = (t0 / tps + 1) mod len, STEP-1, TICKS = t0 mod tps, the scale cache (RELOAD's rl_ctr).
-| Uses d0-d2/d5/a0-a1; keeps d5.
-cl_ctr:
-    move.l  %d5,-(%sp)
-    moveq   #0,%d0
-    move.b  ACT_PAT,%d0
-    move.l  %d0,-(%sp)
-    move.b  PLAY_BANK,%d0
-    move.l  %d0,-(%sp)
-    move.l  %d6,-(%sp)
-    jsr     cl_srcrec                   | d0 = len, d1 = scale (resolved: NORMAL the pattern's)
-    lea     12(%sp),%sp
-    tst.l   %d0
-    bne.b   ct_len
-    moveq   #16,%d0                     | never divide by a zero length
-ct_len:
-    move.l  %d0,%a1                     | a1 = len
-    move.l  %d1,%d2                     | d2 = scale
-    move.l  %d2,%d0
-    jsr     cl_tps
-    move.l  %d0,%d5                     | d5 = tps
-    lea     TSCALE_ARR,%a0
-    move.b  %d2,(%a0,%d6.l)
-    move.l  %d7,%d0
-    divu.l  %d5,%d0
-    addq.l  #1,%d0
-    move.l  %a1,%d1
-    remu.l  %d1,%d2:%d0                 | d2 = STEP
-    lea     STEP_ARR,%a0
-    move.b  %d2,(%a0,%d6.l)
-    add.l   %d1,%d2
-    subq.l  #1,%d2
-    remu.l  %d1,%d0:%d2
-    lea     STEPM1_ARR,%a0
-    move.b  %d0,(%a0,%d6.l)
-    move.l  %d7,%d0
-    remu.l  %d5,%d2:%d0
-    lea     TICKS_ARR,%a0
-    move.b  %d2,(%a0,%d6.l)
-    move.l  (%sp)+,%d5
-    rts
-
-| cl_mreph (d7 = t0): the pattern's own rate changed -- the master goes where the new pattern would be
-| had it played since this master cycle began: step = (t0 / tps_M) mod its length + 1, its tick = t0 mod
-| tps_M, the master scale cache (RELOAD's rl_rephase). Uses d0-d2/a0-a1.
+    .section .dram,"ax"                 | CL25: landing-time only (the standalone cave is full)
+| cl_mreph (d7 = t', 0 mod the new tps_M): the pattern's own rate changed -- the master goes where the new
+| pattern would be had it played since this master cycle began, as stock's landing puts it (DIRECT JUMP's
+| dl_commit): step = (t' / tps_M) mod its length, its tick tps_M - 1 (phase G's advance follows in this tick),
+| the master scale cache. Uses d0-d2/a0-a1.
 cl_mreph:
-    bsr.w   cl_live
-    bsr.w   cl_mrate                    | d0 = tps_M, d1 = length (0 = INF), d2 = scale
+    jsr     cl_live
+    jsr     cl_mrate                    | d0 = tps_M, d1 = length (0 = INF), d2 = scale
     move.b  %d2,SCALE_IX
     move.l  %d0,-(%sp)
     move.l  %d7,%d2
@@ -4910,14 +5095,13 @@ cl_mreph:
     remu.l  %d1,%d0:%d2
     move.l  %d0,%d2
 mp_inf:
-    addq.l  #1,%d2
     move.w  %d2,MASTER_STEP
-    move.l  (%sp)+,%d1
-    move.l  %d7,%d0
-    remu.l  %d1,%d2:%d0
-    move.b  %d2,TICK_CTR
+    move.l  (%sp)+,%d0
+    subq.l  #1,%d0
+    move.b  %d0,TICK_CTR
     rts
 
+    ROMSEC
 | cl_spdo (the sequencer tick, phase D's end; every register saved): a landed slice reaches the engine one
 | step after its landing -- when the new sequence's first step sounds (see cl_fullone). Armed (0xff) at the
 | landing, the count starts here at the track's new rate (set by the landing just before); it runs one per
@@ -5113,6 +5297,345 @@ lo1_nc:
     move.w  %d0,cl_post                 | the UI side writes the SRAM mirror + dirty flags
     rts
 
+| ---------------------------------------------------------------- CL25: one track lands as stock lands it
+| Stock's landing (phase D 0x400a1f72..0x400a222e, the one DIRECT JUMP drives) lands on the tick that ENDS a
+| step and fires the next step at once: reload 0x800065d3[t] = tps - 1 and the first-fire bit 0x80006624 make
+| phase E's builder (0x400a2d44 / MIDI 0x400a399e) take ahead = tps - reload = 1, then ticks = reload; phase F
+| wraps it to 0 and the step after is built on the next tick as usual. The pending event of the old sequence
+| for that boundary goes (DIRECT JUMP's primacy purge, one track), and the next tick the reload goes back to
+| what a never-switched track holds (DIRECT JUMP's dl_fixup rule).
+
+    .section .dram,"ax"                 | CL25: landing-time only (the standalone cave is full)
+| cl_ffok (d0 = t, d7 = t') -> d0 = 1 when t may land on this tick: t' >= 0 (not the cycle's last master step
+| before the wrap's first tick: stock's own deferred landings run there) and no stock landing pending for t
+| (CNTDN 0x800065c3[t] < 0). Uses d0-d1/a0.
+cl_ffok:
+    tst.l   %d7
+    bmi.b   fo_no
+    lea     CNTDN_ARR,%a0
+    tst.b   (%a0,%d0.l)
+    bpl.b   fo_no
+    moveq   #1,%d0
+    rts
+fo_no:
+    moveq   #0,%d0
+    rts
+
+| cl_ffland (d6 = t, d7 = t' >= 0 with t' = 0 mod tps_new; a2 = tps_old, a3 = tps_new, a4 = len_new, a5 =
+| scale_new, d5 = tps_M): STEP = (t' / tps_new) mod len, STEP-1, TICKS 0, the scale cache, reload tps - 1,
+| first fire, no held advance; t's pending events at or after now purged; its fix-up for the next tick; a
+| landed slice is published in this tick (the new step sounds now). Keeps every register but d0-d2/a0-a1.
+cl_ffland:
+    move.l  %d7,%d0
+    move.l  %a3,%d1
+    divu.l  %d1,%d0                     | t' / tps
+    move.l  %a4,%d1
+    remu.l  %d1,%d2:%d0                 | d2 = STEP
+    lea     STEP_ARR,%a0
+    move.b  %d2,(%a0,%d6.l)
+    add.l   %d1,%d2
+    subq.l  #1,%d2
+    remu.l  %d1,%d0:%d2                 | d0 = (STEP + len - 1) mod len
+    lea     STEPM1_ARR,%a0
+    move.b  %d0,(%a0,%d6.l)
+    lea     TICKS_ARR,%a0
+    clr.b   (%a0,%d6.l)
+    move.l  %a5,%d0
+    lea     TSCALE_ARR,%a0
+    move.b  %d0,(%a0,%d6.l)
+|   the reload a never-switched track holds at its rate: max(0, tps - tps_M) once the master has wrapped since
+|   START, 0 before (DIRECT JUMP's dl_fixup). Unchanged rate: the one it had; a slower track holding 0 is in
+|   its first cycle: 0 again.
+    lea     RELOAD_ARR,%a0
+    moveq   #0,%d0
+    move.b  (%a0,%d6.l),%d0             | d0 = its reload until now
+    cmpa.l  %a2,%a3
+    beq.b   ff_fx                       | the same rate: keep it
+    tst.l   %d0
+    bne.b   ff_post
+    cmpa.l  %d5,%a2
+    bls.b   ff_post                     | (a2 > tps_M with reload 0: before the first wrap)
+    moveq   #0,%d0
+    bra.b   ff_fx
+ff_post:
+    move.l  %a3,%d0
+    sub.l   %d5,%d0
+    bpl.b   ff_fx
+    moveq   #0,%d0
+ff_fx:
+    lea     cl_fxv,%a1
+    move.b  %d0,(%a1,%d6.l)
+    move.l  %a3,%d0
+    subq.l  #1,%d0
+    move.b  %d0,(%a0,%d6.l)             | reload = tps - 1: this tick's first fire
+    moveq   #1,%d1
+    lsl.l   %d6,%d1
+    move.w  cl_fxm,%d0
+    or.l    %d1,%d0
+    move.w  %d0,cl_fxm
+    move.w  FFIRE,%d0
+    or.l    %d1,%d0
+    move.w  %d0,FFIRE
+    not.l   %d1
+    move.w  HOLD_MASK,%d0
+    and.l   %d1,%d0
+    move.w  %d0,HOLD_MASK
+    jsr     cl_tpurge
+    lea     cl_spd,%a0
+    move.b  (%a0,%d6.l),%d0
+    cmpi.b  #-1,%d0
+    bne.b   ff_out
+    moveq   #1,%d0                      | armed by the copy: cl_spdo publishes it at this phase D's end
+    move.b  %d0,(%a0,%d6.l)
+ff_out:
+    rts
+
+| cl_tpurge (d6 = t): t's still-pending events (fire time >= now) cancelled the way stock cancels them (record
+| long and slot bit cleared, the time left: 0x400a43b6..0x400a4464; DIRECT JUMP's pg_table for one track).
+| Audio: both tables against the sample clock; MIDI: its table against the MIDI clock. Keeps d2-d7/a2-a6.
+cl_tpurge:
+    lea     -20(%sp),%sp
+    movem.l %d2-%d5/%a2,(%sp)
+    cmpi.l  #8,%d6
+    bcc.b   pu_midi
+    move.l  SCLK,%d5
+    move.l  %d6,%d3
+    movea.l #0x80001904,%a0
+    movea.l #0x46c7e998,%a1
+    movea.l #0x46c7fe44,%a2
+    bsr.b   pu_tab
+    movea.l #0x80001984,%a0
+    movea.l #0x46c7faa4,%a1
+    movea.l #0x46c7fe8c,%a2
+    bsr.b   pu_tab
+    bra.b   pu_out
+pu_midi:
+    move.l  MCLK,%d5
+    move.l  %d6,%d3
+    subq.l  #8,%d3
+    movea.l #0x46c76a26,%a0
+    movea.l #0x46c769c0,%a1
+    movea.l #0x46c77be2,%a2
+    bsr.b   pu_tab
+pu_out:
+    movem.l (%sp),%d2-%d5/%a2
+    lea     20(%sp),%sp
+    rts
+pu_tab:                                 | d3 = the table's track index, d5 = now; uses d0-d2/d4
+    moveq   #0,%d4                      | slot
+pu_sl:
+    moveq   #0,%d0
+    move.b  (%a2,%d3.l),%d0
+    btst    %d4,%d0
+    beq.b   pg1_n
+    move.l  %d4,%d1
+    lsl.l   #3,%d1
+    add.l   %d3,%d1                     | idx = track + slot * 8
+    move.l  (%a0,%d1.l*4),%d2
+    sub.l   %d5,%d2
+    bmi.b   pg1_n                        | already due: stock's boundary rule leaves it
+    clr.l   (%a1,%d1.l*4)
+    bclr    %d4,%d0
+    move.b  %d0,(%a2,%d3.l)
+pg1_n:
+    addq.l  #1,%d4
+    cmpi.l  #3,%d4
+    bne.b   pu_sl
+    rts
+
+| cl_wrcond (d6 = t, d4 = the kind): a landing at the wrap body. Stock's re-home that follows counts t's pass
+| start, so its trig conditions are set on the next tick, in phase D (cl_cdo). Uses d0-d1/a0.
+cl_wrcond:
+    lea     cl_cdk,%a0
+    move.b  %d4,(%a0,%d6.l)
+    moveq   #1,%d0
+    lsl.l   %d6,%d0
+    move.w  cl_cdm,%d1
+    or.l    %d0,%d1
+    move.w  %d1,cl_cdm
+    rts
+
+| cl_cdo (phase D, d7 = t', d5 = tps_M): the deferred trig conditions of the wrap's landings. Uses d0-d4/d6/a0-a4.
+cl_cdo:
+    move.w  cl_cdm,%d3
+    clr.w   cl_cdm
+    moveq   #0,%d6
+cdo_l:
+    btst    %d6,%d3
+    beq.b   cdo_n
+    moveq   #0,%d0
+    move.b  ACT_PAT,%d0
+    move.l  %d0,-(%sp)
+    move.b  PLAY_BANK,%d0
+    move.l  %d0,-(%sp)
+    move.l  %d6,-(%sp)
+    jsr     cl_srcrec                   | d0 = len, d1 = scale (its rate in the playing pattern)
+    lea     12(%sp),%sp
+    tst.l   %d0
+    bne.b   cdo_len
+    moveq   #16,%d0
+cdo_len:
+    movea.l %d0,%a4
+    move.l  %d1,%d0
+    jsr     cl_tps
+    movea.l %d0,%a3
+    lea     cl_cdk,%a0
+    moveq   #0,%d4
+    move.b  (%a0,%d6.l),%d4
+    jsr     cl_cond
+cdo_n:
+    addq.l  #1,%d6
+    cmpi.l  #16,%d6
+    bne.b   cdo_l
+    rts
+
+| cl_cond (d6 = t, d4 = the kind, d7 = t' this tick (signed), a3 = t's tps, a4 = its length): t's trig
+| conditions after its landing (the user, 2026-11-11). Cued (0): they start again, as a stock pattern change
+| starts them (COND_RESET(t)). Instant (1 in place, 2 DIRECT JUMP on): its A:B pass counter becomes the passes
+| it would have begun since the pattern's conditions last started again (cl_Tres) had it played there all
+| along. A track's pass starts (measured, M1-M3 2026-11-11, every track every tick): its own wraps (stock's
+| 0x400a536c when STEP goes len -> 0: t' = j * len * tps - tps) and the master's restart (the wrap body at
+| t' = C - tps_M), once when they coincide. F(x) below counts them before tick x; the counter is
+| F(now) - F(cl_Tres). Keeps d2-d7/a2-a6.
+cl_cond:
+    tst.l   %d4
+    bne.b   cd_inst
+    move.l  %d6,-(%sp)
+    jsr     COND_RESET
+    addq.l  #4,%sp
+    rts
+cd_inst:
+    lea     -44(%sp),%sp
+    movem.l %d2-%d7/%a2-%a6,(%sp)
+    move.l  %a4,%d0
+    move.l  %a3,%d1
+    muls.l  %d1,%d0
+    movea.l %d0,%a5                     | a5 = c = len * tps (one pass)
+    jsr     cl_live
+    jsr     cl_mrate                    | d0 = tps_M, d1 = the master length (0 = INF)
+    move.l  %d0,%d5                     | d5 = tps_M
+    muls.l  %d1,%d0
+    movea.l %d0,%a6                     | a6 = C (0 = INF)
+    move.l  cl_T,%d0
+    sub.l   %d7,%d0
+    movea.l %d0,%a2                     | a2 = B: this master cycle's first tick (t' = 0)
+    move.l  cl_T,%d0
+    bsr.b   cd_F
+    move.l  %d0,%d3                     | F(now)
+    move.l  cl_Tres,%d0
+    bsr.b   cd_F
+    sub.l   %d0,%d3
+    bpl.b   cd_set
+    moveq   #0,%d3
+cd_set:
+    lea     COND_CNT,%a0
+    move.l  %d3,(%a0,%d6.l*4)
+    movem.l (%sp),%d2-%d7/%a2-%a6
+    lea     44(%sp),%sp
+    rts
+cd_F:                                   | d0 = tick x -> d0 = F(x) (a2 = B, a3 = tps, a5 = c, a6 = C, d5 = tps_M);
+    sub.l   %a2,%d0                     | uses d1-d2/d4/d7/a0-a1. d0 = x - B
+    move.l  %a6,%d1
+    beq.w   cd_inf
+    move.l  %d0,%d2
+    divs.l  %d1,%d2                     | q, toward 0
+    move.l  %d2,%d4
+    muls.l  %d1,%d4
+    move.l  %d0,%d7
+    sub.l   %d4,%d7                     | u = x - B - q * C
+    bpl.b   cd_q
+    subq.l  #1,%d2                      | floor
+    add.l   %d1,%d7
+cd_q:
+    movea.l %d2,%a0                     | a0 = q
+    movea.l %d7,%a1                     | a1 = u, in [0, C)
+    move.l  %a6,%d0
+    sub.l   %d5,%d0
+    add.l   %a3,%d0                     | C - tps_M + tps
+    move.l  %a5,%d1
+    move.l  %d0,%d4
+    divu.l  %d1,%d4                     | d4 = J: own wraps up to the wrap body
+    remu.l  %d1,%d2:%d0                 | d2 != 0: the master's restart is a pass start of its own
+    move.l  %d4,%d7
+    tst.l   %d2
+    beq.b   cd_k
+    addq.l  #1,%d7                      | d7 = K: pass starts per master cycle
+cd_k:
+    move.l  %a0,%d0
+    muls.l  %d7,%d0
+    movea.l %d0,%a0                     | a0 = q * K
+    move.l  %a1,%d0
+    add.l   %a3,%d0
+    subq.l  #1,%d0
+    divu.l  %d1,%d0                     | own wraps before u
+    cmp.l   %d4,%d0
+    bls.b   cd_j
+    move.l  %d4,%d0
+cd_j:
+    tst.l   %d2
+    beq.b   cd_f
+    move.l  %a6,%d1
+    sub.l   %d5,%d1                     | the wrap body's t'
+    cmpa.l  %d1,%a1
+    bls.b   cd_f
+    addq.l  #1,%d0                      | ... before u
+cd_f:
+    add.l   %a0,%d0
+    rts
+cd_inf:                                 | INF: no master restarts
+    add.l   %a3,%d0
+    subq.l  #1,%d0
+    move.l  %a5,%d1
+    move.l  %d0,%d2
+    divs.l  %d1,%d2
+    move.l  %d2,%d4
+    muls.l  %d1,%d4
+    cmp.l   %d4,%d0
+    bge.b   cd_i
+    subq.l  #1,%d2                      | floor
+cd_i:
+    move.l  %d2,%d0
+    rts
+
+    ROMSEC
+| cl_creset: detour at COND_RESET 0x400a539c (replaces `lea -12(sp),sp ; movem.l d2/a2-a3,(sp)`, 8 B). A reset
+| of every track (an argument above 15: -1) is the moment the pattern's A:B passes start again -- PLAY, stock's
+| pattern switch, a DIRECT JUMP jump: its running tick. d0-d1 are the caller's scratch. Then stock's body.
+cl_creset:
+    move.l  4(%sp),%d0
+    moveq   #15,%d1
+    cmp.l   %d0,%d1
+    bcc.b   cr_go                       | one track (stock's own test: 15 >= t unsigned)
+    move.l  cl_T,%d0
+    move.l  (%sp),%d1
+    cmpi.l  #0x400a4856,%d1             | stock's switch (phase G, after its tick's passes): from the next tick
+    bne.b   cr_t
+    addq.l  #1,%d0
+cr_t:
+    move.l  %d0,cl_Tres
+cr_go:
+    lea     -12(%sp),%sp
+    movem.l %d2/%a2-%a3,(%sp)
+    jmp     0x400a53a4
+
+| cl_fixup (the tick after landings): their reloads back to the never-switched value. Uses d0-d2/a0-a1.
+cl_fixup:
+    move.w  cl_fxm,%d1
+    clr.w   cl_fxm
+    lea     cl_fxv,%a0
+    lea     RELOAD_ARR,%a1
+    moveq   #0,%d0
+fx_l:
+    btst    %d0,%d1
+    beq.b   fx_n
+    move.b  (%a0,%d0.l),%d2
+    move.b  %d2,(%a1,%d0.l)
+fx_n:
+    addq.l  #1,%d0
+    cmpi.l  #16,%d0
+    bne.b   fx_l
+    rts
+
 | cl_dropone (d6 = track): forget its cue (and its place in a together landing)
 cl_dropone:
     move.w  cl_tog,%d0
@@ -5289,6 +5812,7 @@ cl_convert:
     movem.l %d2-%d5/%a2-%a3,(%sp)
     moveq   #1,%d0
     move.b  %d0,cl_wslab                | every record's length / scale: the mirror owes the whole slab
+    jsr     cl_cvmark                   | CL25: what it overwrites is kept (cl_cvsave, before the copy)
     movea.l %a2,%a3
     adda.l  #TRAILER,%a3                | a3 -> trailer
     move.b  (%a2,%d3.l),%d4             | this track's own len / scale, kept
@@ -7343,6 +7867,7 @@ cl_nedit:   .long 0                     | the name being edited (its index)
 cl_nbuf:    .space NAME_W               | the editor's scratch copy
             .align 2
 cl_snapok:  .short 0                    | bit b: bank b's load snapshot (its originals) is valid
+cl_cvok:    .space 32                   | bit (bank * 16 + pattern): Clyps converted it NORMAL -> PER TRACK (CVSAVE)
 cl_ldmask:  .short 0                    | the masked loader in progress: its banks
 cl_ldret:   .long 0                     | ... and its caller's return address
 cl_buf:     .space 32
@@ -7356,6 +7881,17 @@ cl_cue:     .fill 16, 2, 0xffff         | per track: the cued (bank<<8 | pattern
 cl_cueh:    .fill 16, 2, 0xffff         | per track: the playing (bank<<8 | pattern) it aims at
 cl_arm:     .space 16                   | per track: the gate has passed; waiting for a window start
 cl_cuef:    .space 16                   | per track: the cue is FULL (its machine / FX too)
+cl_inst:    .space 16                   | per track: the cue's kind (CL25): 0 cued, 1 in place, 2 DIRECT JUMP on
+cl_tgr2:    .byte 0                     | cl_togland: the landing changes the pattern's rate
+cl_cdk:     .space 16                   | per track: the kind of a wrap landing whose conditions wait (cl_cdo)
+            .align 2
+cl_cdm:     .short 0                    | ... the tracks
+            .align 2
+cl_T:       .long 0                     | running ticks since PLAY (cl_land; 0 while stopped)
+cl_Tres:    .long 0                     | ... at the last reset of every track's trig conditions (cl_creset)
+            .align 2
+cl_fxm:     .short 0                    | tracks whose reload is fixed up on the next tick (cl_fixup)
+cl_fxv:     .space 16                   | ... the value
 cl_pmoved:  .byte 0                     | the pre-select box shows (an arrow since the last execution)
             .align 2
 cl_pre:     .space 32                   | per track: its pre-select arrows (cl_psave / cl_pload; 0 = none)
@@ -7459,5 +7995,7 @@ cl_bss:
                                                 | with (its slice goes with a FULL reload)
     .equ RQ_SLAB,     SAVEPART + 16*PARTSZ      | the card reload's pattern (clyps_reload.s)
     .equ RQ_PART,     RQ_SLAB + PATSTRIDE       | ... and its Part, both parsed from the .strd (+2: the bss is a multiple of 4)
-    .equ CL_BSS_SIZE, 16*BANKSZ + 16*TRAC_A + 4096*NAME_W + 16*NAME_W + 4096*NAME_W + 16*PARTSZ + PATSTRIDE + PARTSZ + 2
+    .equ CVSAVE,      RQ_PART + PARTSZ + 2      | 256 x CV_W: what a Clyps conversion overwrote (cl_cvsave, CL25)
+    .equ CV_W,        40
+    .equ CL_BSS_SIZE, 16*BANKSZ + 16*TRAC_A + 4096*NAME_W + 16*NAME_W + 4096*NAME_W + 16*PARTSZ + PATSTRIDE + PARTSZ + 2 + 256*CV_W
     .global CL_BSS_SIZE, cl_bss

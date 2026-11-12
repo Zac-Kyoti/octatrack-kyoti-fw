@@ -267,6 +267,24 @@ quick check for each:
   responsive.
 - **PART_CHANGE_CARRYOVER_FIX** — a track that is PICKUP on one Part and FLEX on
   another: switching patterns across the Parts plays the FLEX sample, not the old loop.
+- **KYOTI CL25 walk-through** (WIP; `out/KYOTI_WIP/KYOTI_V1.7_WITH_CLYPS/OCTATRACK_OS1.40C_KYOTI_V1.7_WITH_CLYPS.syx`)
+  = CL24 (flashed) + loads land as DIRECT JUMP lands (the user's CL24 report and decisions, 2026-11-11). Transport
+  running:
+  1. **DIRECT JUMP on, the user's case (OT DEMO P1, T1 64 steps <-> a 16-step slot):** press the load just before a
+     bar line -> the new sequence's step 1 plays ON the bar line (CL24: the old step played there and the new one
+     came in at step 2). Any press: the new sequence sounds from the next master step, never a step later.
+  2. **In place ([PAGE] / [FUNC]+[PAGE] ORIG, [NO]+TRACK temp reload, [PTN]/[BANK]+TRACK card reload):** the
+     restored sequence sounds from the track's very next step.
+  3. **The cycle's last step:** [PAGE] pressed during the last step of the master cycle -> the track stays on the
+     grid and on its step (CL24: it jumped mid-step to a wrong step until the next wrap).
+  4. **Scales:** a load that changes the track's scale (e.g. 1x <-> 3/4x) at a CHAIN AFTER point (DJ off): the new
+     sequence's step at the point plays on the point.
+  5. **Master edits stay:** change the pattern's master scale or length on the unit, then load a track and [PAGE] it
+     back: the master keeps your edit (CL24 put the as-loaded value back, mid-cycle).
+  6. **Trig conditions:** DJ on (or [PAGE] in place): a loaded sequence's A:B trigs (e.g. 1:2, 4:4) fire on the same
+     passes as an untouched track of the same length would. DJ off, a cued load: they start again from pass 1.
+  7. FULL loads: the new track sound arrives with the new sequence's first step (as CL24, now one step sooner with DJ on).
+
 - **KYOTI CL24 walk-through** (WIP; `out/KYOTI_WIP/KYOTI_V1.7_WITH_CLYPS/OCTATRACK_OS1.40C_KYOTI_V1.7_WITH_CLYPS.syx`)
   = CL23 (never flashed; its list below is CL24's too) + the last two RELOAD_FROM_PROJECT rules:
   1. A pattern landing that changes the Part link (the pattern's Part was changed since the save, then the card reload

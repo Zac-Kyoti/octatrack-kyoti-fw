@@ -49,6 +49,8 @@ def grade(path):
     d = json.load(open(path))
     m = d["meta"]
     S, B, F, L, R, P = d["states"], d["builds"], d["fires"], d["lands"], d["reqs"], d["snaps"]
+    P_ = d.get("purges", [])
+    bad_rules = []
     print(f"=== {path}: dj {m['dj']} chain {m['chain']} pokes {m['pokes']} ops {m['ops']}")
     p0 = P[0][1]
     # the params in force per track from a tick on: P[i] was taken after op i-1's landing settled; a track's
@@ -138,8 +140,62 @@ def grade(path):
         print(f"   landing T{k + 1}: request t{rq[0]} (m {rq[4]}.{rq[5]}, code {rq[2]:#x} now {rq[3]}) -> landed t{lt} "
               f"in {where} (m {ms}.{mt}); new sound from t{newf[0]} step {newf[1]} (ahead {newf[4]}; t' {tln}); "
               f"old steps heard after the request: {len(olds)} {olds}")
-    return 0 if not fails else 1
+        # CL25 rules (--rules): the landing tick DIRECT JUMP's rule picks, the new step sounding on it, the
+        # old boundary event purged, the trig conditions
+        if RULES:
+            kind = 1 if rq[3] else (2 if m["dj"] else 0)
+            pb = pars(rq[0])
+            tpsM0, mlen0 = rate(pb, None)
+            _, _, tps0, _ = rate(pb, k)
+            from math import gcd
+            L_ = tps0 * tps // gcd(tps0, tps)
+            if kind == 2:
+                L_ = L_ * tpsM0 // gcd(L_, tpsM0)
+            exp = None
+            if kind:
+                for tt in range(rq[0], rq[0] + 400):         # the next ISR may land it (DJ: "a request on a boundary tick lands that tick")
+                    _, _, tl_ = model(tt + 1 + off, tpsM0, mlen0, tps0, 1)   # phase D of the next tick
+                    if tl_ >= 0 and tl_ % L_ == 0:
+                        exp = tt
+                        break
+            if kind and where == "tick":
+                ok = exp == lt and newf[0] == lt
+                print(f"      RULE landing: kind {kind}, expected t{exp}, landed t{lt}, new sound t{newf[0]}: "
+                      f"{'PASS' if ok else 'FAIL'}")
+                bad_rules.append(None) if ok else bad_rules.append(("land", lt))
+            pg = [x for x in P_ if x[0] == lt and x[1] == k]
+            if where == "tick":
+                okp = bool(pg) and pg[0][2] != pg[0][3] or not any(
+                    b_[2] for b_ in [(x[3], x[0], x[2] <= lq) for x in B if x[1] == k and lt - tps <= x[0] < lt])
+                print(f"      RULE purge: {pg[:1]} {'PASS' if pg else 'FAIL (no purge)'}")
+                if not pg:
+                    bad_rules.append(("purge", lt))
+            if len(S[0]) > 7:
+                nxt = min([x[0] for x in L if x[0] > lt and x[1] == k] + [S[-1][0]])
+                pl = pars(lt + 2)
+                ref = [j for j in range(8) if j != k and rate(pl, j)[2:] == rate(pl, k)[2:]
+                       and not any(x[1] == j for x in L)]
+                rows = [st for st in S if lt + 2 <= st[0] < nxt - 1]
+                if kind and ref:
+                    badc = [(st[0], st[7][k], st[7][ref[0]]) for st in rows if st[7][k] != st[7][ref[0]]]
+                    print(f"      RULE conditions (instant, as T{ref[0] + 1}): "
+                          f"{'PASS' if not badc else 'FAIL ' + str(badc[:4])} over {len(rows)} ticks")
+                    if badc:
+                        bad_rules.append(("cond", lt))
+                elif not kind:
+                    first = rows[0][7][k] if rows else None
+                    print(f"      RULE conditions (cued, restarted): counter {first} after the landing: "
+                          f"{'PASS' if first == 0 else 'FAIL'}")
+                    if first != 0:
+                        bad_rules.append(("cond", lt))
+                else:
+                    print("      RULE conditions: no untouched reference track of that rate")
+    nb = [x for x in bad_rules if x]
+    if RULES:
+        print(f"   RULES: {'PASS' if not nb else 'FAIL ' + str(nb)}")
+    return 0 if not fails and not nb else 1
 
 
+RULES = "--rules" in sys.argv
 if __name__ == "__main__":
-    sys.exit(max(grade(p) for p in sys.argv[1:]))
+    sys.exit(max(grade(p) for p in sys.argv[1:] if not p.startswith("--")))

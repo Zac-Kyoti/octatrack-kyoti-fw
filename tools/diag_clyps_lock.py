@@ -50,6 +50,7 @@ def main(argv):
     ap.add_argument("--start", type=int, default=None, help="the pattern to play (0-based), default: as loaded")
     ap.add_argument("--stride", type=int, default=29)
     ap.add_argument("--tail", type=int, default=800, help="ms after the last landing")
+    ap.add_argument("--cond", action="store_true", help="also record the trig-condition counters per tick")
     a = ap.parse_args(argv)
     sp = os.environ.get("CLYPS_SYMS", str(ROOT / "out/clyps_syms.txt"))
     syms = {k: int(v, 16) for k, v in (l.split() for l in pathlib.Path(sp).read_text().splitlines())}
@@ -126,9 +127,15 @@ def main(argv):
 
     def on_tick(uc, ad, sz, ud):
         st["tick"] += 1
-        states.append([st["tick"], rd(MSTEP, 2), rd(TICK_CTR, 1), rd(SCALE_IX, 1),
-                       list(u.mem_read(STEP_ARR, 16)), list(u.mem_read(TICKS_ARR, 16)),
-                       list(u.mem_read(TSCALE_ARR, 16))])
+        row = [st["tick"], rd(MSTEP, 2), rd(TICK_CTR, 1), rd(SCALE_IX, 1),
+               list(u.mem_read(STEP_ARR, 16)), list(u.mem_read(TICKS_ARR, 16)),
+               list(u.mem_read(TSCALE_ARR, 16))]
+        if a.cond:      # A:B pass counters (long[16]) + the three latch bytes [16] (0x400a536c / 0x400a539c)
+            raw = bytes(u.mem_read(0x46107918, 64))
+            row += [[int.from_bytes(raw[i * 4:i * 4 + 4], "big") for i in range(16)],
+                    list(u.mem_read(0x46107959, 16)), list(u.mem_read(0x46107969, 16)),
+                    list(u.mem_read(0x46107979, 16)), rd(ACT, 1)]
+        states.append(row)
 
     def on_build(uc, ad, sz, ud):
         s = uc.reg_read(er.eb.UC_M68K_REG_A7)
@@ -165,6 +172,19 @@ def main(argv):
     u.hook_add(er.eb.UC_HOOK_CODE, on_wrapin, begin=syms["cl_wrap"], end=syms["cl_wrap"])
     u.hook_add(er.eb.UC_HOOK_CODE, on_landone, begin=syms["cl_landone"], end=syms["cl_landone"])
     u.hook_add(er.eb.UC_HOOK_CODE, on_req, begin=syms["cl_cueload"], end=syms["cl_cueload"])
+    purges = []          # CL25: (tick, track, the slot mask before / after cl_tpurge)
+    if "cl_tpurge" in syms:
+        pst = {}
+
+        def on_pin(uc, ad, sz, ud):
+            t = uc.reg_read(er.eb.UC_M68K_REG_D6)
+            mk = 0x46C7FE44 + t if t < 8 else 0x46C77BE2 + t - 8
+            pst["t"], pst["mk"], pst["b"] = t, mk, rd(mk, 1)
+
+        def on_pout(uc, ad, sz, ud):
+            purges.append([st["tick"], pst["t"], pst["b"], rd(pst["mk"], 1)])
+        u.hook_add(er.eb.UC_HOOK_CODE, on_pin, begin=syms["cl_tpurge"], end=syms["cl_tpurge"])
+        u.hook_add(er.eb.UC_HOOK_CODE, on_pout, begin=syms["pu_out"], end=syms["pu_out"])
     if a.dj:
         u.mem_write(syms["DJ_MODE"], (1).to_bytes(4, "big"))
     p0 = params(act)
@@ -195,6 +215,16 @@ def main(argv):
         else:
             rt.run(ms=150 + (i * a.stride) % 400)
         nl = len(lands)
+        if op[0] == "j":                      # a stock cue: PEND_BANK / PEND_PAT (diag_reflock's way)
+            u.mem_write(0x800065BF, bytes([bank]))
+            u.mem_write(0x800065C0, bytes([int(op[1:])]))
+            settle(3000)
+            snaps.append([st["tick"], params(rd(ACT, 1))])
+            print(f"#{i} {opx}: cued, act now {rd(ACT, 1)} at tick {st['tick']}", flush=True)
+            continue
+        if op == "w":
+            settle(1000)
+            continue
         if op[0] == "s":
             key(int(op[1:]), 1); key(int(op[1:]), 0)
         elif op[0] == "f":
@@ -216,7 +246,8 @@ def main(argv):
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(dict(meta=dict(name=a.name, dj=a.dj, chain=a.chain, pokes=a.poke, ops=a.ops,
                                              track=a.track, pattern=act, bank=bank),
-                                   states=states, builds=builds, fires=fires, lands=lands, reqs=reqs, snaps=snaps)))
+                                   states=states, builds=builds, fires=fires, lands=lands, reqs=reqs, snaps=snaps,
+                                   purges=purges)))
     print(f"wrote {out}: ticks {st['tick']}, landings {len(lands)}", flush=True)
     return 0
 

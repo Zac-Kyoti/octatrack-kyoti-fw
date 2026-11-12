@@ -202,7 +202,9 @@ def main(argv):
         e["n"] = len(lands)
         e["one_tick"] = all(events[i]["where"] == e["where"] and events[i]["ms"] == e["ms"] and
                             events[i]["tc"] == e["tc"] for i in lands)
-        t0 = (e["ms"] - 1) * tps(e["sc"]) + e["tc"]
+        # CL25: a landing comes on the tick that ENDS a step (t' = t0 + 1 = 0 mod tps), stock's landing tick,
+        # and fires the next step at once (until CL24: the tick after, t0 = 0 mod tps, with the look-ahead)
+        t0 = (e["ms"] - 1) * tps(e["sc"]) + e["tc"] + 1
         old_ok = all(t0 % tps(e["tscale"][t]) == 0 for t in t_list)
         print(f"      {label}: {e['n']} landing(s), first in {e['where']} at master step {e['ms']} tick {e['tc']} "
               f"(t0 {t0}); toast after it {e['toast_after']}, before {e['toast_before']}", flush=True)
@@ -300,8 +302,10 @@ def main(argv):
             out = e["out"]
             check(e["where"] == "tick" and old_ok, "B: in the tick, at a step start of T1")
             if out:
-                check(out["step"][0] == e["step"][0] and out["ticks"][0] == e["ticks"][0] == 0,
-                      f"B: T1's counters as stock had them (step {e['step'][0]} -> {out['step'][0]})")
+                check(out["step"][0] == e["step"][0] and out["ticks"][0] == 0
+                      and e["ticks"][0] == tps(e["tscale"][0]) - 1,
+                      f"B: T1's step as stock had it, fired at once (step {e['step'][0]} -> {out['step'][0]}, "
+                      f"ticks {e['ticks'][0]} -> {out['ticks'][0]})")
             check(e["toast_after"] and not e["toast_before"], "B: the toast after the landing, not before")
         check(same_rec(rec(0), card_slab[:TRAC_A]), "B: T1's record from the card")
         check(pending(), "B: nothing left pending")
@@ -319,14 +323,14 @@ def main(argv):
             e, t0, old_ok = res
             out = e["out"]
             check(e["where"] == "tick" and old_ok, "C: in the tick, at a step start of T1")
-            # the slice reaches the engine when the new sequence sounds: one step of T1 after the landing
-            # (the scheduler builds a step ahead; the user, 2026-11-09)
+            # the slice reaches the engine when the new sequence sounds: CL25 fires its step in the landing tick,
+            # so in that tick (CL23/24: one step of T1 after, the look-ahead)
             ap = [x for x in events if x["where"] == "apply" and x["t"] == 0]
             ta = [(x["ms"] - 1) * tps(x["sc"]) + x["tc"] for x in ap]
-            want = t0 + tps(out["tscale"][0]) if out else None
-            print(f"      C: T1 published at t0 {ta} (landed {t0}, one step later = {want})", flush=True)
-            check(out is not None and out["applies"] == 0 and ta[:1] == [want],
-                  "C: T1's slice published one step after the landing, not in its tick")
+            want = t0
+            print(f"      C: T1 published at t' {[x + 1 for x in ta]} (landed {t0})", flush=True)
+            check(out is not None and [x + 1 for x in ta[:1]] == [want],
+                  "C: T1's slice published in the landing tick (its new step sounds now)")
         check(same_rec(rec(0), card_slab[:TRAC_A]) and bytes(u.mem_read(p_ + 0x2A, 30)) == card_part[0x2A:0x2A + 30],
               "C: T1's record and slice from the card")
         check(bytes(u.mem_read(p_ + 0x2A + 30, 30)) == e2, "C: T2's slice untouched")
@@ -350,10 +354,10 @@ def main(argv):
             check(e["where"] == "tick" and old_ok and e["one_tick"],
                   f"D: one tick, a step start of every track ({e['n']} tracks)")
             ap = [x for x in events if x["where"] == "apply"]
-            late = all((x["ms"] - 1) * tps(x["sc"]) + x["tc"] == t0 + tps(out["tscale"][x["t"]]) for x in ap) if out else False
+            late = all((x["ms"] - 1) * tps(x["sc"]) + x["tc"] + 1 == t0 for x in ap) if out else False
             print(f"      D: slices published {[(x['t'], x['ms'], x['tc']) for x in ap]}", flush=True)
-            check(out is not None and out["applies"] == 0 and 1 <= len(ap) <= 8 and late,
-                  f"D: the changed tracks' slices published one step after the landing ({len(ap)})")
+            check(out is not None and 1 <= len(ap) <= 8 and late,          # CL25: in the tick, at its end
+                  f"D: the changed tracks' slices published in the landing tick ({len(ap)})")
         check(same_slab(slab(), card_slab) and part() == card_part, "D: the whole pattern and its Part from the card")
         check(rd(ACT, 1) == act and stock_sw["n"] == sw0, "D: still on the pattern, no stock switch")
         check(pending(), "D: nothing left pending")
@@ -370,8 +374,8 @@ def main(argv):
                 e, t0, old_ok = res
                 out = e["out"]
                 if e["where"] == "tick" and out:
-                    exp = (t0 // tps(out["sc"])) % ln + 1
-                    check(old_ok and out["ms"] == exp,
+                    exp = (t0 // tps(out["sc"])) % ln          # stock's landing: the step it ends, tick tps - 1
+                    check(old_ok and out["ms"] == exp and out["tc"] == tps(out["sc"]) - 1,
                           f"E: on a step start of every track, re-phased: master step {out['ms']} (expected {exp})")
                 else:
                     check(e["where"] == "wrap", f"E: at the master wrap ({e['where']})")
@@ -388,9 +392,9 @@ def main(argv):
             if res:
                 e, t0, old_ok = res
                 out = e["out"]
-                exp = (t0 // tps(e["sc"])) % ml + 1
+                exp = (t0 // tps(e["sc"])) % ml
                 check(e["where"] == "tick" and old_ok, f"E: on the next common step, master step {e['ms']}")
-                check(out is not None and out["ms"] == exp,
+                check(out is not None and out["ms"] == exp and out["tc"] == tps(out["sc"]) - 1,
                       f"E: re-phased -- master step {out['ms'] if out else '?'} (expected {exp})")
             check(rd(slab_ad + 0x8E50, 2) == ml and same_slab(slab(), card_slab), "E: the pattern from the card")
         check(pending(), "E: nothing left pending")

@@ -106,6 +106,9 @@ DETOURS = [  # (site, symbol, stock bytes, length[, opcode: jmp unless given])
     (0x40085864, "cl_rljob", "2d4afd762f2a0004", 8),  # type-0x14 storage case: the card reloads
     (0x40023c62, "cl_rldone", "71f9460bd910", 6),      # doneFn success: our toast, no bank reload
     (0x400a43a0, "cl_wrap", "201274018082", 6),    # wrap body entry: move.l (a2),d0; moveq #1,d2; or.l d2,d0
+    # CL25: every all-track trig-condition reset (stock's switch 0x400a4850, PLAY 0x400a10ee / 0x400a12b8,
+    # DIRECT JUMP's hand-off) -- its tick, for instant landings' conditions: lea -12(sp),sp; movem.l d2/a2-a3,(sp)
+    (0x400a539c, "cl_creset", "4feffff448d70c04", 8),
     # ORIG PTN+PART playing = a pattern change to itself (the user, 2026-11-04): the switch gate's d6
     # and the commit, before ACT <- PEND (scope §1.13)
     (0x400a4352, "cl_sw6", "75f9800065b2", 6, "4eb9"),     # mvz.w 0x800065b2,%d2 (d6 just computed)

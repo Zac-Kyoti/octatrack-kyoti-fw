@@ -38379,6 +38379,22 @@ Now 936 / 932 (<= 945): the pair fits, SC's donor becomes PLATE REV.
   DJ reset A:B counters on a switch). PASS on every tick: 2x / 3/4x sources, master 3/4x (fast tracks, around the wrap),
   master 48 + 12-step, INF, NORMAL 16 + 64-step conversion and ORIG back, wrap landings with a scale change (audible
   timing right). Not covered: MIDI tracks, [CUE] groups, together landings under mixed rates, Clyps after a DJ jump.
+- **KYOTI CL25** (2026-11-12, NOT flashed; CL24 on the unit; syx fd1a283b…): the user's decisions A-D on the CL24
+  timing findings (scope §1.29). A: every in-phase landing (DJ on, in place, CHAIN AFTER points, the together landing)
+  lands as stock's landing / DIRECT JUMP's lands a track -- the tick whose t' ends a step, STEP = t'/tps, TICKS 0,
+  reload tps-1 + first-fire bit 0x80006624, the old boundary event purged (cl_tpurge), the reload fixed up next tick
+  (cl_fixup); DJ on, a cue arms at the request; slices published in the landing tick; signed t0, nothing lands while
+  t' < 0 or CNTDN[t] >= 0 (the cycle's last step). B: cl_back undoes only Clyps' own NORMAL -> PER TRACK conversion
+  (CVSAVE saved before the copy, kept while marked -- ORIG PTN+PRT restores the trailer first). C: cued loads
+  COND_RESET(t) (a wrap landing one tick later, cl_cdo), instant loads set the A:B counter to the passes since the
+  last all-track reset (cl_cond; stock's rule measured, M1-M3; detour 0x400a539c cl_creset). Gates on the final
+  image: diag_clyps_ui full 120, T 21, F+Q 27, L 17, J 8, X+O+W 15, V+Z+I 35, H 3, M+U 38 (JAM2); diag_clyps_quant
+  43 (DJ off) / 39 (DJ on) with its checks moved to the new rule; diag_clyps_lock + check_clyps_lock --rules: 12
+  scenarios (lengths 12-64, 2x/1x/3/4x, master 3/4x / 48 / INF, NORMAL conversion, last-step presses) PASS -- the
+  only off-model ticks: a scale-changing wrap landing's 5-tick counter transient, as CL24, audible timing right (R8
+  re-run on the final image; the other 11 on the image before the CVSAVE fixes, code they never reach). Standalone:
+  landing-time helpers in the DRAM part (ROM 46 B left). Next: the user flashes CL25 (FLASHING "KYOTI CL25"); then
+  RELOAD_FROM_PROJECT gets A + C; later DIRECT JUMP's jumps get C (the user's TODO).
 
 ## 2026-11-10 (`reload-slice`) — RELOAD_FROM_PROJECT beside FREE LOOP: octabam HOOKS bridge `ui_tick` (PR sambanks/octabam#1083)
 

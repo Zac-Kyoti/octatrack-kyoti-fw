@@ -1377,6 +1377,40 @@ is cued like a pattern change (CHAIN AFTER / DIRECT JUMP's next master step). Po
   whose machines differ, the engine told, the pattern reloaded: 16 landings, the restart, one whole-Part apply after
   every publish).
 
+### 1.29 Loads land as DIRECT JUMP lands; master edits stay; trig conditions (the user, 2026-11-11; KYOTI CL25)
+
+The user's CL24 report (DJ on: "the incoming sequence sometimes comes in a step off, back in phase once it wraps") and
+the investigation (NOTES "CL24 timing investigation", harness `tools/diag_clyps_lock.py` + `tools/check_clyps_lock.py`
+= DIRECT JUMP V7's REF-LOCK oracle and position model applied to Clyps). Decisions A-D (the user):
+- **A, the landing (stock's, DIRECT JUMP's):** a track lands on the tick whose t' = t0 + 1 ENDS a step at its old and
+  new rates (DJ on: and the master's), with STEP = (t' / tps) mod len, TICKS 0, reload 0x800065d3[t] = tps - 1 and the
+  first-fire bit 0x80006624: phase E builds that step from the NEW record and fires it at once (ahead = 1), the old
+  sequence's event for that boundary is purged (DJ's pg_table, one track: `cl_tpurge`), the next tick the reload goes
+  back to the never-switched value (DJ's dl_fixup: `cl_fixup`). Until CL24 the copy came one tick later with the
+  look-ahead, so the boundary played the old step. DJ on, a cue is armed at the request (`cl_inst` = 2). Applies to
+  slot / FULL / multi loads, ORIG / temp / card in place, and the together landing (`cl_togland`; a rate change puts
+  the master where stock's landing does: step = t' / tps_M mod len, tick tps_M - 1, `cl_mreph`). A FULL slice is
+  published in the landing tick (the new step sounds there). Wrap landings (`cl_wrap`) unchanged (stock's re-home is
+  exact). Fixes too: a rate-changing load at a CHAIN AFTER point lands on the point.
+- **The cycle's last master step:** MASTER_STEP reads 0 there; t0 is signed now, and nothing lands while t' < 0 or a
+  stock landing is pending for the track (CNTDN 0x800065c3[t] >= 0, `cl_ffok`) -- CL24 landed arm-now cues at tick 2
+  of that step at STEP 0x2AAAAAAB mod len.
+- **B, `cl_back`:** a restore that makes every track original undoes only a NORMAL -> PER TRACK conversion Clyps made
+  (the bytes it overwrote, `cl_cvsave` / CVSAVE + `cl_cvok`), never the user's own master length / scale / mode edits.
+  ORIG PTN+PRT still brings the whole pattern back as loaded (trailer included, re-phased).
+- **C, trig conditions:** cued loads (DJ off: CHAIN AFTER point / wrap) restart the landed track's A:B counter
+  (COND_RESET(t); a wrap landing one tick later, after stock's re-home counts its pass: `cl_cdo`); instant loads (DJ
+  on, in place) set it to the passes it would have begun since the pattern's conditions last restarted had it played
+  there all along (`cl_cond`). Measured stock facts (M1-M3, every track every tick, 0 mismatches): a pass starts at
+  each own wrap (0x400a536c, STEP len -> 0: t' = j * len * tps - tps) and at the master's restart (the wrap body,
+  t' = C - tps_M), once when they coincide; COND_RESET(-1) (PLAY, stock's switch 0x400a4850 -- after its tick's
+  passes --, DJ's hand-off) zeroes it; a detour at 0x400a539c (`cl_creset`) notes the tick (`cl_T` counts running
+  ticks in cl_land). FIRST trigs in an instant load therefore do not fire unless the pattern is in its first pass.
+- **D:** Clyps first; then RELOAD_FROM_PROJECT gets A (its rl_ctr has the same look-ahead landing) and C for its
+  in-place reloads (it already skips MASTER_STEP == 0; it has no cl_back). **TODO (the user): DIRECT JUMP's jumps get
+  the clock-locked conditions too (dj_handoff calls COND_RESET(-1) today).**
+- Standalone image: the landing-time helpers live in the DRAM part (the ROM cave: 18 B left).
+
 ### 1.27 Combinations that must never ship (the user, 2026-11-07)
 
 - Clyps + RELOAD_FROM_PROJECT never; Clyps + DIRECT_JUMP_KYOTI only as KYOTI's integrated pair (SUPERSEDE).
