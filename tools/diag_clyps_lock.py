@@ -172,6 +172,18 @@ def main(argv):
     u.hook_add(er.eb.UC_HOOK_CODE, on_wrapin, begin=syms["cl_wrap"], end=syms["cl_wrap"])
     u.hook_add(er.eb.UC_HOOK_CODE, on_landone, begin=syms["cl_landone"], end=syms["cl_landone"])
     u.hook_add(er.eb.UC_HOOK_CODE, on_req, begin=syms["cl_cueload"], end=syms["cl_cueload"])
+    applies = []         # CL25b: every engine-facing apply, its tick (what changes the SOUND, and when)
+    for name, ad in (("TRK_APPLY", 0x40001F18), ("PART_APPLY", 0x40009094), ("LIGHT_APPLY", 0x40009E00),
+                     ("PICKUP_SET", 0x40097290), ("cl_fullone", syms.get("cl_fullone")), ("cl_slice", syms.get("cl_slice"))):
+        if ad:
+            def mk(nm):
+                def f(uc, a_, sz, ud):
+                    s_ = uc.reg_read(er.eb.UC_M68K_REG_A7)
+                    applies.append([st["tick"], nm, [rd(s_ + 4 * k, 4) for k in (1, 2, 3)], rd(SCLK, 4), st["q"]])
+                return f
+            u.hook_add(er.eb.UC_HOOK_CODE, mk(name), begin=ad, end=ad)
+    u.hook_add(er.eb.UC_HOOK_MEM_WRITE, lambda uc, acc, ad, sz, val, ud: applies.append(
+        [st["tick"], "ENG_RESTART", [val & 0xFF], rd(SCLK, 4), st["q"]]), begin=0x8000184C, end=0x8000184C)
     purges = []          # CL25: (tick, track, the slot mask before / after cl_tpurge)
     if "cl_tpurge" in syms:
         pst = {}
@@ -180,9 +192,13 @@ def main(argv):
             t = uc.reg_read(er.eb.UC_M68K_REG_D6)
             mk = 0x46C7FE44 + t if t < 8 else 0x46C77BE2 + t - 8
             pst["t"], pst["mk"], pst["b"] = t, mk, rd(mk, 1)
+            if t < 8:       # the pending events' fire times against the sample clock (the purge's margin)
+                now = rd(SCLK, 4)
+                pst["dt"] = [((rd(0x80001904 + 4 * (t + 8 * k), 4) - now + (1 << 31)) % (1 << 32)) - (1 << 31)
+                             for k in range(3) if pst["b"] >> k & 1]
 
         def on_pout(uc, ad, sz, ud):
-            purges.append([st["tick"], pst["t"], pst["b"], rd(pst["mk"], 1)])
+            purges.append([st["tick"], pst["t"], pst["b"], rd(pst["mk"], 1), pst.get("dt")])
         u.hook_add(er.eb.UC_HOOK_CODE, on_pin, begin=syms["cl_tpurge"], end=syms["cl_tpurge"])
         u.hook_add(er.eb.UC_HOOK_CODE, on_pout, begin=syms["pu_out"], end=syms["pu_out"])
     if a.dj:
@@ -247,7 +263,7 @@ def main(argv):
     out.write_text(json.dumps(dict(meta=dict(name=a.name, dj=a.dj, chain=a.chain, pokes=a.poke, ops=a.ops,
                                              track=a.track, pattern=act, bank=bank),
                                    states=states, builds=builds, fires=fires, lands=lands, reqs=reqs, snaps=snaps,
-                                   purges=purges)))
+                                   purges=purges, applies=applies)))
     print(f"wrote {out}: ticks {st['tick']}, landings {len(lands)}", flush=True)
     return 0
 

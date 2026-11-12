@@ -155,11 +155,12 @@ def grade(path):
             if kind:
                 for tt in range(rq[0], rq[0] + 400):         # the next ISR may land it (DJ: "a request on a boundary tick lands that tick")
                     _, _, tl_ = model(tt + 1 + off, tpsM0, mlen0, tps0, 1)   # phase D of the next tick
+                    tl_ += 1                                  # CL26: the boundary it aims at is the tick after
                     if tl_ >= 0 and tl_ % L_ == 0:
                         exp = tt
                         break
             if kind and where == "tick":
-                ok = exp == lt and newf[0] == lt
+                ok = exp == lt and newf[0] == lt + 1 and newf[4] == 2   # fired for the boundary, ahead 2
                 print(f"      RULE landing: kind {kind}, expected t{exp}, landed t{lt}, new sound t{newf[0]}: "
                       f"{'PASS' if ok else 'FAIL'}")
                 bad_rules.append(None) if ok else bad_rules.append(("land", lt))

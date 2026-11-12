@@ -38395,6 +38395,22 @@ Now 936 / 932 (<= 945): the pair fits, SC's donor becomes PLATE REV.
   re-run on the final image; the other 11 on the image before the CVSAVE fixes, code they never reach). Standalone:
   landing-time helpers in the DRAM part (ROM 46 B left). Next: the user flashes CL25 (FLASHING "KYOTI CL25"); then
   RELOAD_FROM_PROJECT gets A + C; later DIRECT JUMP's jumps get C (the user's TODO).
+- **KYOTI CL26** (2026-11-12, NOT flashed; CL25 FLASHED -- the user: landing timing good; with DJ on a one-step
+  offset at some switches ("the sequence is offset for one step, perfectly in phase the next"), FULL settings
+  arriving before the sequence (longer with differing scales), clicks on FULL switches and a quiet one on a card
+  pattern reload press). Cause (by the user's description + the code; the emulator's exact clock never shows it):
+  CL25 landed ON the boundary tick and purged the old boundary event only if its fire time >= the sample clock --
+  on the unit the clock runs in audio frames, so at that tick the comparison flips by a frame: the old step stayed
+  and the new one was dropped (old content at the boundary, under the new slice already published). Fix: land ONE
+  TICK BEFORE the boundary (d7 = t0 + 2 = the boundary's t'), TICKS 0 + reload tps - 2 + first-fire (ahead 2: the
+  new step fires on the boundary's grid time, exactly where the old would), the purge a full tick ahead of the
+  old event (measured margin 1.0 tick in every purge), the slice published on the boundary tick (cl_spd = 2), the
+  master re-phase tick tps_M - 2, cl_cond B = cl_T + 1 - d7. Gates on CL26 (syx 4e3d4c19…): ui full 120, T 21, F+Q
+  27, L 17, J 8, X+O+W 15, V+Z+I 35, H 3, M+U 38; quant 43 / 39 (expectations moved: landing = the tick before,
+  B ticks tps - 2, slices on the boundary tick, master tick tps - 2); lock suite 12/12 --rules PASS (new sound on
+  the boundary, ahead 2); FULL timeline (diag_clyps_lock logs TRK_APPLY / Part applies / PICKUP / restarts):
+  TRK_APPLY on the same tick as the new step's sound in F1-F3 (DJ on 1x / mixed scales, DJ off), nothing earlier.
+  VERSTR holds 10 chars ("KYOTI CL25b" refused).
 
 ## 2026-11-10 (`reload-slice`) — RELOAD_FROM_PROJECT beside FREE LOOP: octabam HOOKS bridge `ui_tick` (PR sambanks/octabam#1083)
 

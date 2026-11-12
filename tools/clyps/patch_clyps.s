@@ -130,7 +130,7 @@
     .equ TICKS_ARR,   0x800064f0        | byte[16]: per-track ticks within the step
     .equ TSCALE_ARR,  0x8000663e        | byte[16]: per-track scale cache
     .equ CNTDN_ARR,   0x800065c3        | byte[16]: stock's per-track landing countdown, < 0 idle
-    .equ RELOAD_ARR,  0x800065d3        | byte[16]: per-track reload (first fire: tps - 1)
+    .equ RELOAD_ARR,  0x800065d3        | byte[16]: per-track reload (a first fire's ahead = tps - reload)
     .equ FFIRE,       0x80006624        | word: first-fire mask, bit per track
     .equ HOLD_MASK,   0x80006626        | word: skip one advance, bit per track
     .equ SCLK,        0x4610757c        | audio-domain sample clock (fire-time base)
@@ -4618,13 +4618,15 @@ la_armn:
     cmpi.l  #16,%d0
     bne.b   la_arml
 
-| CL25: every armed track lands as stock's landing (and DIRECT JUMP's) lands a track -- on the tick whose
-| t' = t0 + 1 ends a step at its old AND its new rate (DIRECT JUMP on: and the master's), the step that
-| sounds next built from the NEW record and fired at once (cl_ffland). Until CL24 the copy came one tick
-| later with stock's one-step look-ahead: the step at that boundary had been built from the OLD sequence a
-| step earlier, so the new one was heard a step after a DIRECT JUMP pattern jump (the user's report).
+| CL25: every armed track lands as stock's landing (and DIRECT JUMP's) lands a track: the step that sounds at
+| the next boundary of its old AND its new rate (DIRECT JUMP on: and the master's) is built from the NEW record
+| and fired for that boundary (cl_ffland). Until CL24 the copy came at the boundary with stock's one-step
+| look-ahead: the step there had been built from the OLD sequence, so the new one was heard a step after a
+| DIRECT JUMP jump (the user's report). CL26 (the user's CL25 report, 2026-11-12): one tick BEFORE the
+| boundary -- at the boundary itself the old event's fire time and the sample clock are a frame apart on the
+| unit, so the purge sometimes left it (that step played old, with the new slice already published).
 la_tracks:
-    addq.l  #1,%d7                      | d7 = t' (signed: <= 0 in the cycle's last master step)
+    addq.l  #2,%d7                      | d7 = t' of the NEXT tick (signed): the boundary a landing now aims at
     tst.w   cl_cdm
     beq.b   la_ncd
     jsr     cl_cdo                      | the wrap's landings: their trig conditions now
@@ -4923,7 +4925,7 @@ tl_ready:                               | d6 = t -> d0 = 1 when t may land now: 
 tr_no:
     moveq   #0,%d0
     rts
-tl_ff:                                  | d6 = t (d3 = members, d5 = tps_M): its counters at its rate in the
+tl_ff:                                  | d6 = t (d3 = members, d5 = tps_M, d7 = the boundary): its counters at its rate in the
                                         | playing pattern after the landing, through cl_ffland -- unless t is
     lea     TSCALE_ARR,%a0              | no member and keeps its rate and its place (its built step is right)
     moveq   #0,%d0
@@ -5079,10 +5081,10 @@ tr2_a:
     jmp     cl_tps
 
     .section .dram,"ax"                 | CL25: landing-time only (the standalone cave is full)
-| cl_mreph (d7 = t', 0 mod the new tps_M): the pattern's own rate changed -- the master goes where the new
-| pattern would be had it played since this master cycle began, as stock's landing puts it (DIRECT JUMP's
-| dl_commit): step = (t' / tps_M) mod its length, its tick tps_M - 1 (phase G's advance follows in this tick),
-| the master scale cache. Uses d0-d2/a0-a1.
+| cl_mreph (d7 = the boundary's t', 0 mod the new tps_M; the tick before it): the pattern's own rate changed --
+| the master goes where the new pattern would be had it played since this master cycle began: step = (t' /
+| tps_M) mod its length, its tick tps_M - 2 (phase G advances it here and wraps it on the boundary tick), the
+| master scale cache. Uses d0-d2/a0-a1.
 cl_mreph:
     jsr     cl_live
     jsr     cl_mrate                    | d0 = tps_M, d1 = length (0 = INF), d2 = scale
@@ -5097,7 +5099,7 @@ cl_mreph:
 mp_inf:
     move.w  %d2,MASTER_STEP
     move.l  (%sp)+,%d0
-    subq.l  #1,%d0
+    subq.l  #2,%d0
     move.b  %d0,TICK_CTR
     rts
 
@@ -5300,14 +5302,15 @@ lo1_nc:
 | ---------------------------------------------------------------- CL25: one track lands as stock lands it
 | Stock's landing (phase D 0x400a1f72..0x400a222e, the one DIRECT JUMP drives) lands on the tick that ENDS a
 | step and fires the next step at once: reload 0x800065d3[t] = tps - 1 and the first-fire bit 0x80006624 make
+| (Clyps since CL26: a tick earlier with reload tps - 2, ahead 2 -- the same fire time, see la_tracks)
 | phase E's builder (0x400a2d44 / MIDI 0x400a399e) take ahead = tps - reload = 1, then ticks = reload; phase F
 | wraps it to 0 and the step after is built on the next tick as usual. The pending event of the old sequence
 | for that boundary goes (DIRECT JUMP's primacy purge, one track), and the next tick the reload goes back to
 | what a never-switched track holds (DIRECT JUMP's dl_fixup rule).
 
     .section .dram,"ax"                 | CL25: landing-time only (the standalone cave is full)
-| cl_ffok (d0 = t, d7 = t') -> d0 = 1 when t may land on this tick: t' >= 0 (not the cycle's last master step
-| before the wrap's first tick: stock's own deferred landings run there) and no stock landing pending for t
+| cl_ffok (d0 = t, d7 = the boundary's t') -> d0 = 1 when t may land on this tick: t' >= 0 (not inside the
+| cycle's last master step: stock's own deferred landings run there) and no stock landing pending for t
 | (CNTDN 0x800065c3[t] < 0). Uses d0-d1/a0.
 cl_ffok:
     tst.l   %d7
@@ -5321,10 +5324,12 @@ fo_no:
     moveq   #0,%d0
     rts
 
-| cl_ffland (d6 = t, d7 = t' >= 0 with t' = 0 mod tps_new; a2 = tps_old, a3 = tps_new, a4 = len_new, a5 =
-| scale_new, d5 = tps_M): STEP = (t' / tps_new) mod len, STEP-1, TICKS 0, the scale cache, reload tps - 1,
-| first fire, no held advance; t's pending events at or after now purged; its fix-up for the next tick; a
-| landed slice is published in this tick (the new step sounds now). Keeps every register but d0-d2/a0-a1.
+| cl_ffland (d6 = t, d7 = the boundary's t' >= 0, 0 mod tps_new; a2 = tps_old, a3 = tps_new, a4 = len_new,
+| a5 = scale_new, d5 = tps_M), the tick before that boundary: STEP = (t' / tps_new) mod len, STEP-1, TICKS 0
+| (phase E builds it now), the scale cache, reload tps - 2 with the first-fire bit (ahead = 2: it fires on the
+| boundary, where the old one would have), no held advance; t's pending events at or after now purged (the old
+| boundary event is a tick away: no race with the sample clock); its fix-up for the next tick; a landed slice
+| is published on the boundary tick (cl_spdo). Keeps every register but d0-d2/a0-a1.
 cl_ffland:
     move.l  %d7,%d0
     move.l  %a3,%d1
@@ -5366,8 +5371,8 @@ ff_fx:
     lea     cl_fxv,%a1
     move.b  %d0,(%a1,%d6.l)
     move.l  %a3,%d0
-    subq.l  #1,%d0
-    move.b  %d0,(%a0,%d6.l)             | reload = tps - 1: this tick's first fire
+    subq.l  #2,%d0
+    move.b  %d0,(%a0,%d6.l)             | reload = tps - 2: this tick's build fires on the next tick
     moveq   #1,%d1
     lsl.l   %d6,%d1
     move.w  cl_fxm,%d0
@@ -5385,8 +5390,8 @@ ff_fx:
     move.b  (%a0,%d6.l),%d0
     cmpi.b  #-1,%d0
     bne.b   ff_out
-    moveq   #1,%d0                      | armed by the copy: cl_spdo publishes it at this phase D's end
-    move.b  %d0,(%a0,%d6.l)
+    moveq   #2,%d0                      | armed by the copy: cl_spdo publishes it at the next phase D's end,
+    move.b  %d0,(%a0,%d6.l)             | the boundary tick
 ff_out:
     rts
 
@@ -5455,7 +5460,8 @@ cl_wrcond:
     move.w  %d1,cl_cdm
     rts
 
-| cl_cdo (phase D, d7 = t', d5 = tps_M): the deferred trig conditions of the wrap's landings. Uses d0-d4/d6/a0-a4.
+| cl_cdo (phase D, d7 = the next tick's t', d5 = tps_M): the deferred trig conditions of the wrap's landings.
+| Uses d0-d4/d6/a0-a4.
 cl_cdo:
     move.w  cl_cdm,%d3
     clr.w   cl_cdm
@@ -5489,7 +5495,7 @@ cdo_n:
     bne.b   cdo_l
     rts
 
-| cl_cond (d6 = t, d4 = the kind, d7 = t' this tick (signed), a3 = t's tps, a4 = its length): t's trig
+| cl_cond (d6 = t, d4 = the kind, d7 = the next tick's t' (signed), a3 = t's tps, a4 = its length): t's trig
 | conditions after its landing (the user, 2026-11-11). Cued (0): they start again, as a stock pattern change
 | starts them (COND_RESET(t)). Instant (1 in place, 2 DIRECT JUMP on): its A:B pass counter becomes the passes
 | it would have begun since the pattern's conditions last started again (cl_Tres) had it played there all
@@ -5517,8 +5523,9 @@ cd_inst:
     muls.l  %d1,%d0
     movea.l %d0,%a6                     | a6 = C (0 = INF)
     move.l  cl_T,%d0
+    addq.l  #1,%d0
     sub.l   %d7,%d0
-    movea.l %d0,%a2                     | a2 = B: this master cycle's first tick (t' = 0)
+    movea.l %d0,%a2                     | a2 = B: this master cycle's first tick (d7 is the next tick's t')
     move.l  cl_T,%d0
     bsr.b   cd_F
     move.l  %d0,%d3                     | F(now)

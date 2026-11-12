@@ -267,6 +267,18 @@ quick check for each:
   responsive.
 - **PART_CHANGE_CARRYOVER_FIX** — a track that is PICKUP on one Part and FLEX on
   another: switching patterns across the Parts plays the FLEX sample, not the old loop.
+- **KYOTI CL26 walk-through** (WIP; `out/KYOTI_WIP/KYOTI_V1.7_WITH_CLYPS/OCTATRACK_OS1.40C_KYOTI_V1.7_WITH_CLYPS.syx`)
+  = CL25 (flashed: landings in time, three issues reported) + every landing one tick before its boundary, the new
+  step scheduled for the boundary itself and the old one removed a tick ahead (on the unit the old event and the
+  sample clock were a frame apart at the boundary, so it sometimes stayed). DJ on, transport running:
+  1. **No one-step offset:** switch T1 between its 64 steps and a 16-step slot at many points in the bar (OT DEMO):
+     the incoming sequence never plays one step off before falling into place.
+  2. **FULL loads arrive together:** [FUNC] + trig 5 / 13 / 16 (A05 / A13 / A16 have other Parts): the new machine /
+     volume / FX start with the new sequence's first step, never on the old sequence's last step.
+  3. **Differing scales (CL25 check 4, DJ on):** the same FULL switches, no early settings and no loud click.
+  4. **Card pattern reload, FULL** ([PTN]+[BANK]+trig of the pattern you are on): listen for the quiet click on the
+     press -- report whether it is still there (it may be the card read itself, not the landing).
+
 - **KYOTI CL25 walk-through** (WIP; `out/KYOTI_WIP/KYOTI_V1.7_WITH_CLYPS/OCTATRACK_OS1.40C_KYOTI_V1.7_WITH_CLYPS.syx`)
   = CL24 (flashed) + loads land as DIRECT JUMP lands (the user's CL24 report and decisions, 2026-11-11). Transport
   running:
