@@ -38434,6 +38434,13 @@ Now 936 / 932 (<= 945): the pair fits, SC's donor becomes PLATE REV.
   2026-10-30 design; the user: fine). Next: RELOAD_FROM_PROJECT and DIRECT JUMP ports (reference/handoffs/
   RELOAD_CLYPS_PORT.md, DJ_CLYPS_PORT.md), agents in their own worktrees.
 
+- **KYOTI CL33** (2026-11-13; NOT flashed): the DIRECT JUMP port session (worktree dj-clyps, V7.0.2: jumps no longer
+  call COND_RESET) measured that PLAY never calls COND_RESET and STOP does (0x400a12b8) -- with cl_T still at its last
+  count, so cl_creset left cl_Tres stale and Clyps' instant loads after STOP -> PLAY came out a pass short. Reproduced
+  (diag_clyps_lock op `x`, run SP2: CL32 FAIL 3 vs 4 / 4 vs 5, CL33 PASS); fix = clear cl_Tres in cl_land's stopped branch
+  (scope §1.33). Gates on CL33: diag_clyps_ui all 9 sets PASS, diag_clyps_quant PASS (DJ off + on), lock 14/14 --rules PASS,
+  check_clyps_full PASS, timecmp (CL29 vs CL33) identical in all 18 runs. RELOAD got the same fix (reload-clyps 7f0bc12).
+
 ## 2026-11-10 (`reload-slice`) — RELOAD_FROM_PROJECT beside FREE LOOP: octabam HOOKS bridge `ui_tick` (PR sambanks/octabam#1083)
 
 - Sam merged #1079 (`d01cf1c3`) and asked for the HOOKS chain at `0x40056c28` in place of the FREE LOOP conflict.

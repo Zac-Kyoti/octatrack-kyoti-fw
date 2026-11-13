@@ -4597,6 +4597,7 @@ cl_land:
     tst.l   RUNNING                     | d0 is dead here: la_out's displaced move writes it
     bne.b   la_run
     clr.l   cl_T                        | stopped: the running-tick count starts again at PLAY
+    clr.l   cl_Tres                     | CL33: STOP's COND_RESET(-1) noted its last count; PLAY never resets
     clr.w   cl_cdm
     clr.w   cl_fxm                      | ... and stock's start sets every track's reload itself
     bra.w   la_out

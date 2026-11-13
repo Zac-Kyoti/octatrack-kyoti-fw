@@ -1465,6 +1465,17 @@ the investigation (NOTES "CL24 timing investigation", harness `tools/diag_clyps_
 - Timing is frozen at CL29 (the user): CL32's tick-level landings / builds / slice publishes are compared with CL29's
   runs (out/clyps/lock/timecmp.py).
 
+### 1.33 Trig conditions after STOP -> PLAY (KYOTI CL33, 2026-11-13)
+
+- Stock's STOP (0x400a12b8) calls COND_RESET(-1) while `cl_T` still holds its last running count, so `cl_creset`
+  stamped `cl_Tres` with it; PLAY never calls COND_RESET (measured by the DIRECT JUMP session). An instant load after
+  STOP -> PLAY counted the passes from that stale tick: a counter one pass short (emulator, CL32: 3 vs 4, 4 vs 5 against
+  an untouched track). Masked until now by DIRECT JUMP V7.0.1, whose jumps call COND_RESET(-1) and re-noted cl_Tres.
+- Fix: `cl_land`'s stopped branch clears `cl_Tres` with `cl_T`. Same fix owed in RELOAD's port (`rl_Tres`).
+- Grader: `diag_clyps_lock.py` op `x` = STOP, then the harness's PLAY. check_clyps_lock's position model does not know
+  a restart, so its landing rule reads FAIL after one (the untouched tracks are "off the model" too); the condition rule
+  is still exact.
+
 ### 1.27 Combinations that must never ship (the user, 2026-11-07)
 
 - Clyps + RELOAD_FROM_PROJECT never; Clyps + DIRECT_JUMP_KYOTI only as KYOTI's integrated pair (SUPERSEDE).

@@ -267,6 +267,13 @@ quick check for each:
   responsive.
 - **PART_CHANGE_CARRYOVER_FIX** — a track that is PICKUP on one Part and FLEX on
   another: switching patterns across the Parts plays the FLEX sample, not the old loop.
+- **KYOTI CL33 walk-through** (WIP; `out/KYOTI_WIP/KYOTI_V1.7_WITH_CLYPS/OCTATRACK_OS1.40C_KYOTI_V1.7_WITH_CLYPS.syx`)
+  = CL32 + one fix; timing unchanged from CL29 (every landing, build and slice publish identical in the emulator).
+  1. **Trig conditions after STOP -> PLAY:** DJ on, a track with a 1:2 trig. Play a while, STOP, PLAY, let a few
+     passes go by, load a slot on that track: its 1:2 trig keeps alternating in step with an untouched track's
+     (CL32 could land one pass out -- STOP's condition reset left a stale count that PLAY never cleared).
+  2. Then CL32's four items below.
+
 - **KYOTI CL32 walk-through** (WIP; `out/KYOTI_WIP/KYOTI_V1.7_WITH_CLYPS/OCTATRACK_OS1.40C_KYOTI_V1.7_WITH_CLYPS.syx`)
   = CL29 (flashed) + the user's CL29 list (CL30 / CL31 never flashed). Timing unchanged from CL29.
   1. **Cued LED on every track:** DJ off, a load cued on T2..T8: the slot flashes YELLOW until it lands (CL29: red /

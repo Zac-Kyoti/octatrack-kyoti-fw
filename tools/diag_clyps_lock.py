@@ -17,7 +17,7 @@ grades it against DIRECT JUMP's position model.
   CLYPS_SYMS=out/clyps/kyoti_cl24_syms.txt python3 tools/diag_clyps_lock.py --image IMG --project DIR \
       --name N --out out/clyps/lock/N.json [--dj] [--chain STEPS] [--poke P:OFF=VAL[:SIZE] ...] \
       [--ops s1,s15,o@m0,...] [--track 0]
-  ops: sK = slot K (pattern K of the playing bank, 0-based), fK = FULL slot K, o = ORIG SEQ, of = ORIG
+  ops: sK = slot K (pattern K of the playing bank, 0-based), fK = FULL slot K, x = STOP then PLAY, o = ORIG SEQ, of = ORIG
        SEQ/MCH/FX (the trig of the pattern you are on, [FUNC] for the FULL form); a suffix @mK waits for master step K first (0 = the cycle's last audible step), @kN
        waits N ms; without one, an irregular delay walks the press through every tick of a step.
 """
@@ -245,6 +245,14 @@ def main(argv):
             continue
         if op == "w":
             settle(1000)
+            continue
+        if op == "x":                         # STOP (stock's COND_RESET(-1), 0x400a12b8), then PLAY again
+            key(0x27, 1); key(0x27, 0)
+            settle(600)
+            stopped = rd(RUNNING, 4)
+            rt.start_transport_live()
+            settle(300)
+            print(f"#{i} x: stopped ({stopped}), running {rd(RUNNING, 4)} at tick {st['tick']}", flush=True)
             continue
         if op == "d":                         # one DOWN arrow: where the arrows show
             key(0x20, 1); key(0x20, 0)
