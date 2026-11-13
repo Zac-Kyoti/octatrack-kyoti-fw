@@ -1240,6 +1240,42 @@ mm_bind_drop:
     movea.l (%sp)+,%a2
     moveq   #1,%d0
     rts
+
+| ev_trig_muted (Modwerk #777): unsigned mm_trig_muted(void). A machine that starts its own
+| note from a trig, before stock binds the voice, asks which tracks' new trigs are dropped
+| now: bit t for track t+1. The answer is mm_voice_bind's own, asked for each track in turn,
+| so the two cannot disagree (KEYMASK included). OT and OTFX never drop a trig: 0 at once,
+| the same gate as fresh_bind's. C convention: %d2/%d3 are restored, mm_voice_bind keeps
+| %a2 and clobbers only %d0/%d1.
+    .global mm_trig_muted
+mm_trig_muted:
+    .ifndef ALWAYS_ON
+    move.l  GATE,%d0
+    subq.l  #1,%d0
+    cmpi.l  #1,%d0                      | OTFX-T (1) / DT-T (2) only
+    bhi.s   tm_none
+    .endif
+    lea     (-8,%sp),%sp
+    movem.l %d2-%d3,(%sp)
+    moveq   #0,%d3                      | the answer
+    moveq   #7,%d2                      | track 7..0
+tm_loop:
+    move.l  %d2,-(%sp)
+    bsr.w   mm_voice_bind               | 1: this track's reset would be dropped
+    addq.l  #4,%sp
+    tst.l   %d0
+    beq.s   tm_next
+    bset    %d2,%d3
+tm_next:
+    subq.l  #1,%d2
+    bpl.s   tm_loop
+    move.l  %d3,%d0
+    movem.l (%sp),%d2-%d3
+    lea     (8,%sp),%sp
+    rts
+tm_none:
+    moveq   #0,%d0
+    rts
     .endif
 
 | ============================ hook 11: 0x4000d0ba (THE REL_STATE RACE, FIXED SAFELY) ====
