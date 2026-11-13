@@ -38441,6 +38441,13 @@ Now 936 / 932 (<= 945): the pair fits, SC's donor becomes PLATE REV.
   (scope §1.33). Gates on CL33: diag_clyps_ui all 9 sets PASS, diag_clyps_quant PASS (DJ off + on), lock 14/14 --rules PASS,
   check_clyps_full PASS, timecmp (CL29 vs CL33) identical in all 18 runs. RELOAD got the same fix (reload-clyps 7f0bc12).
 
+- **KYOTI CL34, part 1** (2026-11-13; NOT flashed): PRE = 1 on every instant load (scope §1.34; the user chose it for
+  Clyps, DIRECT JUMP and RELOAD alike -- §1.29 C carries nothing of the outgoing sequence, the incoming one's own last
+  result is unknowable for a % trig, 1 = stock's STOP / pattern-change value). cl_cond cd_set writes 0x46107979[t] = 1
+  (stock COND_RESET's own store, checked). Gates: diag_clyps_ui 9/9 sets PASS, diag_clyps_quant PASS (DJ off + on), lock
+  14/14 --rules PASS, check_clyps_full PASS, timecmp (CL29 vs CL34) identical in all 18 runs; PRE on the landed track 1
+  after every instant landing (out/clyps/lock/precheck.py; CL33: 0). The arrows change follows in the same CL34.
+
 ## 2026-11-10 (`reload-slice`) — RELOAD_FROM_PROJECT beside FREE LOOP: octabam HOOKS bridge `ui_tick` (PR sambanks/octabam#1083)
 
 - Sam merged #1079 (`d01cf1c3`) and asked for the HOOKS chain at `0x40056c28` in place of the FREE LOOP conflict.

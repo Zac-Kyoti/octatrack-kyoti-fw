@@ -267,6 +267,13 @@ quick check for each:
   responsive.
 - **PART_CHANGE_CARRYOVER_FIX** — a track that is PICKUP on one Part and FLEX on
   another: switching patterns across the Parts plays the FLEX sample, not the old loop.
+- **KYOTI CL34 walk-through** (WIP; `out/KYOTI_WIP/KYOTI_V1.7_WITH_CLYPS/OCTATRACK_OS1.40C_KYOTI_V1.7_WITH_CLYPS.syx`)
+  = CL33 + one rule; timing unchanged from CL29.
+  1. **PRE after an instant load** (DJ on): a track whose outgoing sequence's last conditional trig FAILED (e.g. a 1:2
+     on its off pass); load a slot whose first conditional trig is PRE: it plays (CL33 followed the outgoing failure
+     and stayed silent). As after STOP or a stock pattern change. A held FILL still carries over.
+  2. Then CL33's item and CL32's four items below.
+
 - **KYOTI CL33 walk-through** (WIP; `out/KYOTI_WIP/KYOTI_V1.7_WITH_CLYPS/OCTATRACK_OS1.40C_KYOTI_V1.7_WITH_CLYPS.syx`)
   = CL32 + one fix; timing unchanged from CL29 (every landing, build and slice publish identical in the emulator).
   1. **Trig conditions after STOP -> PLAY:** DJ on, a track with a 1:2 trig. Play a while, STOP, PLAY, let a few

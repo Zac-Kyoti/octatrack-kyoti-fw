@@ -1476,6 +1476,15 @@ the investigation (NOTES "CL24 timing investigation", harness `tools/diag_clyps_
   a restart, so its landing rule reads FAIL after one (the untouched tracks are "off the model" too); the condition rule
   is still exact.
 
+### 1.34 PRE after an instant load (the user, 2026-11-13; KYOTI CL34)
+
+- §1.29 C says an instant load's conditions run as if the incoming sequence had always played there; nothing of the
+  outgoing sequence is carried (only performance state: the clock position and a held FILL). The PRE latch
+  (0x46107979[t]) would then hold the incoming sequence's own last conditional result, unknowable for a % trig. CL33
+  kept the outgoing latch (ties the incoming to the outgoing, varies per load); DIRECT JUMP V7.0.2 reset it to 1.
+  Decided: **PRE = 1 on every instant load, in Clyps, DIRECT JUMP and RELOAD** (as COND_RESET(t) and stock's STOP /
+  pattern change leave it). FILL (0x46107959 / 69) kept. `cl_cond` cd_set.
+
 ### 1.27 Combinations that must never ship (the user, 2026-11-07)
 
 - Clyps + RELOAD_FROM_PROJECT never; Clyps + DIRECT_JUMP_KYOTI only as KYOTI's integrated pair (SUPERSEDE).

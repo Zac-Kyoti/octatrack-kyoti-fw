@@ -137,6 +137,7 @@
     .equ MCLK,        0x46107564        | MIDI-domain clock
     .equ COND_RESET,  0x400a539c        | (t | -1): A:B pass counters / FILL latches fresh (stock's switch)
     .equ COND_CNT,    0x46107918        | long[16]: a track's A:B pass counter (++ at its wraps, 0x400a536c)
+    .equ COND_PRE,    0x46107979        | byte[16]: PRE's latch (COND_RESET(t) sets 1)
     .equ LAND_RESUME, 0x400a1f78        | after `move.b 0x80006687,%d0` (stock's ble.w follows)
     .equ UIT_RESUME,  0x40062d22        | after `tst.l 0x46c7c72c` (stock's beq.w follows)
     .equ WRAP_RESUME, 0x400a43a6        | after `move.l (a2),d0 ; moveq #1,d2 ; or.l d2,d0`
@@ -5910,6 +5911,10 @@ cd_inst:
 cd_set:
     lea     COND_CNT,%a0
     move.l  %d3,(%a0,%d6.l*4)
+    lea     COND_PRE,%a0                | CL34 (the user, 2026-11-13): PRE = 1, as COND_RESET sets it -- the incoming
+    adda.l  %d6,%a0                     | sequence's own last result is unknown (a % trig), and nothing is carried
+    moveq   #1,%d0                      | from the outgoing one; FILL (a performer's press) is kept
+    move.b  %d0,(%a0)
     movem.l (%sp),%d2-%d7/%a2-%a6
     lea     44(%sp),%sp
     rts
