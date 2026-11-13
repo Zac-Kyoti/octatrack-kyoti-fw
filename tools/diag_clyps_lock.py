@@ -18,7 +18,7 @@ grades it against DIRECT JUMP's position model.
       --name N --out out/clyps/lock/N.json [--dj] [--chain STEPS] [--poke P:OFF=VAL[:SIZE] ...] \
       [--ops s1,s15,o@m0,...] [--track 0]
   ops: sK = slot K (pattern K of the playing bank, 0-based), fK = FULL slot K, o = ORIG SEQ, of = ORIG
-       SEQ/MCH/FX; a suffix @mK waits for master step K first (0 = the cycle's last audible step), @kN
+       SEQ/MCH/FX (the trig of the pattern you are on, [FUNC] for the FULL form); a suffix @mK waits for master step K first (0 = the cycle's last audible step), @kN
        waits N ms; without one, an irregular delay walks the press through every tick of a step.
 """
 import argparse, json, os, pathlib, sys
@@ -51,6 +51,9 @@ def main(argv):
     ap.add_argument("--stride", type=int, default=29)
     ap.add_argument("--tail", type=int, default=800, help="ms after the last landing")
     ap.add_argument("--cond", action="store_true", help="also record the trig-condition counters per tick")
+    ap.add_argument("--leds", action="store_true", help="also record the LED base / invert bitmaps per tick")
+    ap.add_argument("--parts", type=lambda v: int(v, 0), default=0,
+                    help="BANKSZ: at the end compare the playing Part with the load snapshot's")
     a = ap.parse_args(argv)
     sp = os.environ.get("CLYPS_SYMS", str(ROOT / "out/clyps_syms.txt"))
     syms = {k: int(v, 16) for k, v in (l.split() for l in pathlib.Path(sp).read_text().splitlines())}
@@ -135,6 +138,8 @@ def main(argv):
             row += [[int.from_bytes(raw[i * 4:i * 4 + 4], "big") for i in range(16)],
                     list(u.mem_read(0x46107959, 16)), list(u.mem_read(0x46107969, 16)),
                     list(u.mem_read(0x46107979, 16)), rd(ACT, 1)]
+        if a.leds:      # 0x460ba98c: the LEDs' base bits (die / 8, die % 8); 0x460ba9ae: LED_FLASH's inverted dies
+            row.append([bytes(u.mem_read(0x460BA98C, 17)).hex(), bytes(u.mem_read(0x460BA9AE, 17)).hex()])
         states.append(row)
 
     def on_build(uc, ad, sz, ud):
@@ -241,14 +246,32 @@ def main(argv):
         if op == "w":
             settle(1000)
             continue
-        if op[0] == "s":
+        if op == "d":                         # one DOWN arrow: where the arrows show
+            key(0x20, 1); key(0x20, 0)
+            settle(300)
+            print(f"#{i} d: cur {rd(syms['cl_cur'], 1) + 1} shown {rd(syms['cl_pmoved'], 1)}", flush=True)
+            continue
+        if op == "P":                         # ORIG PTN+PRT: [PTN]+[BANK]+[YES]
+            key(0x2E, 1); key(0x2F, 1); key(0x31, 1); key(0x31, 0); key(0x2F, 0); key(0x2E, 0)
+            settle(3000)
+            print(f"#{i} P: cur {rd(syms['cl_cur'], 1) + 1} shown {rd(syms['cl_pmoved'], 1)} "
+                  f"sbank {rd(syms['cl_sbank'], 1)}", flush=True)
+            continue
+        if op[0] == "y":                      # the arrows to slot K, then [YES]
+            g2 = 0
+            while rd(syms["cl_cur"], 1) != int(op[1:]) and g2 < 20:
+                key(0x20, 1); key(0x20, 0)
+                g2 += 1
+            rt.run(ms=300)
+            key(0x31, 1); key(0x31, 0)
+        elif op[0] == "s":
             key(int(op[1:]), 1); key(int(op[1:]), 0)
         elif op[0] == "f":
             key(FUNC, 1); key(int(op[1:]), 1); key(int(op[1:]), 0); key(FUNC, 0)
         elif op == "o":
-            key(PAGE, 1); key(PAGE, 0)
+            key(act, 1); key(act, 0)                # CL29: ORIG = the trig of the pattern you are on
         elif op == "of":
-            key(FUNC, 1); key(PAGE, 1); key(PAGE, 0); key(FUNC, 0)
+            key(FUNC, 1); key(act, 1); key(act, 0); key(FUNC, 0)
         g = 0
         while len(lands) == nl and g < 300:
             settle(68)
@@ -257,13 +280,21 @@ def main(argv):
         snaps.append([st["tick"], params(act)])
         l = lands[-1] if len(lands) > nl else None
         print(f"#{i} {opx}: requests {[x[:6] for x in reqs if x[0] >= (l[0] - 400 if l else 0)][-2:]} landing "
-              f"{l}", flush=True)
+              f"{l}; cur {rd(syms['cl_cur'], 1) + 1} shown {rd(syms['cl_pmoved'], 1)}", flush=True)
     settle(a.tail)
+    parts = None
+    if a.parts:     # CL29: the playing pattern's Part now vs as loaded (the snapshot, cl_bss + bank * BANKSZ)
+        pi = rd(slab_ad + 0x8E57, 1) & 3
+        live = bytes(u.mem_read(bb + 0x8ED80 + pi * 0x18B2, 0x18B2))
+        snap = bytes(u.mem_read(syms["cl_bss"] + bank * a.parts + 0x8ED80 + pi * 0x18B2, 0x18B2))
+        diff = [i for i in range(0x18B2) if live[i] != snap[i]]
+        parts = dict(part=pi, diff=diff[:64], n=len(diff))
+        print(f"Part {pi + 1} now vs as loaded: {len(diff)} bytes differ {[hex(i) for i in diff[:12]]}", flush=True)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(dict(meta=dict(name=a.name, dj=a.dj, chain=a.chain, pokes=a.poke, ops=a.ops,
                                              track=a.track, pattern=act, bank=bank),
                                    states=states, builds=builds, fires=fires, lands=lands, reqs=reqs, snaps=snaps,
-                                   purges=purges, applies=applies)))
+                                   purges=purges, applies=applies, parts=parts)))
     print(f"wrote {out}: ticks {st['tick']}, landings {len(lands)}", flush=True)
     return 0
 

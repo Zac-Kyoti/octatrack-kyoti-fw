@@ -267,6 +267,39 @@ quick check for each:
   responsive.
 - **PART_CHANGE_CARRYOVER_FIX** — a track that is PICKUP on one Part and FLEX on
   another: switching patterns across the Parts plays the FLEX sample, not the old loop.
+- **KYOTI CL32 walk-through** (WIP; `out/KYOTI_WIP/KYOTI_V1.7_WITH_CLYPS/OCTATRACK_OS1.40C_KYOTI_V1.7_WITH_CLYPS.syx`)
+  = CL29 (flashed) + the user's CL29 list (CL30 / CL31 never flashed). Timing unchanged from CL29.
+  1. **Cued LED on every track:** DJ off, a load cued on T2..T8: the slot flashes YELLOW until it lands (CL29: red /
+     green -- the grid read T1's cue for every track).
+  2. **The arrows stay:** once moved they are always on screen; no load or reload (slot, ORIG, ORIG PTN+PRT, temp,
+     card) moves or hides them. A track that has none yet shows none until an arrow moves them.
+  3. **Their solid yellow:** when the slot under the arrows is the one loaded, its solid yellow goes once it lands
+     (the slot shows the playing red / yellow flash); the next arrow brings the yellow back (also back onto it).
+  4. **ORIG via the trig of your own pattern** (arrows elsewhere): the header reads ORIG TRK SEQ / FULL during its
+     flash, then the arrows' label again.
+
+- **KYOTI CL29 walk-through** (WIP; `out/KYOTI_WIP/KYOTI_V1.7_WITH_CLYPS/OCTATRACK_OS1.40C_KYOTI_V1.7_WITH_CLYPS.syx`)
+  = CL28 (flashed: FULL settings with the first sounding trig work) + the user's CL28 list:
+  1. **Shared Parts:** OT DEMO A01, T3 active: [FUNC] + trig 7 (A07, Part 2), then [FUNC] + trig 2 (A02, Part 1): T3
+     plays A02's sequence with Part 1's OWN T3 sample and settings (CL28 kept Part 2's). Also [FUNC] + trig 1 (your
+     own pattern = ORIG SEQ/MCH/FX) after a FULL load: Part 1's T3 as loaded.
+  2. **[PAGE] does nothing in Clyps** (alone, with [FUNC], with the [PTN]+[BANK] chord); the page LEDs are stock's
+     (step indicator) all the time. ORIG SEQ = the trig of the pattern you are on ([FUNC] + it: SEQ/MCH/FX);
+     ORIG PTN+PRT = [PTN]+[BANK]+[YES].
+  3. **Arrows after a slot load** (trig or [YES], SEQ or FULL, a group too): the arrows and the solid yellow LED
+     disappear; the loaded slot flashes red / yellow. The next arrow press shows them again on the slot next to the
+     loaded one, solid yellow there. Restores (the trig of your own pattern), temp and card reloads leave the arrows.
+
+- **KYOTI CL28 walk-through** (WIP; `out/KYOTI_WIP/KYOTI_V1.7_WITH_CLYPS/OCTATRACK_OS1.40C_KYOTI_V1.7_WITH_CLYPS.syx`)
+  = CL26 (flashed) + a FULL load's machine / track settings (and a new machine's restart) wait for the incoming
+  sequence's first trig that actually sounds (CL27, never flashed, waited for the first trig step). DJ on:
+  1. **The user's repro:** OT DEMO, A01 playing, Clyps on T1, [FUNC] + trig 5 (A05 T1) two steps before A01's end: A01
+     T1's sample keeps its own settings until A05 T1's first trig, which starts with A05's settings.
+  2. The same at other points of the bar, and with A16 (trig 16) / A13 (trig 13), and between differing scales.
+  3. A first trig with a negative micro-timing, or a trig condition (e.g. 1:2) that fails on the first pass: the
+     settings arrive with the trig that actually plays.
+  4. CL26's checks still hold (no one-step offset; the sequence lands on time).
+
 - **KYOTI CL26 walk-through** (WIP; `out/KYOTI_WIP/KYOTI_V1.7_WITH_CLYPS/OCTATRACK_OS1.40C_KYOTI_V1.7_WITH_CLYPS.syx`)
   = CL25 (flashed: landings in time, three issues reported) + every landing one tick before its boundary, the new
   step scheduled for the boundary itself and the old one removed a tick ahead (on the unit the old event and the

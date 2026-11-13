@@ -446,11 +446,11 @@ def main(argv):
         tap(0x10)
         act = rd(0x800065BE, 1)
         key(PTN, 1)                        # earlier scenarios loaded onto tracks: every track back first
-        key(BANK, 1)                       # (chord + [PAGE] = ORIG PTN + PART; begun outside: closes)
-        tap(PAGE)
+        key(BANK, 1)                       # (chord + [YES] = ORIG PTN + PART since CL29; begun outside: closes)
+        tap(YES)
         key(BANK, 0)
         key(PTN, 0)
-        check(state()["open"] == 0, "chord + [PAGE], the chord begun outside: Clyps closes")
+        check(state()["open"] == 0, "chord + [YES], the chord begun outside: Clyps closes")
         pre = {t: rec(act, t) for t in range(3)}
         p = next(q for q in range(16) if q != act and all(rec(q, t) != pre[t] for t in range(3)))
         print(f"      playing {act}, source slot {p}, snapshots 0x{snapok():04x}", flush=True)
@@ -469,13 +469,13 @@ def main(argv):
         check(rd(syms["cl_hdrst"], 1) == 0 and state()["cur"] == act and state()["sbank"] == bank,
               "the box on your own pattern's slot = the ORIG entry")
         shot("E0_orig")
-        tap(PAGE)
+        tap(rd(0x800065BE, 1))  # CL29: ORIG = the trig of the pattern you are on ([PAGE] does nothing)
         check(state()["open"] == 1 and rec(act, 0) == pre[0], "[PAGE] on an original track: nothing")
         key(p, 1)
         key(p, 0)
         check(rec(act, 0) == rec(p, 0) and oslot(act, 0) == pre[0], f"trig {p + 1}: loaded; the original untouched")
         shot("E1_loaded")
-        tap(PAGE)
+        tap(rd(0x800065BE, 1))  # CL29: ORIG = the trig of the pattern you are on ([PAGE] does nothing)
         check(state()["open"] == 1 and rec(act, 0) == pre[0], "[PAGE]: the load undone, Clyps stays")
         tap(NO)
         ad = BLOB + bank * BANKSTRIDE + act * PATSTRIDE
@@ -485,7 +485,7 @@ def main(argv):
         key(BANK, 1)
         key(BANK, 0)
         key(PTN, 0)
-        tap(PAGE)
+        tap(rd(0x800065BE, 1))  # CL29: ORIG = the trig of the pattern you are on ([PAGE] does nothing)
         check(rec(act, 0) == pre[0] and state()["open"] == 1, "[PAGE] undoes the edit; Clyps stays")
         for t in range(3):
             tap(0x10 + t)
@@ -496,10 +496,10 @@ def main(argv):
         key(BANK, 1)
         tailmsg()
         check(rd(syms["cl_hdrst"], 1) == 2, "chord held: the header shows ORIG PTN + PART")
-        tap(PAGE)
+        tap(YES)
         key(BANK, 0)
         key(PTN, 0)
-        check(all(rec(act, t) == pre[t] for t in range(3)), "chord + [PAGE]: all three back")
+        check(all(rec(act, t) == pre[t] for t in range(3)), "chord + [YES]: all three back")
         check(state()["open"] == 1, "begun inside Clyps: Clyps stays")
         tap(NO)
         closed_ok("[NO]")
@@ -528,7 +528,7 @@ def main(argv):
         key(BANK, 0)
         key(PTN, 0)
         shot("G2_saved")
-        tap(PAGE)
+        tap(rd(0x800065BE, 1))  # CL29: ORIG = the trig of the pattern you are on ([PAGE] does nothing)
         shot("G3_plain")
         tap(NO)
         closed_ok("[NO]")
@@ -692,7 +692,7 @@ def main(argv):
         key(BANK, 1)
         key(BANK, 0)
         key(PTN, 0)
-        tap(PAGE)
+        tap(rd(0x800065BE, 1))  # CL29: ORIG = the trig of the pattern you are on ([PAGE] does nothing)
         check(name(NAMES, nidx(bank, act, 0)) == b"", "[PAGE]: back to the name it had when loaded (none)")
         tap(NO)
         closed_ok("[NO]")
@@ -848,7 +848,7 @@ def main(argv):
                 check(not md, f"... the NVRAM mirror has the whole converted slab ({len(md)} bytes differ {md[:6]})")
             key(PTN, 1)
             key(BANK, 1)
-            tap(PAGE)
+            tap(YES)
             key(BANK, 0)
             key(PTN, 0)
             tap(NO)
@@ -1192,19 +1192,17 @@ def main(argv):
         def ledbit(die):
             b_ = bytes(u.mem_read(0x460BA98C, 17))
             return (b_[die // 8] >> (die % 8)) & 1
-        pled = lambda: rd(syms["cl_pled"], 1)
-        check(pled() == 1 and all(ledbit(0x48 + 2 * k) and not ledbit(0x49 + 2 * k) for k in range(4)),
-              "box on ORIG, the track original: all four page LEDs red")
+        check("cl_pled" not in syms, "the page LEDs are stock's in Clyps (CL29, the user)")
         key(FUNC, 1)
         tap(sq)
         key(FUNC, 0)
-        check(pslice(t, dst) == ssl and state()["cur"] == act and rd(syms["cl_pmoved"], 1) and pled() != 1,
-              f"[FUNC]+trig again: ALL; the arrows stay on ORIG (the user, 2026-11-07); the page LEDs no longer "
-              f"'original' (cl_pled {pled()})")
-        tap(PAGE)
+        check(pslice(t, dst) == ssl and state()["cur"] == act and rd(syms["cl_pmoved"], 1),
+              f"[FUNC]+trig again: ALL; the arrows stay on ORIG (the user, 2026-11-07 / 11-12: no load moves them; "
+              f"cur {state()['cur'] + 1})")
+        tap(rd(0x800065BE, 1))  # CL29: ORIG = the trig of the pattern you are on ([PAGE] does nothing)
         check(rec(act, 0) == oslot(act, 0) and pslice(t, dst) == ssl, "[PAGE] = ORIG SEQ: the sequence only")
         key(FUNC, 1)
-        tap(PAGE)
+        tap(rd(0x800065BE, 1))  # CL29: ORIG = the trig of the pattern you are on ([PAGE] does nothing)
         key(FUNC, 0)
         check(pslice(t, dst) == dsl0, "[FUNC]+[PAGE] = ORIG SEQ+MCH/FX: the slice too")
         key(FUNC, 1)                       # change T1 (FULL) and T2 (sequence), then chord + [PAGE]
@@ -1216,9 +1214,9 @@ def main(argv):
         key(PTN, 1)
         key(BANK, 1)
         tailmsg()
-        check(state()["open"] == 1 and rd(syms["cl_hdrst"], 1) == 2 and pled() == 3,
-              "the chord from outside: Clyps opens showing ORIG PTN + PART; page LEDs flashing red")
-        tap(PAGE)
+        check(state()["open"] == 1 and rd(syms["cl_hdrst"], 1) == 2,
+              "the chord from outside: Clyps opens showing ORIG PTN + PART")
+        tap(YES)
         key(BANK, 0)
         key(PTN, 0)
         opart = bytes(u.mem_read(partbase(bank, act, syms["cl_bss"]), PARTSZ))
@@ -1422,7 +1420,7 @@ def main(argv):
         tap(q)
         key(FUNC, 0)
         mcheck(f"[FUNC]+trig {q + 1} (TRK FULL)")
-        tap(PAGE)
+        tap(rd(0x800065BE, 1))  # CL29: ORIG = the trig of the pattern you are on ([PAGE] does nothing)
         mcheck("[PAGE] (ORIG TRK SEQ)")
         key(CUE := 0x2A, 1)
         tap(0x11)
@@ -1435,7 +1433,7 @@ def main(argv):
         wr.clear()
         key(PTN, 1)
         key(BANK, 1)
-        tap(PAGE)
+        tap(YES)
         key(BANK, 0)
         key(PTN, 0)
         mcheck("[PTN]+[BANK]+[PAGE] (ORIG PTN+PART, 16 tracks + the Part)")
@@ -1487,12 +1485,12 @@ def main(argv):
         q = next(x for x in range(16) if x != act and rec(x, 0) != rec(act, 0))
         tap(q)
         print(f"      after loading slot {q + 1}: T1's name {bytes(u.mem_read(NAMES_ + idx * 10, 10)).hex()}", flush=True)
-        tap(PAGE)
+        tap(rd(0x800065BE, 1))  # CL29: ORIG = the trig of the pattern you are on ([PAGE] does nothing)
         nmo = bytes(u.mem_read(NAMESNAP_ + idx * 10, 10))
         check(bytes(u.mem_read(NAMES_ + idx * 10, 10)) == nmo,
               f"[PAGE] (ORIG): T1's name as loaded ({nmo.hex()}), no garbage")
         key(FUNC, 1)
-        tap(PAGE)
+        tap(rd(0x800065BE, 1))  # CL29: ORIG = the trig of the pattern you are on ([PAGE] does nothing)
         key(FUNC, 0)
         check(bytes(u.mem_read(NAMES_ + idx * 10, 10)) == nmo, "[FUNC]+[PAGE] (ORIG FULL): the same")
         tap(NO)
@@ -1563,7 +1561,8 @@ def main(argv):
                   f"{state()['cur'] + 1}; home 0x{rd(syms['cl_home'], 2):04x}", flush=True)
             check(not e2[0] and e2[1] == e2[2], f"{kind}: T1 equals its original (no edited mark)")
             check(state()["cur"] == q and rd(syms["cl_pmoved"], 1) and rd(syms["cl_home"], 2) == 0xFFFF,
-                  f"... no Clyps source left; the arrows stay on {q + 1} (the user, 2026-11-07; cur {state()['cur'] + 1})")
+                  f"... no Clyps source left; the arrows stay on {q + 1} (the user, 2026-11-07 / 11-12; cur "
+                  f"{state()['cur'] + 1})")
             whole = keys_ is None
             check(nm(0) == b"SAVEDNM" and (nm(1) == (b"" if whole else b"T2NAME")),
                   f"... T1's name as saved ({nm(0)}); T2's {'gone (never saved)' if whole else 'untouched'} ({nm(1)})")
@@ -1606,8 +1605,9 @@ def main(argv):
                   f"{state()['cur'] + 1}; mirror diffs {md}", flush=True)
             check(not e2[0] and e2[1] == e2[2] and e2[3] == e2[4] and slab(act)[:0x8E5C] == oslab(act)[:0x8E5C],
                   "NORMAL pattern: the card's TRK SEQ undoes the conversion (no edited mark, the slab as loaded)")
-            check((state()["cur"] == cur0 if pm0 else state()["cur"] == act) and not md,
-                  f"... the arrows where they were (shown {pm0}) / else the box home; the NVRAM mirror follows the whole slab")
+            check(rd(syms["cl_pmoved"], 1) == pm0 and (state()["cur"] == cur0 if pm0 else True) and not md,
+                  f"... the arrows as they were (shown {pm0}: a card reload neither shows nor moves them); the NVRAM "
+                  f"mirror follows the whole slab")
             tap(NO)
 
     if "V" in a.only:
@@ -1675,15 +1675,35 @@ def main(argv):
         check(state()["cur"] == act, f"T2: the box on T2's sequence (its original: your pattern {act + 1}; cur {state()['cur'] + 1})")
         tap(0x10)
         check(state()["cur"] == q, f"back to T1: its arrows where they were left ({q + 1}); cur {state()['cur'] + 1}")
-        tap(PAGE)
-        check(state()["cur"] == q and pm() == 1, f"[PAGE] (T1's original): the arrows stay on {q + 1} (the user, "
-              f"2026-11-07: no execution hides them; cur {state()['cur'] + 1}, shown {pm()})")
+        tap(rd(0x800065BE, 1))  # CL29: ORIG = the trig of the pattern you are on ([PAGE] does nothing)
+        check(state()["cur"] == q and pm() == 1 and rd(syms["cl_ftgt"], 1) == 1 and rd(syms["cl_flk"], 1),
+              f"the trig of your own pattern (ORIG TRK SEQ): the arrows stay on {q + 1}; the header's ORIG flash "
+              f"(CL32, the user; cur {state()['cur'] + 1}, shown {pm()}, flash {rd(syms['cl_ftgt'], 1)}/"
+              f"{rd(syms['cl_flk'], 1)})")
         tap(0x11)
         tap(0x10)
         check(state()["cur"] == q and pm() == 1, f"... T2, back: T1's arrows still on {q + 1} (cur {state()['cur'] + 1})")
+        ys = lambda: rd(syms["cl_ysup"], 1)
         tap(r)
-        check(state()["cur"] == q and pm() == 1, f"trig {r + 1} (a load): the arrows stay on {q + 1} "
-              f"(cur {state()['cur'] + 1})")
+        repaint()
+        check(state()["cur"] == q and pm() == 1 and led(q) == (1, 1) and led(r) == (1, 0) and not ys(),
+              f"trig {r + 1} (a load of another slot): the arrows stay on {q + 1}, solid yellow; {r + 1} red (cur "
+              f"{state()['cur'] + 1}, shown {pm()}, led q {led(q)} r {led(r)}, ysup {ys()})")
+        tap(YES)
+        repaint()
+        fl = flashes()
+        check(rec(act, 0) == rec(q, 0) and state()["cur"] == q and pm() == 1 and ys() == 1 and led(q) == (1, 0)
+              and (led_tbl_[q] + 1, 3) in fl and not any(led(x) == (1, 1) for x in range(16)),
+              f"[YES] loads {q + 1} (the slot under the arrows): they stay, its solid yellow goes -- red / yellow, "
+              f"the sequence (CL32, the user; cur {state()['cur'] + 1}, ysup {ys()}, led {led(q)}, flashes {fl})")
+        tap(DOWN)
+        repaint()
+        nx = (q + 1) % 16
+        check(state()["cur"] == nx and led(nx) == (1, 1) and not ys(),
+              f"an arrow: the solid yellow back, on {nx + 1} (led {led(nx)}, ysup {ys()})")
+        tap(UP)
+        repaint()
+        check(state()["cur"] == q and led(q) == (1, 1), f"... and back onto {q + 1}: solid yellow there (led {led(q)})")
         key(PTN, 1)
         key(BANK, 1)
         tailmsg()                          # V's keys post no UI tail of their own (posttail off)
@@ -1695,11 +1715,12 @@ def main(argv):
               f"{hid}, cur {state()['cur'] + 1}, shown {pm()})")
         key(PTN, 1)                        # a pattern load leaves them where they were (the user, 2026-11-07)
         key(BANK, 1)
-        tap(PAGE)
+        tap(YES)
         key(BANK, 0)
         key(PTN, 0)
         tailmsg()
         check(state()["cur"] == q and pm() == 1, f"ORIG PTN+PRT: the arrows stay on {q + 1} (cur {state()['cur'] + 1})")
+        q = next(x for x in range(16) if x not in (act, q) and rec(x, 0) != rec(act, 0))   # a slot T1 does not play
         # running: a cue flashes yellow
         rt.run(until=lambda x: x.pc == er.MAIN_SPIN)
         rt.internal_clock()
@@ -1716,6 +1737,14 @@ def main(argv):
         half = max(n for _, n in fl) if fl else 0
         check(cued != 0xFFFF and led(q) == (1, 1) and (led_tbl_[q], half) in fl and (led_tbl_[q] + 1, half) in fl
               and half > 3, f"cued {q + 1}: yellow, both dies flashed {half} ticks ({fl}, cue 0x{cued:04x})")
+        tap(0x11)                          # T2 (CL30: cl_paint read T1's cue for every track -- red / green on T2..)
+        q2 = next(x for x in range(16) if x not in (act, q) and rec(x, 1) != rec(act, 1))
+        key(q2, 1, 0)
+        key(q2, 0, 0)
+        cued2 = rd(syms["cl_cue"] + 2, 2)
+        repaint()
+        check(cued2 != 0xFFFF and led(q2) == (1, 1), f"T2: cued {q2 + 1} painted yellow (led {led(q2)}, cue 0x{cued2:04x})")
+        tap(0x10)
         key(0x27, 1)
         key(0x27, 0)
         rt.run(ms=300)
@@ -1727,7 +1756,7 @@ def main(argv):
         # "pattern change to itself"): every changed track on the next step they share, in phase. Formerly: DIRECT JUMP off:
         # stock's switch (CHAIN AFTER point, d6 hand-off 0x400a45ba, COND_RESET -1); on: DJ's jump (next
         # landing point, its hand-off, no stock real switch). The originals come back at that point only.
-        print("Z: [PTN]+[BANK]+[PAGE] playing: the pattern as loaded, in place (DJ off and on)")
+        print("Z: [PTN]+[BANK]+[YES] playing: the pattern as loaded, in place (DJ off and on)")
         djm = syms.get("DJ_MODE")
         act = rd(0x800065BE, 1)
         sl = BLOB + bank * BANKSTRIDE + act * PATSTRIDE
@@ -1796,11 +1825,11 @@ def main(argv):
                 rd(uc.reg_read(er.eb.UC_M68K_REG_A7) + 4, 4)), begin=0x400A539C, end=0x400A539C)
             key(PTN, 1, 0)
             key(BANK, 1, 0)
-            key(PAGE, 1, 0)
+            key(YES, 1, 0)
             s0 = rd(0x800065B2, 2)
             pend = rd(syms["cl_tog"], 2)
             still = restored() != ([], [])
-            key(PAGE, 0, 0)
+            key(YES, 0, 0)
             key(BANK, 0, 0)
             key(PTN, 0, 0)
             n = 0
@@ -1945,7 +1974,7 @@ def main(argv):
             hk = [u.hook_add(er.eb.UC_HOOK_CODE, on_call, begin=ad_, end=ad_) for ad_ in names]
             key(PTN, 1)
             key(BANK, 1)
-            tap(PAGE)
+            tap(YES)
             c0 = dict(cnt)
             print(f"      after [PAGE]: {c0}, cl_nq {rd(syms['cl_nq'], 1)}, cl_flk {rd(syms['cl_flk'], 1)}", flush=True)
             # 60 UI ticks (1 s): between ticks the system runs 16 ms; a pending landing post goes through
@@ -2090,7 +2119,7 @@ def main(argv):
         check(rec(act, actv) == rec(q, actv) and rec(act, other) == before[other] and rec(act, a0) == before[a0],
               f"trig {q + 1}: the active member T{actv + 1} takes slot {q + 1}; T{other + 1} (no arrows, its "
               f"original) stays; T{a0 + 1} untouched")
-        tap(PAGE)
+        tap(rd(0x800065BE, 1))  # CL29: ORIG = the trig of the pattern you are on ([PAGE] does nothing)
         check(all(rec(act, k) == oslot(act, k) for k in m), "[PAGE]: every member its own original")
         dst = partbase(bank, act)
         osrc = partbase(bank, act, syms["cl_bss"])
@@ -2103,7 +2132,7 @@ def main(argv):
               and pslice(a0, dst) == sl_a0,
               f"[FUNC]+trig: FULL slot {q + 1} into T{actv + 1}; T{other + 1} its original FULL; T{a0 + 1}'s slice untouched")
         key(FUNC, 1)
-        tap(PAGE)
+        tap(rd(0x800065BE, 1))  # CL29: ORIG = the trig of the pattern you are on ([PAGE] does nothing)
         key(FUNC, 0)
         check(all(rec(act, k) == oslot(act, k) and pslice(k, dst) == pslice(k, osrc) for k in m),
               "[FUNC]+[PAGE]: every member its original sequence and slice")
@@ -2128,7 +2157,9 @@ def main(argv):
         tap(YES)
         check(rec(act, other) == rec(q3, other) and rec(act, actv) == rec(q4, actv),
               f"[YES]: T{other + 1} slot {q3 + 1}, T{actv + 1} slot {q4 + 1} -- each its own arrows")
-        tap(PAGE)
+        key(CUE, 1)                        # every member its original: [CUE] + the trig of your pattern (CL29:
+        tap(rd(0x800065BE, 1))             # [PAGE] restored every member; it does nothing now)
+        key(CUE, 0)
         key(CUE, 1)                        # [CUE] held: the arrows move every member's to the same slot
         tap(DOWN)
         cq = state()["cur"]
@@ -2137,14 +2168,18 @@ def main(argv):
         check(all(pre[2 * k] & 0x80 and pre[2 * k + 1] == cq for k in m),
               f"[CUE] held + DOWN: every member's arrows on slot {cq + 1} ({[pre[2 * k:2 * k + 2] for k in m]}; "
               f"the user, 2026-11-06)")
-        tap(PAGE)
+        key(CUE, 1)                        # every member its original: [CUE] + the trig of your pattern (CL29:
+        tap(rd(0x800065BE, 1))             # [PAGE] restored every member; it does nothing now)
+        key(CUE, 0)
         q5 = next(x for x in range(16) if x != act and all(rec(x, k) != rec(act, k) for k in m))
         key(CUE, 1)                        # [CUE] held: a trig loads that slot into every member
         tap(q5)
         key(CUE, 0)
         check(all(rec(act, k) == rec(q5, k) for k in m) and rec(act, a0) == before[a0],
               f"[CUE] held + trig {q5 + 1}: every member slot {q5 + 1}; T{a0 + 1} untouched (the user, 2026-11-06)")
-        tap(PAGE)
+        key(CUE, 1)                        # every member its original: [CUE] + the trig of your pattern (CL29:
+        tap(rd(0x800065BE, 1))             # [PAGE] restored every member; it does nothing now)
+        key(CUE, 0)
         key(CUE, 1)
         tap(MIDIK)
         tap(0x10)
@@ -2161,7 +2196,7 @@ def main(argv):
         tap(q2)
         check(rec(act, aview) == rec(q2, aview) and mrec(act) == morig,
               f"trig {q2 + 1}: the active T{aview + 1} takes it; MIDI 1 (no arrows, its original) stays")
-        tap(PAGE)
+        tap(rd(0x800065BE, 1))  # CL29: ORIG = the trig of the pattern you are on ([PAGE] does nothing)
         key(CUE, 1)
         tap(0x10 + m[1])
         check(rd(0x80000012, 4) == 0 and rd(0x80000000, 1) == m[0],

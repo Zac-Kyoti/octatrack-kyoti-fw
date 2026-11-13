@@ -621,8 +621,8 @@ cl_k_yes:
     tst.l   PTN_HELD
     beq.b   ky_noptn
     tst.l   BANK_HELD
-    bne.w   kp_pat                      | the chord: ORIG PTN+PART, as chord + [PAGE] (the user,
-                                        | 2026-10-30; closes Clyps when the chord opened it)
+    bne.w   kp_pat                      | the chord: ORIG PTN+PART (the user, 2026-10-30; its only chord
+                                        | since CL29; closes Clyps when the chord opened it)
 .ifdef DJ_TOGGLE
     jmp     DJ_TOGGLE                   | [PTN]+[YES]: DIRECT JUMP on / off (a tail call: our
 .endif                                  | (keycode, event) are its arguments, in place)
@@ -904,33 +904,12 @@ tw_e:
 tw_o:
     rts
 
-| [PAGE] (SCALE) 0x1b (the user, 2026-10-29): like the ORIG entry -- this track's original
-| sequence (ORIG SEQ); [FUNC]+[PAGE] = with its machine / FX (ORIG SEQ/MCH/FX; a MIDI track always).
-| With the [PTN]+[BANK] chord held: ORIG PTN/PART, the pattern and its Part as loaded; if that chord
-| opened Clyps (begun outside), Clyps then closes; begun inside, it stays.
+| [PAGE] (SCALE) 0x1b: nothing in Clyps (CL29, the user, 2026-11-12) -- the original is the trig of the pattern
+| you are on (ORIG SEQ; [FUNC] + it: ORIG SEQ/MCH/FX, cl_exec), ORIG PTN/PART the [PTN]+[BANK] chord + [YES]
+| (kp_pat). Until CL28 [PAGE] restored (and with the chord, the whole pattern).
 cl_k_page:
     FWDCHK
-    move.l  8(%sp),%d0
-    cmpi.l  #1,%d0
-    bne.w   kn_out
-    clr.b   cl_flash
-    jsr     cl_hstate
-    btst    #1,%d0
-    bne.b   kp_pat
-    moveq   #0,%d0
-    tst.b   cl_fn
-    beq.b   kp_one
-    move.l  #0x10000,%d0
-kp_one:
-    jsr     cl_restore
-    jsr     cl_targets                  | nothing restored ([CUE] held, no member): nothing to flash
-    tst.l   %d0
-    beq.w   cl_refresh
-    jsr     cl_onorig
-    tst.l   %d0
-    beq.w   cl_refresh                  | the box elsewhere: nothing to flash
-    jsr     cl_flhdr
-    bra.w   cl_refresh
+    rts
 kp_pat:
     jsr     cl_restorepat
     tst.b   cl_chordout
@@ -1338,6 +1317,7 @@ cl_boxhome:
     lsr.l   #8,%d0
     move.b  %d0,cl_sbank
     move.b  %d0,cl_bank
+    clr.b   cl_ysup                     | (no arrows until one moves them -- the user, 2026-11-12)
     rts
 
 cl_playing:
@@ -1779,7 +1759,13 @@ ss_slot:
     move.b  %d2,%d1
     movea.l #BLOB,%a1
     jsr     cl_partin
-    movea.l %a0,%a3                     | a3 = the source Part
+    move.l  %a0,-(%sp)                  | CL29: a slice Clyps overwrote in that Part reads as it was
+    move.l  %d0,-(%sp)
+    move.l  %d4,-(%sp)
+    move.l  %d3,-(%sp)
+    jsr     cl_shsrc
+    lea     16(%sp),%sp
+    movea.l %d0,%a3                     | a3 = the source Part
 ss_live:
     moveq   #0,%d0
     move.b  PLAY_BANK,%d0
@@ -2010,8 +1996,8 @@ ex2_pn:
     move.b  ACT_PAT,%d1
     cmp.l   %d1,%d0
     beq.b   ex2_hdr
-    move.w  %d0,cl_fcode                | the flash on the loaded slot; shown arrows stay where they are,
-    bsr.b   ex2_cur                     | the hidden cursor follows the load (the next arrow starts there)
+    move.w  %d0,cl_fcode                | the flash on the loaded slot (the arrows stay where they are)
+    bsr.b   ex2_cur
     jsr     cl_flstart
     bra.b   ex2_out
 ex2_hdr:
@@ -2019,9 +2005,9 @@ ex2_hdr:
     bsr.b   ex2_cur
     jsr     cl_flhdr
     bra.b   ex2_out
-ex2_cur:
-    tst.b   cl_pmoved
-    bne.b   ec_out
+ex2_cur:                                | shown arrows: no load moves them (the user, 2026-11-07 / 11-12); none
+    tst.b   cl_pmoved                   | shown: the (unseen) cursor follows the load, the next arrow starts
+    bne.b   ec_out                      | there (CL22, as CL28)
     move.b  %d0,%d1
     andi.l  #15,%d1
     move.b  %d1,cl_cur
@@ -2392,6 +2378,19 @@ pl_cvn:
     addq.l  #1,%d1
     cmpi.l  #16,%d1
     bne.b   pl_cv
+    lea     cl_shok,%a0                 | CL29: nor the slices kept from before Clyps (8 B per bank)
+    moveq   #0,%d1
+pl_sh:
+    move.w  cl_ldmask,%d0
+    btst    %d1,%d0
+    beq.b   pl_shn
+    clr.l   (%a0)
+    clr.l   4(%a0)
+pl_shn:
+    addq.l  #8,%a0
+    addq.l  #1,%d1
+    cmpi.l  #16,%d1
+    bne.b   pl_sh
     moveq   #0,%d0
     move.w  cl_ldmask,%d0
     moveq   #0,%d1                      | d1 = banks in it
@@ -2425,6 +2424,7 @@ pl_tp:
     clr.l   (%a0)+
     subq.l  #1,%d0
     bne.b   pl_tp
+    clr.b   cl_ysup
     lea     cl_svalid,%a0               | ... and no saved sequence survives
     clr.l   (%a0)+
     clr.l   (%a0)+
@@ -2971,6 +2971,13 @@ cl_fullone:
     move.l  %d7,%d1
     movea.l #BLOB,%a1
     bsr.w   cl_partin
+    move.l  %a0,-(%sp)                  | CL29: a slice Clyps overwrote in that Part reads as it was
+    move.l  %d0,-(%sp)
+    move.l  %d2,-(%sp)
+    move.l  %d6,-(%sp)
+    jsr     cl_shsrc
+    lea     16(%sp),%sp
+    movea.l %d0,%a0
     bra.b   fo_src
 fo_card:
     tst.b   rq_stok
@@ -3034,7 +3041,7 @@ fo_mc:
     beq.b   fo_copy
     moveq   #1,%d0
     lsl.l   %d6,%d0
-    tst.l   RUNNING                     | playing: with the publish, one step later (cl_spdo)
+    tst.l   RUNNING                     | playing: with the publish, at the new sequence's first trig (cl_spdo)
     bne.b   fo_rsd
     move.b  ENG_RESTART,%d1
     or.l    %d1,%d0
@@ -3064,12 +3071,17 @@ fo_copy:
     moveq   #1,%d0
     move.b  %d0,cl_fsame
 fo_cp:
+    tst.b   cl_fsame
+    bne.b   fo_cp2
+    jsr     cl_shkeep                   | CL29: the slice as it was, before Clyps overwrites it the first time
+fo_cp2:
     move.l  %a3,-(%sp)
     move.l  %a2,-(%sp)
     move.l  %d6,-(%sp)
     tst.b   cl_fsame
     bne.b   fo_cs
     bsr.w   cl_slice
+    jsr     cl_shdrop                   | ... forgotten once it is back
 fo_cs:
     tst.b   cl_pwhole                   | ORIG PTN/PART or the card's pattern: the first landing
     beq.b   fo_norest                   | brings the rest of the Part too (cl_restorepat, cl_togarm)
@@ -3089,7 +3101,8 @@ fo_norest:
 |   playing (the user, 2026-11-09): the slice reaches the engine when the new sequence SOUNDS -- the
 |   scheduler builds a step one step ahead, so a sequence landed at a step start is heard a step later;
 |   TRK_APPLY now put the new volume etc. on the old sound a step early. The Part holds the slice now (the
-|   builder reads it); the engine gets it, and a new machine its restart, one step later (cl_spdo).
+|   builder reads it); the engine gets it, and a new machine its restart, when the new sequence first triggers
+|   its sample (cl_spdo / cl_ftrig, the user 2026-11-12).
     tst.l   RUNNING
     beq.b   fo_now
     lea     cl_spp,%a0
@@ -3098,8 +3111,10 @@ fo_norest:
     move.b  PLAY_BANK,%d0
     move.b  %d0,(%a0,%d6.l)
     lea     cl_spd,%a0
+    move.l  %d6,%d1
+    add.l   %d1,%d1
     moveq   #-1,%d0
-    move.b  %d0,(%a0,%d6.l)             | armed: its rate after the landing sets the count
+    move.w  %d0,(%a0,%d1.l)             | armed: the landing sets the count (cl_ffland; a wrap's: cl_spdo)
     moveq   #1,%d0
     move.b  %d0,cl_spn
     bra.b   fo_pubd
@@ -4089,6 +4104,7 @@ tq_orig:
 
 | cl_pshow: an arrow moved the pre-select box -- it shows until the next execution. Uses d0.
 cl_pshow:
+    clr.b   cl_ysup                     | an arrow: the solid yellow back on their slot (CL32)
     moveq   #1,%d0
     move.b  %d0,cl_pmoved
     tst.b   cl_cuh                      | [CUE] held with a group: every member's arrows to this slot (the
@@ -4113,7 +4129,70 @@ ps3_one:
     jsr     cl_trk                      | [CUE] up: the active track's record only (each member its own)
     jmp     cl_psave
 
-| cl_pre[16] (the user, 2026-11-06): per track, its pre-select arrows: 0x8000 = shown | bank << 8 | slot.
+| cl_ychk (d0 = the tracks that landed; UI task): a track whose pre-select arrows sit on the slot it plays now (the
+| slot under them has landed: cl_playt; an original / saved / card -> the playing pattern's own slot) loses their
+| solid yellow until the next arrow (the user, 2026-11-12) -- the active track's on screen (cl_ysup), another's in
+| its record (0x4000). Keeps d2-d7/a2-a6.
+cl_ychk:
+    lea     -16(%sp),%sp
+    movem.l %d2-%d4/%a2,(%sp)
+    move.l  %d0,%d4                     | d4 = the mask
+    jsr     cl_trk
+    move.l  %d0,%d3                     | d3 = the active track
+    moveq   #0,%d2
+yc_l:
+    btst    %d2,%d4
+    beq.w   yc_n
+    move.l  %d2,%d0
+    jsr     cl_playt                    | d0 = what it plays: bank << 8 | slot, or SRC_* << 8
+    move.l  %d0,%d1
+    lsr.l   #8,%d1
+    cmpi.l  #16,%d1
+    bcs.b   yc_s
+    moveq   #0,%d0
+    move.b  PLAY_BANK,%d0
+    lsl.l   #8,%d0
+    move.b  ACT_PAT,%d0
+yc_s:
+    andi.l  #0x0f0f,%d0
+    cmp.l   %d3,%d2
+    bne.b   yc_m
+    tst.b   cl_pmoved                   | the active track: the screen's arrows
+    beq.b   yc_n
+    moveq   #0,%d1
+    move.b  cl_sbank,%d1
+    lsl.l   #8,%d1
+    move.b  cl_cur,%d1
+    cmp.l   %d1,%d0
+    bne.b   yc_n
+    moveq   #1,%d0
+    move.b  %d0,cl_ysup
+    bra.b   yc_n
+yc_m:
+    lea     cl_pre,%a2                  | another track: its record
+    move.l  %d2,%d1
+    add.l   %d1,%d1
+    adda.l  %d1,%a2
+    moveq   #0,%d1
+    move.w  (%a2),%d1
+    btst    #15,%d1
+    beq.b   yc_n
+    andi.l  #0x0f0f,%d1
+    cmp.l   %d1,%d0
+    bne.b   yc_n
+    move.w  (%a2),%d1
+    ori.l   #0x4000,%d1
+    move.w  %d1,(%a2)
+yc_n:
+    addq.l  #1,%d2
+    cmpi.l  #16,%d2
+    bne.w   yc_l
+    movem.l (%sp),%d2-%d4/%a2
+    lea     16(%sp),%sp
+    rts
+
+| cl_pre[16] (the user, 2026-11-06): per track, its pre-select arrows: 0x8000 = shown | bank << 8 | slot
+| (CL32: 0x4000 = their solid yellow off -- the slot under them has landed; the next arrow puts it back).
 | What the screen shows is the active track's (cl_sbank / cl_cur / cl_pmoved); a track change saves the one
 | left (cl_psave) and loads the new one (cl_pload). A later "execute every track's pre-select" reads them.
 | cl_psave (d0 = track): the screen's arrows -> its record. Uses d0-d1/a0.
@@ -4128,6 +4207,9 @@ cl_psave:
     tst.b   cl_pmoved
     beq.b   pv_w
     ori.l   #0x8000,%d1
+    tst.b   cl_ysup
+    beq.b   pv_w
+    ori.l   #0x4000,%d1                 | ... their solid yellow off (CL32)
 pv_w:
     move.w  %d1,(%a0)
     rts
@@ -4144,7 +4226,13 @@ cl_pload:
     andi.l  #15,%d0
     move.b  %d0,cl_cur
     lsr.l   #8,%d1
-    andi.l  #0x7f,%d1
+    clr.b   cl_ysup                     | 0x4000: their solid yellow off (CL32)
+    btst    #6,%d1
+    beq.b   pl2_y
+    moveq   #1,%d0
+    move.b  %d0,cl_ysup
+pl2_y:
+    andi.l  #0x0f,%d1
     move.b  %d1,cl_sbank
     move.b  %d1,cl_bank
     moveq   #1,%d0
@@ -4153,8 +4241,10 @@ cl_pload:
 pl2_no:
     moveq   #0,%d0
     rts
-| The pre-select arrows stay through every execution (the user, 2026-11-07): only the [PTN]+[BANK] chord hides
-| them while it is held (cl_draw), a track change swaps them (cl_psave / cl_pload), a project load clears them.
+| The pre-select arrows are always shown and no load or reload moves them (the user, 2026-11-07, again
+| 2026-11-12 after CL29-CL31 hid them); the [PTN]+[BANK] chord hides them while it is held (cl_draw), a track change
+| swaps them (cl_psave / cl_pload), a project load clears them. Their solid yellow goes once the slot under them
+| lands on the track (cl_ysup) and comes back with the next arrow (CL32).
 
 | cl_bbeg / cl_bend: a batch of loads (a group, ORIG, ORIG PTN+PART, a temp chord on several tracks):
 | the immediate (stopped) loads inside it note their tracks (cl_batm) and cl_bend serves them in one
@@ -4184,6 +4274,8 @@ be_out:
 | refresh (the undo-restore's own 0x40029b9c) once per audio index (it does t and t + 8); the Part's
 | share once (cl_postpart).
 cl_postmask:
+    move.l  4(%sp),%d0
+    jsr     cl_ychk                     | CL32: the arrows' solid yellow off where the slot under them landed
     lea     -20(%sp),%sp
     movem.l %d2-%d5/%a2,(%sp)
     move.l  24(%sp),%d4                 | d4 = the mask
@@ -5104,32 +5196,56 @@ mp_inf:
     rts
 
     ROMSEC
-| cl_spdo (the sequencer tick, phase D's end; every register saved): a landed slice reaches the engine one
-| step after its landing -- when the new sequence's first step sounds (see cl_fullone). Armed (0xff) at the
-| landing, the count starts here at the track's new rate (set by the landing just before); it runs one per
-| tick; at 0 TRK_APPLY / cl_mapply and a new machine's restart.
+    .section .dram,"ax"                 | (only while a publish is pending; the standalone cave is full)
+| cl_spdo (the sequencer tick, phase D's end; every register saved): a landed slice reaches the engine when the
+| new sequence first TRIGGERS its sample (the user, 2026-11-12: the incoming settings must never be heard on
+| what is being left -- the old sample rings on until the new sequence's first trig). A word count per track,
+| one per tick; at 0 TRK_APPLY / cl_mapply and a new machine's restart. Set at a tick landing by cl_ffland; a
+| wrap landing's (0xffff, armed at the wrap body) here: its new cycle's step 0 sounds a step later, then its
+| first trig (cl_ftrig).
 cl_spdo:
     tst.b   cl_spn
-    beq.b   sd_out
+    beq.w   sd_out
     moveq   #0,%d6
     moveq   #0,%d3                      | d3 = one is still pending
 sd_l:
+    move.l  %d6,%d1
+    add.l   %d1,%d1                     | d1 = word index
     lea     cl_spd,%a0
     moveq   #0,%d0
-    move.b  (%a0,%d6.l),%d0
+    move.w  (%a0,%d1.l),%d0
     beq.b   sd_n
-    cmpi.l  #0xff,%d0
+    cmpi.l  #0xfffe,%d0
+    beq.b   sd_wt
+    cmpi.l  #0xffff,%d0
     bne.b   sd_dec
-    lea     TSCALE_ARR,%a1
+    moveq   #0,%d0
+    jsr     cl_ftrig                    | a sample trig anywhere in the new sequence?
+    tst.l   %d0
+    bmi.b   sd_wnt
+    jsr     cl_spwait                   | yes: wait for the first one that sounds
+    moveq   #1,%d3
+    bra.b   sd_n
+sd_wnt:
+    lea     TSCALE_ARR,%a1              | none: when its new cycle's step 0 sounds, a step of its rate later
+    moveq   #0,%d0
     move.b  (%a1,%d6.l),%d0
     jsr     cl_tps
+    move.l  %d6,%d1
+    add.l   %d1,%d1
     lea     cl_spd,%a0
-    move.b  %d0,(%a0,%d6.l)
+    move.w  %d0,(%a0,%d1.l)
+    moveq   #1,%d3
+    bra.b   sd_n
+sd_wt:
+    jsr     cl_sptrig                   | a sounding trig of the new sequence fires within half a tick?
+    tst.l   %d0
+    bne.b   sd_go
     moveq   #1,%d3
     bra.b   sd_n
 sd_dec:
     subq.l  #1,%d0
-    move.b  %d0,(%a0,%d6.l)
+    move.w  %d0,(%a0,%d1.l)
     beq.b   sd_go
     moveq   #1,%d3
     bra.b   sd_n
@@ -5148,7 +5264,9 @@ sd_out:
 | RELOAD session's parity point, 2026-11-09). Keeps d2-d7.
 cl_sppub:
     lea     cl_spd,%a0
-    clr.b   (%a0,%d6.l)
+    move.l  %d6,%d0
+    add.l   %d0,%d0
+    clr.w   (%a0,%d0.l)
     lea     cl_spb,%a0
     move.b  (%a0,%d6.l),%d0
     cmp.b   PLAY_BANK,%d0
@@ -5210,15 +5328,19 @@ sp_m:
     lea     12(%sp),%sp
     rts
 
+    ROMSEC
+    .section .dram,"ax"                 | (the UI task; the standalone cave is full)
 | cl_spflush (UI task, the transport stopped): every pending slice to the engine at once.
 cl_spflush:
     move.l  %d6,-(%sp)
     moveq   #0,%d6
 sf_l:
     lea     cl_spd,%a0
-    tst.b   (%a0,%d6.l)
+    move.l  %d6,%d0
+    add.l   %d0,%d0
+    tst.w   (%a0,%d0.l)
     beq.b   sf_n
-    bsr.w   cl_sppub
+    jsr     cl_sppub
 sf_n:
     addq.l  #1,%d6
     cmpi.l  #16,%d6
@@ -5226,6 +5348,7 @@ sf_n:
     clr.b   cl_spn
     move.l  (%sp)+,%d6
     rts
+    ROMSEC
 
 | d0 = scale index -> d0 = ticks per step (out-of-range scale reads as 1x, as DIRECT JUMP does)
 cl_tps:
@@ -5387,12 +5510,261 @@ ff_fx:
     move.w  %d0,HOLD_MASK
     jsr     cl_tpurge
     lea     cl_spd,%a0
-    move.b  (%a0,%d6.l),%d0
-    cmpi.b  #-1,%d0
+    move.l  %d6,%d1
+    add.l   %d1,%d1
+    moveq   #0,%d0
+    move.w  (%a0,%d1.l),%d0
+    cmpi.l  #0xffff,%d0
     bne.b   ff_out
-    moveq   #2,%d0                      | armed by the copy: cl_spdo publishes it at the next phase D's end,
-    move.b  %d0,(%a0,%d6.l)             | the boundary tick
+    lea     STEP_ARR,%a1                | armed by the copy: it waits for the new sequence's first trig that
+    moveq   #0,%d0                      | SOUNDS (cl_spdo); a sequence without any sample trig: the boundary
+    move.b  (%a1,%d6.l),%d0             | tick (2)
+    jsr     cl_ftrig
+    tst.l   %d0
+    bmi.b   ff_bnd
+    jsr     cl_spwait
+    bra.b   ff_out
+ff_bnd:
+    moveq   #2,%d0
+    lea     cl_spd,%a0
+    move.l  %d6,%d1
+    add.l   %d1,%d1
+    move.w  %d0,(%a0,%d1.l)
 ff_out:
+    rts
+
+| ---------------------------------------------------------------- CL29: the Parts as they were before Clyps
+| (the user, 2026-11-12: OT DEMO A01 T3, FULL slot 7 (Part 2), then FULL slot 2 (Part 1) -> T3 kept Part 2's
+| sample: A01 and A02 SHARE Part 1, and the first load had written Part 2's T3 into it, so slot 2's "Part 1"
+| was already that). Before a FULL load first overwrites track t's slice of (bank, Part), the slice as it was
+| goes to SHADOW (a Part-shaped buffer per bank and Part) and its bit to cl_shok; a FULL load from any slot
+| whose Part has t's bit reads t's slice from there; the bit goes once the live slice equals it again, and on a
+| load of the bank.
+| cl_shsrc(t, bank, Part, the live Part) -> d0 = the Part to read t's slice from. Keeps d1-d7/a1-a6.
+cl_shsrc:
+    lea     -12(%sp),%sp
+    movem.l %d1-%d2/%a1,(%sp)
+    move.l  16(%sp),%d2                 | t
+    move.l  20(%sp),%d0                 | bank
+    move.l  24(%sp),%d1                 | Part
+    bsr.b   sh_idx
+    move.l  %d0,%d1
+    lsr.l   #3,%d1
+    lea     cl_shok,%a1
+    move.b  (%a1,%d1.l),%d1
+    andi.l  #7,%d0
+    btst    %d0,%d1
+    bne.b   ss2_sh
+    move.l  28(%sp),%d0                 | not kept: the live Part
+    bra.b   ss2_out
+ss2_sh:
+    move.l  %a0,%d0
+ss2_out:
+    movem.l (%sp),%d1-%d2/%a1
+    lea     12(%sp),%sp
+    rts
+sh_idx:                                 | d0 = bank, d1 = Part, d2 = t -> d0 = bit index, a0 = shadow Part
+    lsl.l   #2,%d0
+    add.l   %d1,%d0
+    move.l  %d0,%d1
+    move.l  %d2,-(%sp)
+    move.l  #PARTSZ,%d2
+    muls.l  %d2,%d1
+    move.l  (%sp)+,%d2
+    movea.l #SHADOW,%a0
+    adda.l  %d1,%a0
+    lsl.l   #4,%d0
+    add.l   %d2,%d0
+    rts
+
+| cl_shkeep (d6 = t, a2 = the playing Part, d4 = its index; cl_fullone): not kept yet -> t's slice of it into
+| its shadow, the bit set. Keeps every register.
+cl_shkeep:
+    lea     -20(%sp),%sp
+    movem.l %d0-%d2/%a0-%a1,(%sp)
+    moveq   #0,%d0
+    move.b  PLAY_BANK,%d0
+    move.l  %d4,%d1
+    move.l  %d6,%d2
+    bsr.b   sh_idx
+    move.l  %d0,%d1
+    lsr.l   #3,%d1
+    lea     cl_shok,%a1
+    adda.l  %d1,%a1
+    andi.l  #7,%d0
+    move.b  (%a1),%d1
+    bset    %d0,%d1
+    bne.b   sk2_out                     | kept already: it holds the slice from before the first load
+    move.b  %d1,(%a1)
+    move.l  %a2,-(%sp)
+    move.l  %a0,-(%sp)
+    move.l  %d6,-(%sp)
+    jsr     cl_slice                    | shadow <- live
+    lea     12(%sp),%sp
+sk2_out:
+    movem.l (%sp),%d0-%d2/%a0-%a1
+    lea     20(%sp),%sp
+    rts
+
+| cl_shdrop (d6 = t, a2 = the playing Part, d4 = its index; after the copy): its slice equals the kept one again
+| -> the bit goes. Keeps every register.
+cl_shdrop:
+    lea     -24(%sp),%sp
+    movem.l %d0-%d2/%a0-%a2,(%sp)
+    moveq   #0,%d0
+    move.b  PLAY_BANK,%d0
+    move.l  %d4,%d1
+    move.l  %d6,%d2
+    bsr.b   sh_idx
+    move.l  %d0,%d2                     | d2 = the bit index
+    move.l  %a0,-(%sp)
+    move.l  %a2,-(%sp)
+    move.l  %d6,-(%sp)
+    jsr     cl_slcmp
+    lea     12(%sp),%sp
+    tst.l   %d0
+    bne.b   sd2_out
+    move.l  %d2,%d1
+    lsr.l   #3,%d1
+    lea     cl_shok,%a1
+    adda.l  %d1,%a1
+    andi.l  #7,%d2
+    move.b  (%a1),%d1
+    bclr    %d2,%d1
+    move.b  %d1,(%a1)
+sd2_out:
+    movem.l (%sp),%d0-%d2/%a0-%a2
+    lea     24(%sp),%sp
+    rts
+
+| cl_spwait (d6 = t): t's landed slice waits for the new sequence's first trig that SOUNDS (the user, 2026-11-12:
+| its micro-timing and trig conditions honoured -- a trig whose condition fails is never built): state 0xfffe,
+| and the clock at the landing (nothing pending of t is older: the landing purged it). Keeps d1-d7/a1-a6.
+cl_spwait:
+    move.l  %d1,-(%sp)
+    move.l  %d6,%d1
+    add.l   %d1,%d1
+    lea     cl_spd,%a0
+    move.w  #0xfffe,%d0
+    move.w  %d0,(%a0,%d1.l)
+    move.l  SCLK,%d0
+    cmpi.l  #8,%d6
+    bcs.b   sw_a
+    move.l  MCLK,%d0
+sw_a:
+    add.l   %d1,%d1
+    lea     cl_sptm,%a0
+    move.l  %d0,(%a0,%d1.l)
+    move.l  (%sp)+,%d1
+    rts
+
+| cl_sptrig (d6 = t, waiting) -> d0 = 1 when one of t's pending events is a sounding trig (record bit 2: the
+| builder's 29 / 61 -- a sample / note trig; 25 is a trigless trig, 1 an empty step) of the new sequence (fire
+| time at or after the landing's clock) that fires before half a tick from now: the slice is published at the
+| tick nearest its sound. Audio: the primary table vs the sample clock (a tick 0x285ff0); MIDI: its table vs
+| the MIDI clock (a tick 16800). Keeps d1-d7/a2-a6.
+cl_sptrig:
+    lea     -28(%sp),%sp
+    movem.l %d1-%d5/%a2-%a3,(%sp)
+    move.l  %d6,%d0
+    lsl.l   #2,%d0
+    lea     cl_sptm,%a0
+    move.l  (%a0,%d0.l),%d4             | d4 = the landing's clock
+    move.l  %d6,%d3                     | d3 = t's index in its table
+    cmpi.l  #8,%d6
+    bcc.b   st_m
+    move.l  SCLK,%d2                    | d2 = now
+    move.l  #0x142ff8,%d5               | d5 = half a tick
+    movea.l #0x46c7fe44,%a2             | a2 = slot masks, a0 = fire times, a1 = records
+    movea.l #0x80001904,%a0
+    movea.l #0x46c7e998,%a1
+    bra.b   st_go
+st_m:
+    subq.l  #8,%d3
+    move.l  MCLK,%d2
+    move.l  #8400,%d5
+    movea.l #0x46c77be2,%a2
+    movea.l #0x46c76a26,%a0
+    movea.l #0x46c769c0,%a1
+st_go:
+    moveq   #0,%d1                      | d1 = slot
+st_l:
+    moveq   #0,%d0
+    move.b  (%a2,%d3.l),%d0
+    btst    %d1,%d0
+    beq.b   st_n                        | nothing pending in it
+    move.l  %d1,%d0
+    lsl.l   #3,%d0
+    add.l   %d3,%d0
+    movea.l %d0,%a3                     | a3 = idx = track + slot * 8
+    move.l  (%a1,%d0.l*4),%d0
+    btst    #2,%d0
+    beq.b   st_n                        | not a sounding trig
+    move.l  %a3,%d0
+    move.l  (%a0,%d0.l*4),%d0           | its fire time
+    move.l  %d0,%a3
+    sub.l   %d4,%d0
+    bmi.b   st_n                        | older than the landing: not the new sequence's
+    move.l  %a3,%d0
+    sub.l   %d2,%d0                     | fire time - now
+    cmp.l   %d5,%d0
+    blt.b   st_yes                      | within half a tick (or past: a negative micro)
+st_n:
+    addq.l  #1,%d1
+    cmpi.l  #3,%d1
+    bne.b   st_l
+    moveq   #0,%d0
+    bra.b   st_out
+st_yes:
+    moveq   #1,%d0
+st_out:
+    movem.l (%sp),%d1-%d5/%a2-%a3
+    lea     28(%sp),%sp
+    rts
+
+| cl_ftrig (d6 = t, d0 = a step k): d0 = the steps from k (0 = k itself) to t's first sample trig in the playing
+| pattern, its length wrapping; -1 without any (nothing will ever trigger). The note / sample trig layer is the record's
+| first 8 bytes, a big-endian 64-bit mask, bit s = step s (the builder 0x4009d1e8: steps 0..31 in +4, 32..63 in
+| +0). Keeps d1-d7/a2-a6.
+cl_ftrig:
+    lea     -20(%sp),%sp
+    movem.l %d1-%d4/%a2,(%sp)
+    move.l  %d0,%d4                     | d4 = k
+    moveq   #0,%d0
+    move.b  ACT_PAT,%d0
+    move.l  %d0,-(%sp)
+    move.b  PLAY_BANK,%d0
+    move.l  %d0,-(%sp)
+    move.l  %d6,-(%sp)
+    jsr     cl_srcrec                   | d0 = len, a0 = t's record
+    lea     12(%sp),%sp
+    movea.l %a0,%a2
+    move.l  %d0,%d3                     | d3 = len
+    beq.b   ft_none
+    moveq   #0,%d2                      | d2 = d
+ft_l:
+    move.l  %d4,%d0
+    add.l   %d2,%d0
+    remu.l  %d3,%d1:%d0                 | d1 = (k + d) mod len
+    cmpi.l  #32,%d1
+    bcc.b   ft_hi
+    move.l  4(%a2),%d0
+    bra.b   ft_t
+ft_hi:
+    subi.l  #32,%d1
+    move.l  (%a2),%d0
+ft_t:
+    btst    %d1,%d0
+    bne.b   ft_got
+    addq.l  #1,%d2
+    cmp.l   %d3,%d2
+    bcs.b   ft_l
+ft_none:
+    moveq   #-1,%d2
+ft_got:
+    move.l  %d2,%d0
+    movem.l (%sp),%d1-%d4/%a2
+    lea     20(%sp),%sp
     rts
 
 | cl_tpurge (d6 = t): t's still-pending events (fire time >= now) cancelled the way stock cancels them (record
@@ -5876,8 +6248,7 @@ cl_blink:
 |   (the user, 2026-11-04) every period: the active track's sequence (cl_srccode: red, cl_paint) gets its
 |   green die for 3 LED ticks (LED_FLASH, stock's own call) -- a red / yellow flash, as stock's p-locked
 |   trig; its cued sequence (yellow) goes off for half the period -- flashing yellow. With the [PTN]+[BANK]
-|   chord held (the pattern view), the cued pattern flashes the same way. The four page LEDs do the
-|   3-tick flash when cl_ppaint left them "flash" (cl_pled 3).
+|   chord held (the pattern view), the cued pattern flashes the same way.
     move.l  %d2,-(%sp)
     tst.l   PTN_HELD
     beq.b   bl_box
@@ -5924,6 +6295,8 @@ bl_src2:
     beq.w   bl_page                     | cued again (a FULL re-load): flashing yellow only
     tst.b   cl_pmoved
     beq.b   bl_src3
+    tst.b   cl_ysup
+    bne.b   bl_src3                     | (CL32: their yellow off -- the sequence's red / yellow flash shows)
     moveq   #0,%d1
     move.b  cl_sbank,%d1
     lsl.l   #8,%d1
@@ -5957,16 +6330,6 @@ bl_yel:                                 | d1 = a slot: both its dies off for hal
     addq.l  #8,%sp
     rts
 bl_page:
-    moveq   #0,%d0
-    move.b  cl_pled,%d0
-    cmpi.l  #3,%d0
-    bne.b   bl_out
-    moveq   #0x49,%d2                   | the four page LEDs' green dies
-bl_pk:
-    bsr.w   bl_led
-    addq.l  #2,%d2
-    cmpi.l  #0x51,%d2
-    bne.b   bl_pk
 bl_out:
     move.l  (%sp)+,%d2
     rts
@@ -6310,6 +6673,12 @@ cl_draw:
 cd_r1:
     jsr     cl_onorig
     move.l  %d0,%d4                     | d4 = the box is on the original (your own pattern's slot)
+    tst.b   cl_ftgt                     | CL32: an ORIG load's flash reads ORIG wherever the arrows are
+    beq.b   cd_r1o
+    tst.b   cl_flk
+    beq.b   cd_r1o
+    moveq   #1,%d4
+cd_r1o:
     jsr     cl_ismulti
     tst.l   %d0
     beq.b   cd_r1s
@@ -6736,7 +7105,7 @@ cd_boxed:
     moveq   #1,%d0
     move.l  %d0,RDRAW
     pea     7
-    jsr     LED_PAINT                   | the page LEDs (cl_ppaint) follow the view
+    jsr     LED_PAINT                   | the page LEDs (stock's) follow the view
     clr.l   (%sp)
     jsr     LED_PAINT                   | and the grid (the chord's pattern view comes and goes)
     addq.l  #4,%sp
@@ -7042,9 +7411,9 @@ cl_paint:
     jsr     cl_trk
     add.l   %d0,%d0
     lea     cl_cue,%a0
-    moveq   #0,%d0
-    move.w  (%a0,%d0.l),%d0
-    movea.l %d0,%a2                     | a2 = the active track's cue (0xffff = none)
+    moveq   #0,%d1                      | (CL30: d1 -- a moveq #0,%d0 here read track 1's cue for every track, so
+    move.w  (%a0,%d0.l),%d1             | on T2-T16 a cued slot was painted green under cl_blink's yellow flash: the
+    movea.l %d1,%a2                     | user's red / green) a2 = the active track's cue (0xffff = none)
     jsr     cl_srccode
     move.l  %d0,%d5                     | d5 = its sequence's slot
     moveq   #0,%d6
@@ -7071,6 +7440,8 @@ cp_lp:
     beq.b   cp_yellow                   | cued (cl_blink flashes it)
     tst.b   cl_pmoved
     beq.b   cp_nps
+    tst.b   cl_ysup
+    bne.b   cp_nps                      | (CL32: not once the slot under them has landed)
     cmp.l   %d6,%d0
     beq.b   cp_yellow                   | the pre-select arrows shown: their slot yellow, over the select box
 cp_nps:                                 | and the highlight too; not shown: no yellow (the user, 2026-11-06:
@@ -7195,134 +7566,6 @@ pv_next:
     cmpi.l  #16,%d2
     bne.w   pv_lp
     bra.w   cp_done
-
-| cl_ppaint: LED slot 7, the page LEDs. Stock's step indicator (PAGE_PAINT), except while the box
-| is on ORIG or the [PTN]+[BANK] chord is held (the user, 2026-10-29): then all four LEDs show that
-| original's status in the grid's colours -- red = playing (original, also once ORIG has run),
-| yellow = its restore is cued, red with stock's p-lock yellow flash (cl_blink) = selected, changed.
-cl_ppaint:
-    jsr     cl_pstat
-    move.b  %d0,cl_pled
-    tst.l   %d0
-    beq.w   pp_stock
-    lea     -12(%sp),%sp
-    movem.l %d2-%d4,(%sp)
-    move.l  %d0,%d4                     | d4 = status
-    moveq   #0x48,%d2                   | d2 = LED k's red die (0x48 + 2k), green = + 1
-ppl_k:
-    pea     15
-    move.l  %d2,-(%sp)
-    jsr     LED_BRI
-    addq.l  #1,(%sp)
-    jsr     LED_BRI
-    addq.l  #8,%sp
-    move.l  %d2,-(%sp)
-    jsr     LED_ON
-    addq.l  #1,(%sp)
-    lea     LED_OFF,%a0
-    cmpi.l  #2,%d4
-    bne.b   ppl_g
-    lea     LED_ON,%a0
-ppl_g:
-    jsr     (%a0)
-    addq.l  #4,%sp
-    addq.l  #2,%d2
-    cmpi.l  #0x50,%d2
-    bne.b   ppl_k
-    movem.l (%sp),%d2-%d4
-    lea     12(%sp),%sp
-    rts
-pp_stock:
-    jmp     PAGE_PAINT
-
-| cl_pstat -> d0 = 0 not ours (stock's page LEDs), 1 red: original, 2 yellow: restore cued, 3 flash.
-| The box on ORIG: the active track (its sequence); the chord held: the whole pattern (every track's
-| sequence and the Part).
-cl_pstat:
-    tst.b   cl_open
-    beq.w   pst_no
-    lea     -8(%sp),%sp
-    movem.l %d2-%d3,(%sp)
-    jsr     cl_hstate
-    btst    #1,%d0
-    bne.b   pst_pat
-    jsr     cl_onorig                   | the box on your own pattern's slot (its original)
-    tst.l   %d0
-    beq.w   pst_none
-    jsr     cl_trk
-    move.l  %d0,%d2
-    add.l   %d0,%d0
-    lea     cl_cue,%a0
-    moveq   #0,%d1
-    move.w  (%a0,%d0.l),%d1
-    cmpi.l  #SRC_ORIG<<8,%d1
-    beq.w   pst_y
-    move.l  %d2,%d0
-    jsr     cl_diff
-    tst.l   %d0
-    beq.w   pst_r
-    bra.w   pst_f
-pst_pat:
-    moveq   #0,%d2                      | any track's restore cued: yellow
-pst_c:
-    move.l  %d2,%d0
-    add.l   %d0,%d0
-    lea     cl_cue,%a0
-    moveq   #0,%d1
-    move.w  (%a0,%d0.l),%d1
-    cmpi.l  #SRC_ORIG<<8,%d1
-    beq.b   pst_y
-    addq.l  #1,%d2
-    cmpi.l  #16,%d2
-    bne.b   pst_c
-    moveq   #0,%d2                      | every track original ...
-pst_d:
-    move.l  %d2,%d0
-    jsr     cl_diff
-    tst.l   %d0
-    bne.b   pst_f
-    addq.l  #1,%d2
-    cmpi.l  #16,%d2
-    bne.b   pst_d
-    jsr     cl_origok                   | ... and the Part as loaded
-    tst.l   %d0
-    beq.b   pst_r
-    moveq   #0,%d0
-    move.b  PLAY_BANK,%d0
-    moveq   #0,%d1
-    move.b  ACT_PAT,%d1
-    movea.l #SNAPB,%a1
-    jsr     cl_partin
-    move.l  %a0,%d3
-    moveq   #0,%d0
-    move.b  PLAY_BANK,%d0
-    moveq   #0,%d1
-    move.b  ACT_PAT,%d1
-    movea.l #BLOB,%a1
-    jsr     cl_partin
-    movea.l %d3,%a1
-    move.l  #PARTSZ,%d0
-    jsr     cl_cmpw
-    tst.l   %d0
-    bne.b   pst_f
-pst_r:
-    moveq   #1,%d0
-    bra.b   pst_out
-pst_y:
-    moveq   #2,%d0
-    bra.b   pst_out
-pst_f:
-    moveq   #3,%d0
-    bra.b   pst_out
-pst_none:
-    moveq   #0,%d0
-pst_out:
-    movem.l (%sp),%d2-%d3
-    lea     8(%sp),%sp
-    rts
-pst_no:
-    moveq   #0,%d0
-    rts
 
 | ================================================================ names on the card (worker task)
     .section .dram,"ax"
@@ -7821,9 +8064,7 @@ cl_encs:
 cl_led:     .long 0, cl_ledrec
 cl_ledrec:  .long 0, cl_paint, cl_blink
             .byte CL_BLINK, 0
-            .long 7, cl_ppaint, 0       | the page LEDs: stock's, except on ORIG / with the chord held
-            .byte 0, 0
-            .long -1
+            .long -1                    | (CL29, the user: the page LEDs are stock's in Clyps too)
             .align 2
 
 cl_win:     .long 0
@@ -7855,7 +8096,6 @@ cl_ptpop:   .byte 0                     | stock's [PTN] overlay taken down for t
 cl_hdrst:   .byte 0                     | the header was drawn for this cl_hstate
 cl_bkdef:   .byte 0                     | a [BANK] press outside Clyps was deferred (SELECT BANK on release)
 cl_chordout:.byte 0                     | Clyps was opened by the chord, still held: chord + SCALE closes
-cl_pled:    .byte 0                     | the 4th page LED: 0 stock's, 1 red, 2 yellow, 3 flashing red
 cl_ptfwd:   .byte 0                     | a [PTN] pressed in Clyps: its events go to stock's handler
 cl_bkfwd:   .byte 0                     | a [BANK] pressed in Clyps: stock's gesture, ours to finish
 cl_bkarm:   .byte 0                     | ... BANK_SEL 2 from now on is a pick (it closed Clyps until CL22; unused)
@@ -7875,6 +8115,7 @@ cl_nbuf:    .space NAME_W               | the editor's scratch copy
             .align 2
 cl_snapok:  .short 0                    | bit b: bank b's load snapshot (its originals) is valid
 cl_cvok:    .space 32                   | bit (bank * 16 + pattern): Clyps converted it NORMAL -> PER TRACK (CVSAVE)
+cl_shok:    .space 128                  | bit ((bank * 4 + Part) * 16 + t): t's slice of that Part is kept in SHADOW (CL29)
 cl_ldmask:  .short 0                    | the masked loader in progress: its banks
 cl_ldret:   .long 0                     | ... and its caller's return address
 cl_buf:     .space 32
@@ -7900,6 +8141,7 @@ cl_Tres:    .long 0                     | ... at the last reset of every track's
 cl_fxm:     .short 0                    | tracks whose reload is fixed up on the next tick (cl_fixup)
 cl_fxv:     .space 16                   | ... the value
 cl_pmoved:  .byte 0                     | the pre-select box shows (an arrow since the last execution)
+cl_ysup:    .byte 0                     | ... their solid yellow off: the slot under them landed (CL32)
             .align 2
 cl_pre:     .space 32                   | per track: its pre-select arrows (cl_psave / cl_pload; 0 = none)
             .align 2
@@ -7934,7 +8176,9 @@ cl_oldlnk:  .byte 0                     | ... the link that was sounding
 cl_fsame:   .byte 0                     | cl_fullone: this slice is already the source's (nothing to publish)
 cl_spn:     .byte 0                     | a landed slice waits for its step (cl_spdo)
 cl_spr:     .byte 0                     | ... audio tracks whose new machine restarts with it
-cl_spd:     .space 16                   | per track: ticks until its slice reaches the engine (0xff armed, 0 none)
+cl_spd:     .space 32                   | per track (word): ticks until its slice reaches the engine (0xffff armed at a
+                                        | wrap, 0xfffe waiting for a sounding trig: cl_sptrig; 0 none)
+cl_sptm:    .space 64                   | ... (long) the clock at its landing
 cl_spp:     .space 16                   | ... its Part index
 cl_spb:     .space 16                   | ... and bank (a publish whose Part no longer sounds is dropped)
             .align 2
@@ -8004,5 +8248,6 @@ cl_bss:
     .equ RQ_PART,     RQ_SLAB + PATSTRIDE       | ... and its Part, both parsed from the .strd (+2: the bss is a multiple of 4)
     .equ CVSAVE,      RQ_PART + PARTSZ + 2      | 256 x CV_W: what a Clyps conversion overwrote (cl_cvsave, CL25)
     .equ CV_W,        40
-    .equ CL_BSS_SIZE, 16*BANKSZ + 16*TRAC_A + 4096*NAME_W + 16*NAME_W + 4096*NAME_W + 16*PARTSZ + PATSTRIDE + PARTSZ + 2 + 256*CV_W
+    .equ SHADOW,      CVSAVE + 256*CV_W         | 64 x PARTSZ: the Parts' slices as they were before Clyps (CL29)
+    .equ CL_BSS_SIZE, 16*BANKSZ + 16*TRAC_A + 4096*NAME_W + 16*NAME_W + 4096*NAME_W + 16*PARTSZ + PATSTRIDE + PARTSZ + 2 + 256*CV_W + 64*PARTSZ
     .global CL_BSS_SIZE, cl_bss

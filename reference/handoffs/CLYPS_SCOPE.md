@@ -1411,6 +1411,60 @@ the investigation (NOTES "CL24 timing investigation", harness `tools/diag_clyps_
   the clock-locked conditions too (dj_handoff calls COND_RESET(-1) today).**
 - Standalone image: the landing-time helpers live in the DRAM part (the ROM cave: 18 B left).
 
+### 1.30 A FULL load's sound waits for the incoming sequence's first trig that sounds (the user, 2026-11-12; KYOTI CL28)
+
+- **CL26 (built, flashed):** every landing one tick BEFORE its boundary (reload tps - 2, ahead 2): the old boundary
+  event is purged a whole tick before it is due -- CL25 purged it on the boundary tick, where on the unit the
+  sample clock and the old event's time are a frame apart, so the old step sometimes stayed (the user's "offset for
+  one step, back in phase the next").
+- **The user's rule (CL26 report):** "a user should simply never hear the incoming sequence's track settings applied
+  to what they are changing away from" -- repro: OT DEMO, DJ on, A01 playing, FULL load of A05 T1 two steps before
+  A01's end: A05's T1 lands on its own (empty) step 16, and its settings were published there, under A01's ringing
+  sample. **CL27 (never flashed):** published on the boundary of the first step with a sample trig (the record's
+  first 8 bytes: a big-endian 64-bit mask, bit s = step s, read from the builder 0x4009d1e8). **CL28 (the user: wait
+  for a trig that actually sounds):** the slice -- and a new machine's voice restart -- waits (`cl_spd` = 0xfffe,
+  `cl_spwait`) until the scheduler has stored a SOUNDING event for the track (record bit 2: the builder's 29 / 61 =
+  sample / note trig; 25 = trigless, 1 = empty; a trig whose condition fails is never built) whose fire time
+  (micro-timing included) is at or after the landing, and publishes on the tick nearest its sound (fire time - clock <
+  half a tick, `cl_sptrig`; audio: 0x80001904 vs 0x4610757c, a tick 0x285ff0; MIDI: 0x46c76a26 vs 0x46107564, a tick
+  16800). A sequence without any sample trig publishes on the landing's boundary; a stop publishes everything.
+  Gate: `tools/check_clyps_full.py` (TRK_APPLY on the tick the incoming sequence's first trig sounds).
+- **Clicks (the user, CL26):** no worse than stock Part changes or stock pattern changes with CHAIN AFTER 2/16: left.
+- **Standing rule (the user, 2026-11-12):** whatever is approved working for Clyps is applied, as applicable, to
+  RELOAD_FROM_PROJECT and DIRECT JUMP in later sessions -- so far: the landing a tick before the boundary (ahead 2,
+  purge), the trig-condition rule (§1.29 C), the FULL slice / restart at the first sounding trig.
+
+### 1.31 Shared Parts, no [PAGE], arrows after a slot load (the user, 2026-11-12; KYOTI CL29)
+
+- **Shared Parts:** patterns of a bank share its four Parts, so a FULL load writing slot 7's T3 slice (Part 2) into
+  A01's Part 1 also changed what slot 2 (A02, Part 1) "is" -- a FULL load of slot 2 then found nothing to change. Now
+  the first time a FULL load overwrites track t's slice of (bank, Part), the slice as it was goes to SHADOW (a
+  Part-shaped buffer per bank and Part; `cl_shkeep`, bit in `cl_shok`); a FULL load from any slot whose Part has
+  t's bit reads t's slice from there (`cl_shsrc`, in cl_fullone and cl_slsame); the bit goes once the live slice
+  equals it again (`cl_shdrop`) and on a load of the bank. Cost: 16 x 4 x PARTSZ = 404,608 B of the reserve.
+- **[PAGE]:** nothing in Clyps (`cl_k_page` = FWDCHK only): ORIG SEQ is the trig of the pattern you are on (cl_exec:
+  your own slot = SRC_ORIG; [FUNC] = SEQ/MCH/FX), ORIG PTN+PRT is [PTN]+[BANK]+[YES]. The page LEDs are stock's
+  (the LED layer's slot-7 record, `cl_ppaint` / `cl_pstat` / `cl_pled`, removed).
+- **Arrows:** a slot load (trig or [YES], SEQ or FULL, a group's members too) hides the target's pre-select arrows
+  and moves them, unseen, to the slot loaded (cl_exec ex2_ld: cl_pmoved / cl_pre's shown bit; the cursor follows,
+  ex2_cur / cl_boxhome); the loaded slot keeps its red / yellow flash; the next arrow shows them again from there.
+  Restores, temp and card reloads leave them (§1.26's persistence otherwise).
+
+### 1.32 Arrows stay; their solid yellow; the cued LED on every track (the user, 2026-11-12; KYOTI CL32)
+
+- CL29-CL31 hid the arrows after loads (and moved them); the user, 2026-11-12, reversed it: **the pre-select arrows
+  are always on screen once moved, and no load or reload moves or hides them** (§1.26 again; ex2_cur no longer moves
+  the cursor). A track that has none yet shows none (cl_boxhome).
+- **Their solid yellow** goes once the slot under them lands on the track (`cl_ychk` from cl_postmask: what the
+  track plays now = the arrows' slot -> `cl_ysup`, per track 0x4000 in cl_pre) and comes back with the next arrow
+  (cl_pshow); meanwhile that slot shows the sequence's red / yellow flash (cl_paint / cl_blink).
+- **ORIG via the trig** with the arrows elsewhere: the header reads ORIG ... during the load flash (cl_ftgt + cl_flk).
+- **cl_paint read T1's cue for every track** (`moveq #0,%d0` over the index): a cued slot on T2..T16 was painted green
+  under cl_blink's yellow flash (red / green). Masked until CL29 by the arrows' solid yellow. Fixed; an index-clobber
+  scan of the sources finds no other.
+- Timing is frozen at CL29 (the user): CL32's tick-level landings / builds / slice publishes are compared with CL29's
+  runs (out/clyps/lock/timecmp.py).
+
 ### 1.27 Combinations that must never ship (the user, 2026-11-07)
 
 - Clyps + RELOAD_FROM_PROJECT never; Clyps + DIRECT_JUMP_KYOTI only as KYOTI's integrated pair (SUPERSEDE).

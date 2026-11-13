@@ -38411,6 +38411,28 @@ Now 936 / 932 (<= 945): the pair fits, SC's donor becomes PLATE REV.
   the boundary, ahead 2); FULL timeline (diag_clyps_lock logs TRK_APPLY / Part applies / PICKUP / restarts):
   TRK_APPLY on the same tick as the new step's sound in F1-F3 (DJ on 1x / mixed scales, DJ off), nothing earlier.
   VERSTR holds 10 chars ("KYOTI CL25b" refused).
+- **KYOTI CL27-CL32** (2026-11-12 / 13; CL26, CL28, CL29 FLASHED -- CL29 "timing correct", the user froze timing
+  there; CL27 / CL30 / CL31 never flashed; CL32 NOT flashed, syx a599c93a...). CL27: a FULL slice published on the first
+  trig STEP's boundary (cl_ftrig; the user's repro: OT DEMO, DJ on, A01, [FUNC]+trig 5 two steps before the end -- A05 T1
+  lands on its empty step 16 and its settings sat on A01's ringing sample). CL28 (the user: wait for a trig that SOUNDS):
+  cl_spwait / cl_sptrig -- the slice and a new machine's restart wait for a pending event of the track with record bit 2
+  (29 / 61 sample trig; 25 trigless, 1 empty) at or after the landing, published where fire - now < half a tick; no
+  sample trig in the sequence: the boundary tick; cl_spd widened to words. CL29: shared Parts -- A01 and A02 share Part
+  1, so FULL slot 7 then FULL slot 2 on T3 kept Part 2's sample (slot 2's Part already held it): SHADOW (64 x PARTSZ,
+  +404,608 B reserve) keeps a track's slice of (bank, Part) from before Clyps' first overwrite (cl_shkeep / cl_shsrc /
+  cl_shdrop, cl_shok); [PAGE] does nothing in Clyps (ORIG = the trig of your own pattern, ORIG PTN+PRT = chord + [YES]);
+  page LEDs stock's (slot-7 LED record, cl_ppaint / cl_pstat / cl_pled removed). CL30-CL31: arrow experiments, reversed by
+  the user. CL32: the arrows always shown once moved, no load or reload moves or hides them (CL22 again; with none shown,
+  the unseen cursor follows a load as before); their solid yellow goes once the slot under them lands (cl_ychk from
+  cl_postmask, cl_ysup / cl_pre 0x4000) and comes back with the next arrow; an ORIG load's header flash reads ORIG
+  wherever the arrows are; cl_paint read T1's cue for every track (`moveq #0,%d0` over the index: T2..T16 cued slots red /
+  green on the unit, masked before by the arrows' yellow) -- fixed, index-clobber scan finds no other. Gates on CL32:
+  diag_clyps_ui full 120, T 21, F+Q 27, L 17, J 8, X+O+W 15, V+Z+I 39, H 3, M+U (JAM2; a gate fix: group restores =
+  [CUE] + your trig); diag_clyps_quant 39 (DJ on) + DJ off; lock 14/14 --rules, check_clyps_full PASS (incl. F4 = the
+  user's repro), P1 / P2 (the shared-Part repro) Part 1 = as loaded; out/clyps/lock/timecmp.py: landings, every build and
+  every TRK_APPLY identical to CL29 in all 18 runs. Card track reloads are inside Clyps only in KYOTI-with-Clyps (the
+  2026-10-30 design; the user: fine). Next: RELOAD_FROM_PROJECT and DIRECT JUMP ports (reference/handoffs/
+  RELOAD_CLYPS_PORT.md, DJ_CLYPS_PORT.md), agents in their own worktrees.
 
 ## 2026-11-10 (`reload-slice`) — RELOAD_FROM_PROJECT beside FREE LOOP: octabam HOOKS bridge `ui_tick` (PR sambanks/octabam#1083)
 

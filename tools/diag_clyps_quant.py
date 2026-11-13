@@ -16,8 +16,9 @@ that loads on the audio side (OT DEMO), from pattern 1:
      (master step = (t0 / tps) mod len + 1), the length back. PER TRACK: the master length edited, the pattern
      reloaded: the same re-phase.
   G  [PTN] + [TRACK 1] then [TRACK 2]: both land. H  SEQ then FULL of T1: FULL wins (the slice back).
-  P  [PAGE] (ORIG SEQ, T1 edited): in place -- at T1's next step, in the tick, not at the CHAIN AFTER point.
-  O  [PTN] + [BANK] + [PAGE] (ORIG PTN+PRT, T1 T3 + the Part edited): together, in the tick; as loaded; no
+  P  the trig of the pattern you are on (ORIG SEQ, T1 edited; [PAGE] until CL28): in place -- at T1's next
+     step, in the tick, not at the CHAIN AFTER point.
+  O  [PTN] + [BANK] + [YES] (ORIG PTN+PRT; + [PAGE] until CL28, T1 T3 + the Part edited): together, in the tick; as loaded; no
      stock pattern switch.
   M  a group T1 T2, T1's arrows on its own slot (a restore), T2's on another (a load): [YES] lands both at the
      cued point (CHAIN AFTER 4 steps), not T1 earlier.
@@ -211,6 +212,13 @@ def main(argv):
         return e, t0, old_ok
 
     pending = lambda: rd(syms["cl_nq"], 1) == 0 and rd(syms["cl_tog"], 2) == 0
+
+    def ftrig(t, k):
+        # CL26: steps from k to t's first sample trig (the record's first 8 bytes, big-endian, bit s = step s)
+        r = rec(t)
+        m_ = int.from_bytes(r[0:8], "big")
+        ln_ = r[0x50] if rd(slab_ad + 0x8E55, 1) else rd(slab_ad + 0x8E53, 1)
+        return next((dd for dd in range(ln_) if m_ >> ((k + dd) % ln_) & 1), 0)
     pb = lambda: bb + PART_OFF + link() * PARTSZ
 
     ring = None
@@ -327,10 +335,10 @@ def main(argv):
             # so in that tick (CL23/24: one step of T1 after, the look-ahead)
             ap = [x for x in events if x["where"] == "apply" and x["t"] == 0]
             ta = [(x["ms"] - 1) * tps(x["sc"]) + x["tc"] for x in ap]
-            want = t0
-            print(f"      C: T1 published at t' {[x + 1 for x in ta]} (the boundary {t0})", flush=True)
+            want = t0 + ftrig(0, out["step"][0]) * tps(out["tscale"][0]) if out else None
+            print(f"      C: T1 published at t' {[x + 1 for x in ta]} (the boundary {t0}, its first trig {want})", flush=True)
             check(out is not None and [x + 1 for x in ta[:1]] == [want],
-                  "C: T1's slice published on the boundary tick (its new step sounds there)")
+                  "C: T1's slice published on the boundary of the new sequence's first trig")
         check(same_rec(rec(0), card_slab[:TRAC_A]) and bytes(u.mem_read(p_ + 0x2A, 30)) == card_part[0x2A:0x2A + 30],
               "C: T1's record and slice from the card")
         check(bytes(u.mem_read(p_ + 0x2A + 30, 30)) == e2, "C: T2's slice untouched")
@@ -354,10 +362,11 @@ def main(argv):
             check(e["where"] == "tick" and old_ok and e["one_tick"],
                   f"D: one tick, a step start of every track ({e['n']} tracks)")
             ap = [x for x in events if x["where"] == "apply"]
-            late = all((x["ms"] - 1) * tps(x["sc"]) + x["tc"] + 1 == t0 for x in ap) if out else False  # the boundary tick
+            late = all((x["ms"] - 1) * tps(x["sc"]) + x["tc"] + 1
+                       == t0 + ftrig(x["t"], out["step"][x["t"]]) * tps(out["tscale"][x["t"]]) for x in ap) if out else False
             print(f"      D: slices published {[(x['t'], x['ms'], x['tc']) for x in ap]}", flush=True)
             check(out is not None and 1 <= len(ap) <= 8 and late,          # CL25: in the tick, at its end
-                  f"D: the changed tracks' slices published on the boundary tick ({len(ap)})")
+                  f"D: the changed tracks' slices published on their first trig's boundary ({len(ap)})")
         check(same_slab(slab(), card_slab) and part() == card_part, "D: the whole pattern and its Part from the card")
         check(rd(ACT, 1) == act and stock_sw["n"] == sw0, "D: still on the pattern, no stock switch")
         check(pending(), "D: nothing left pending")
@@ -457,9 +466,9 @@ def main(argv):
               "H: T1's record and its slice from the card (FULL won)")
 
     if "P" in a.only:
-        print("P: [PAGE] = ORIG SEQ of T1, in place", flush=True)
+        print("P: the trig of the pattern you are on = ORIG SEQ of T1, in place", flush=True)
         flip(slab_ad, 0x81)
-        gesture([(PAGE, 1), (PAGE, 0)])
+        gesture([(act, 1), (act, 0)])
         res = landing("P", [0])
         if res:
             e, t0, old_ok = res
@@ -467,13 +476,13 @@ def main(argv):
         check(same_rec(rec(0), orig_slab[:TRAC_A]), "P: T1 as loaded")
 
     if "O" in a.only:
-        print("O: [PTN] + [BANK] + [PAGE] = ORIG PTN+PRT, together, in place", flush=True)
+        print("O: [PTN] + [BANK] + [YES] = ORIG PTN+PRT, together, in place", flush=True)
         p_ = pb()
         flip(slab_ad, 0x81)
         flip(slab_ad + 2 * TRAC_A, 0x81)
         flip(p_ + 0x2A, 0x55)
         sw0 = stock_sw["n"]
-        gesture([(PTN, 1), (BANK, 1), (PAGE, 1), (PAGE, 0), (BANK, 0), (PTN, 0)])
+        gesture([(PTN, 1), (BANK, 1), (YES, 1), (YES, 0), (BANK, 0), (PTN, 0)])
         res = landing("O", list(range(16)))
         if res:
             e, t0, old_ok = res
