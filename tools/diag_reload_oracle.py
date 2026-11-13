@@ -12,8 +12,13 @@ pattern would be had it played since the master cycle began. The oracle is that 
 
 Each run writes a per-tick log (phase D's entry 0x400a1f72: the master step and tick, every track's
 STEP / STEP-1 / TICKS / scale cache) and every step the scheduler builds (stock's step handlers
-0x4009d1e8 / 0x4009cf4c: track, step). --compare REF CAND: from the candidate's landing tick on, both
-must match tick for tick.
+0x4009d1e8 / 0x4009cf4c: track, step). --compare REF CAND: from the tick after the candidate's landing on,
+both must match tick for tick -- every counter and every step built. On the landing tick itself (2026-11-13,
+Clyps' rule: RELOAD_CLYPS_PORT.md 1) the candidate lands the tick BEFORE the boundary and builds the boundary's
+step there again, from the reloaded record (ahead 2, its old build purged), where the never-switched reference
+built it a step earlier (ahead tps): each extra step the candidate builds on the landing tick must be the step
+the reference built last for that track, i.e. the one sounding at the boundary (tools/check_reload_lock.py
+--rules checks the ahead and the purge).
 
   python3 tools/diag_reload_oracle.py --role reference --out out/oracle_ref.json --image IMG --elf ELF \
       --project DIR --name NAME [--saved 12] [--ticks 200]
@@ -46,6 +51,13 @@ def compare(ref_p, cand_p):
     last = min(max(rs), max(cs))
     print(f"landed at tick {L} (master step {cand['landed_ms']}); comparing ticks {L + 1}..{last}")
     bad = []
+    extra, missing = cb.get(L, set()) - rb.get(L, set()), rb.get(L, set()) - cb.get(L, set())
+    last_ref = lambda trk: max((t_, st_) for t_, k_, st_ in ref["built"] if k_ == trk and t_ <= L)[1]
+    wrong = [(trk, step, last_ref(trk)) for trk, step in sorted(extra) if last_ref(trk) != step]
+    print(f"  the landing tick rebuilds {sorted(extra)} (the reference's sounding steps: "
+          f"{'all' if not wrong else wrong}); reference-only builds there: {sorted(missing)}")
+    if wrong or missing:
+        bad.append((L, "landing builds", sorted(extra), sorted(missing)))
     for t in range(L + 1, last + 1):
         a, b = rs.get(t), cs.get(t)
         if a is None or b is None:
@@ -102,9 +114,16 @@ def main(argv):
     u = rt.uc
     rd = lambda ad, n: int.from_bytes(bytes(u.mem_read(ad, n)), "big")
 
-    def key(code, ev):
+    def main_call(addr, *args):
+        # emu_rtos's call_as_main leaves the arguments on main's stack: restore main's SP (Clyps' gates)
         rt.run(until=lambda x: x.pc == er.MAIN_SPIN)
-        rt.call_as_main(SET_KEY, args=(code, ev), budget=600000)
+        sp0 = u.reg_read(er.eb.UC_M68K_REG_A7)
+        r_ = rt.call_as_main(addr, args=args, budget=600000)
+        u.reg_write(er.eb.UC_M68K_REG_A7, sp0)
+        return r_
+
+    def key(code, ev):
+        main_call(SET_KEY, code, ev)
 
     if rd(0x80000012, 4):
         key(0x35, 1); key(0x35, 0)
@@ -113,8 +132,7 @@ def main(argv):
     u.mem_write(sl + 0x8E55, b"\x00")                       # NORMAL
     u.mem_write(sl + 0x8E53, bytes([a.saved]))
     if a.role == "candidate":
-        rt.run(until=lambda x: x.pc == er.MAIN_SPIN)
-        rt.call_as_main(SAVE_PROJECT, budget=600000)
+        main_call(SAVE_PROJECT)
         rt.run(ms=8000)                                     # the card: NORMAL, --saved steps
         u.mem_write(sl + 0x8E53, bytes([a.edit]))           # live: --edit steps
     print(f"{a.role}: bank {bank + 1} pattern {act + 1}, NORMAL, length {rd(sl + 0x8E53, 1)}, "
@@ -156,8 +174,7 @@ def main(argv):
             key(PTN, 1); key(0x10, 1); key(0x10, 0); key(PTN, 0)
         t0 = st["t"]
         rt.run(ms=17)
-        rt.run(until=lambda x: x.pc == er.MAIN_SPIN)
-        rt.call_as_main(0x40056C28, budget=600000)          # the UI tick (route A runs none)
+        main_call(0x40056C28)                               # the UI tick (route A runs none)
         if st["t"] == t0 and rt.sample > 1e12:
             break
     print(f"  {st['t']} ticks; landed at {st['landed']}; length now {rd(sl + 0x8E53, 1)}", flush=True)

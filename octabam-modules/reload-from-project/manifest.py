@@ -60,9 +60,19 @@ start of the track -- old and new rate, phase-continuous counters -- or, reloadi
 you are on, at the next step all 16 tracks share. A reload that changes the pattern's own length /
 scale re-phases the master and every track to where the saved pattern would be since the master
 cycle began (an oracle run that played the saved pattern from the start matches it tick for
-tick). The wrap body (0x400a43a0) lands whatever is pending at a master wrap. The slice and the
-Part go to the engine in the same tick, per track (stock's whole-Part apply posts a kernel
-message, so it is left to the UI half). The UI task's 1/60 s tick (0x40056c28) runs the UI half
+tick). The wrap body (0x400a43a0) lands whatever is pending at a master wrap. The slice goes into
+the Part at the landing and reaches the engine per track, when the reloaded sequence first
+triggers a sample that sounds (stock's whole-Part apply posts a kernel message, so it is left to
+the UI half).
+
+CLYPS' LANDING RULES (13 Nov 2026, the author's Clyps CL25-CL32). A track lands one tick BEFORE
+its boundary, as stock's landing and DIRECT JUMP land a track: counters set for the boundary,
+reload tps - 2 and the first-fire bit (phase E builds the boundary's step from the reloaded record,
+ahead 2), the old sequence's pending events for the track cancelled, the reload fixed up the next
+tick -- so the boundary already plays the reloaded step. A whole pattern lands the tracks whose
+sequence or slice changes. The reloaded track's trig-condition pass counter is set to what it
+would be had it played there since the pattern's conditions last started again; COND_RESET's
+entry (0x400a539c, a twelfth detour) notes when they do. The UI task's 1/60 s tick (0x40056c28) runs the UI half
 after the landing, and lands a reload still pending when the transport stops. Stopped, or the
 target not playing: at once. A pattern you are NOT on is a pattern change: it lands offline and
 stock's cue takes the OT there (CHAIN AFTER, or DIRECT JUMP when on). Several chords before a
@@ -93,8 +103,8 @@ from remix.schema import Detour, Kind, Linked, Module
 
 _HERE = os.path.relpath(os.path.dirname(os.path.realpath(__file__)))
 
-# ---- the eleven hook sites, all `jmp` (the unit replays and rejoins stock) --------
-# Three are EIGHT-byte spans: the jmp is six, so one nop follows, or the displaced
+# ---- the twelve hook sites, all `jmp` (the unit replays and rejoins stock) --------
+# Four are EIGHT-byte spans: the jmp is six, so one nop follows, or the displaced
 # span would be left half-rewritten.
 HOOKS = (
     # (site, stock bytes, symbol, span, what)
@@ -109,15 +119,16 @@ HOOKS = (
     (0x400a2530, "4ab946c8028a",     "rl_tick",       6, "phase D of the sequencer tick: the landing"),
     (0x400a43a0, "201274018082",     "rl_wrap",       6, "the wrap body: a landing at a master wrap"),
     (0x40056c28, "2039460d1e6c",     "rl_uitick",     6, "the UI task's 1/60 s tick: the UI half"),
+    (0x400a539c, "4feffff448d70c04", "rl_creset",     8, "COND_RESET: the trig conditions' restart tick"),
 )
 
 # ---- the author's oracle -------------------------------------------------------
 # patch_reload3.s, m68k-elf-as -mcpu=5407 or 54455 (identical bytes; RL_DONE is the
 # source's default), linked at 0x400d6500 -- the address the standalone image uses:
-# 50044 bytes: ~6.7 KB of code + the 43 KB staging buffers of the quantized landing (2100 before the
-# 8 Nov 2026 Part-slice, pattern and quantized reloads). octabam re-links it there on every build
+# 51600 bytes: ~8.2 KB of code + the 43 KB staging buffers of the quantized landing (2100 before the
+# 8 Nov 2026 Part-slice, pattern and quantized reloads; 50044 before Clyps' landing rules, 13 Nov 2026). octabam re-links it there on every build
 # and compares.
-REFERENCE = (0x400d6500, "62953b358f29a7f933c3d04b3c28e7af00fd15edb14ab9082c4d4eed0c64d981")
+REFERENCE = (0x400d6500, "5e04de536e1607d03b1aeb9e2c90b6d9718feba8219f18a0b0e993f043a6365b")
 
 MODULE = Module(
     name="reload-from-project",

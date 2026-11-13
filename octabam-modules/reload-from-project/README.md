@@ -21,7 +21,7 @@ panel PTN held gate that path toasted `TRK SEQ RELOADED` (16 Oct 2026, MKII).
 It reloads the pattern that is *playing*, on an audio or a MIDI track, and never
 restarts the sequence or the internal metronome. While playing, a reload lands **on the
 next step** of the track, in phase (a whole pattern: on the next step all its tracks
-share); stopped, at once. A stock-style toast confirms when the reload has **landed** —
+share) -- that step already plays the reloaded sequence; stopped, at once. A stock-style toast confirms when the reload has **landed** —
 and says so if the trigs did not.
 
 Deferred by the author's own scoping: whole-bank reload.
@@ -50,8 +50,9 @@ Standalone image: `tools/build_reload_from_project.py` → `RELOAD_FROM_PROJECT`
 | `0x400a2530` | `rl_tick` | phase D of the sequencer tick: the quantized landing |
 | `0x400a43a0` | `rl_wrap` | the wrap body: a landing at a master wrap |
 | `0x40056c28` | `rl_uitick` | the UI task's 1/60 s tick: the UI half after a landing |
+| `0x400a539c` | `rl_creset` | COND_RESET's entry: notes when the trig conditions start again (8-byte span) |
 
-All eleven are `jmp`. Three displace eight bytes, so the six-byte jump is followed by a
+All twelve are `jmp`. Four displace eight bytes, so the six-byte jump is followed by a
 nop — otherwise the span would be left half-rewritten.
 
 The worker is **stock's own**; this module hooks it rather than reimplementing it.
@@ -91,9 +92,25 @@ own length or scale re-phases the master and every track to where the saved patt
 since the master cycle began; an emulator oracle (a run that played the saved pattern from the
 start) matches it tick for tick. The wrap body (`0x400a43a0`) lands anything pending at a master
 wrap. The slice goes into the Part in that tick, but reaches the engine (the per-track apply
-`0x40001f18`, the engine restart) one of the track's new steps later, when its first new step
-sounds -- the scheduler builds a step ahead -- and only if its bank and Part still play; only
-the tracks whose slice changed are applied. The UI task's 1/60 s
+`0x40001f18`, the engine restart) only when the reloaded sequence first triggers a sample that
+sounds, and only if its bank and Part still play; only the tracks whose slice changed are
+applied.
+
+**CLYPS' landing rules** (13 Nov 2026; the author's Clyps CL25–CL32, whose timing he approved on
+hardware). The scheduler builds each step a step ahead, so a landing on the tick that starts a
+step was heard a step late. A track now lands **one tick before** the boundary, as stock's own
+landing and DIRECT JUMP land a track: its counters are set for that boundary, its reload and the
+first-fire bit make phase E build the boundary's step from the reloaded record at once (ahead 2,
+firing exactly where the old step would have), the old sequence's still-pending events for the
+track are cancelled a whole tick before they are due, and the next tick its reload goes back to a
+never-switched track's value. Only when that boundary is not inside the master cycle's last step
+and stock has no landing of its own pending for the track. A whole pattern lands the tracks whose
+sequence or slice changes; the others keep their built steps. A change of the pattern's rate puts
+the master where stock's landing does. A Part slice reaches the engine on the tick the reloaded
+sequence's first **sounding** trig fires (micro-timing and trig conditions honoured; without any
+sample trig, on the boundary). The reloaded track's trig-condition pass counter becomes what it
+would be had it played there since the pattern's conditions last started again (COND_RESET's
+entry, `0x400a539c`, notes when). The UI task's 1/60 s
 tick (`0x40056c28`) then runs the UI half, and lands a reload still pending when the transport
 stops. Stopped, or the target not playing: at once. A pattern you are *not* on is a pattern
 change: stock's cue, so CHAIN AFTER (or DIRECT JUMP when it is on) decides when. Several chords

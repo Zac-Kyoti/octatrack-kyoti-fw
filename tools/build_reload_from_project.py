@@ -215,7 +215,9 @@ PATCHES = [
       # 2026-11-08 (3): the landing -- phase D of the tick, the wrap body, the UI task's 1/60 s tick
       (0x400a2530, "rl_tick", "4ab946c8028a", 6, "jmp"),
       (0x400a43a0, "rl_wrap", "201274018082", 6, "jmp"),
-      (0x40056c28, "rl_uitick", "2039460d1e6c", 6, "jmp")]),
+      (0x40056c28, "rl_uitick", "2039460d1e6c", 6, "jmp"),
+      # 2026-11-13 (Clyps' trig-condition rule): COND_RESET's entry -- a reset of every track notes its tick
+      (0x400a539c, "rl_creset", "4feffff448d70c04", 8, "jmp")]),
 ]
 
 # Session 80 continued (2): the [BANK]-held keymap overlay layer.

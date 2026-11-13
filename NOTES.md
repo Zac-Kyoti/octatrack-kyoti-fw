@@ -37960,3 +37960,48 @@ Now 936 / 932 (<= 945): the pair fits, SC's donor becomes PLATE REV.
   square 590.7 / 590.1 cycles a sample (card form 450.1 / 590.2). The card form's run: ALL GOOD, unchanged.
 - Trap: Modwerk's toolchain `dsp_asm` alone mis-encodes this voice (TFR's source, XY moves beside an ALU op, `dc`);
   its packager assembles it through `tools/dsp_xasm.py`, carried in the module's upstream.
+## 2026-11-13 (`reload-clyps`) — RELOAD_FROM_PROJECT gets Clyps' landing rules (CL25-CL32): a tick before the boundary, the slice with the first sounding trig, trig conditions in place (WIP, NOT flashed)
+
+- **Why:** the user's standing rule (2026-11-12): what is approved working in Clyps applies to RELOAD_FROM_PROJECT.
+  Handoff `reference/handoffs/RELOAD_CLYPS_PORT.md` (trkseq `ae75d15`), rules 1-3 ported from `tools/clyps/patch_clyps.s`;
+  rule 4 (RELOAD's generations, cancel, unchanged slices, the link rule, the unmasked copy) kept. Timing = Clyps CL29.
+- **Landing (`rl_tick`, phase D 0x400a2530):** t' = t0 + 2 (signed; the old MASTER_STEP == 0 / t0 == 0 skips are gone):
+  a track lands when t' >= 0, CNTDN 0x800065c3[t] < 0 and t' ends a step of its old and new rate (`rl_ready`,
+  `rl_nrate`); `rl_ffland` = cl_ffland (STEP = t'/tps mod len, TICKS 0, reload tps - 2 + FFIRE 0x80006624, HOLD
+  0x80006626 cleared, `rl_tpurge` = cl_tpurge, `rl_fixup` the next tick), then `rl_cond` (cl_cond, instant kind).
+  Together landings (a pattern / a rate change) still wait for all 16 tracks (+ the master on a rate change); members
+  = the tracks whose record differs (`rl_rdiff`, computed in `rl_stdone` at the staging, as Clyps decides at the
+  request) or whose slice changes (`rl_chg`), every track on a pattern-rate change; a NORMAL track reload changing the
+  pattern's rate moves only the reloaded tracks plus those whose rate or place changes (`rl_tlff` = tl_ff); master
+  re-phase `rl_mreph` = cl_mreph (tick tps_M - 2). `rl_ctr` / `rl_rephase` deleted.
+- **Publish:** `rl_sp` words: 0xffff armed (rl_pubt), resolved by `rl_ffland` (a sample trig anywhere -> `rl_spwait`
+  0xfffe + the clock, else 2 = the boundary tick) or, after a wrap landing, by `rl_spdo` (trig -> wait, else tps);
+  `rl_sptrig` = cl_sptrig (record bit 2, fire >= landing clock, fire - now < half a tick); `rl_sppub` drops a publish
+  whose bank / sounding Part moved. `rl_spcount` / `rl_spcount0` deleted.
+- **Trig conditions:** `rl_T` counts running ticks in `rl_tick` (every tick slice passes 0x400a1f72 first: nothing
+  branches into stock's landing block from outside, and no COND_RESET caller sits between 0x400a1f72 and 0x400a2530,
+  so it counts exactly Clyps' cl_T); new detour `rl_creset` at COND_RESET 0x400a539c (8 B, `4feffff4 48d70c04`,
+  twelfth hook; no other module uses the site); wrap landings set theirs on the next tick (`rl_cdm` / `rl_cdo`).
+- **Emulator gates (route A, OT DEMO; standalone `bbc2f478…` unless noted):** `diag_reload_quant.py` (expectations
+  moved as Clyps' gate: landing tick t0 + 2 = 0 mod tps, TICKS tps - 2 before, slices on the first trig's boundary,
+  master tick tps - 2; the gate now restores main's SP after borrowed calls; W's expectation is the sound tick of the
+  new cycle's step 0 = the wrap tick + tps -- the old count rule published one tick after it, measured with the new
+  `diag_reload_lock.py` op W); `diag_reload_oracle.py` (the landing tick rebuilds exactly the reference's sounding
+  steps, every counter and build identical after) 3/3 PASS (at 40 / 70 / 85); `diag_reload_ptn.py` PASS (19 checks,
+  standalone and KYOTI). New REF-LOCK harness after Clyps': `tools/diag_reload_lock.py` (recorder),
+  `tools/check_reload_lock.py --rules` (model every track every tick, landing tick, ahead 2, purge, conditions vs an
+  untouched same-rate track), `tools/check_reload_full.py` (TRK_APPLY on the first sounding trig's tick): L1 SEQ 1x,
+  L2 FULL, L3 1x->2x, L4 1x->3/4x, L5 len 64->12, L6 master len 64->48 (pattern), L7 master scale (pattern), L8
+  presses in the cycle's last step, L9 pattern members, L11 NORMAL rate change: model PASS on every tick, 47 tick
+  landings PASS (conditions checked on 27, the rest had no untouched reference), FULL publishes 7/7 PASS (L2, L8, LW
+  incl. one wrap landing). Purge margin where an old event was pending: 2,646,000 = one tick. The landing tick's
+  instructions (D): 73,951, of which ~28 K `rl_slcmp` and ~42 K stock (the copy); the new code ~1-2 K.
+  `diag_reload_quant.py`: standalone 32/32 PASS; KYOTI V1.7 (rebuilt, DJ off) 32/32 PASS; KYOTI DJ on 30 ok / 2 FAIL,
+  both I's precondition "still on P1 when it is pressed": with DIRECT JUMP on the cued P2 is already playing (a
+  test precondition, not this change; not re-run on the old FINAL), its cancel check passes. Earlier runs on the
+  first build (all tracks members on a NORMAL track reload's rate change) found that rule too wide; fixed (oracle
+  rebuilds only T1 at 40). Not covered: MIDI tracks' landings, real audio timing, hardware.
+- **Builds (WIP, NOT flashed; `seal()` pins untouched):** standalone mainos `bbc2f478…` (syx `0460f51a…`,
+  `140C_RLCP2`, DRAM 10 pages); BUG_RL3 mainos `4f8a579b…` (syx `9f0c1230…`); KYOTI V1.7 mainos `ce93776d…`
+  (syx `f1881e0c…`; OS VERSION still reads KYOTI V1.7). octabam REFERENCE `5e04de53…` (51,600 B), twelve detours (the
+  manifest's hooks and reference checked locally; no octabam build run, no pin PR).

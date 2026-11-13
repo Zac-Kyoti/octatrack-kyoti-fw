@@ -468,6 +468,16 @@
     .equ TICK_RES,     0x400a2536       | after `tst.l 0x46c8028a` (stock's beq.w follows)
     .equ WRAP_RES,     0x400a43a6       | after the wrap body's first three instructions
     .equ UITICK_RES,   0x40056c2e       | after `move.l 0x460d1e6c,%d0` (stock's beq follows)
+|   ---- 2026-11-13: CLYPS' landing rules (KYOTI CL25-CL32, trkseq; reference/handoffs/RELOAD_CLYPS_PORT.md) ----
+    .equ CNTDN_ARR,    0x800065c3       | byte[16]: stock's per-track landing countdown, < 0 idle
+    .equ RELOAD_ARR,   0x800065d3       | byte[16]: per-track reload (a first fire's ahead = tps - reload)
+    .equ FFIRE,        0x80006624       | word: first-fire mask, bit per track
+    .equ HOLD_MASK,    0x80006626       | word: skip one advance, bit per track
+    .equ SCLK,         0x4610757c       | audio-domain sample clock (fire-time base; a tick 0x285ff0)
+    .equ MCLK,         0x46107564       | MIDI-domain clock (a tick 16800)
+    .equ COND_RESET,   0x400a539c       | (t | -1): A:B pass counters / FILL latches fresh (stock's switch)
+    .equ COND_CNT,     0x46107918       | long[16]: a track's A:B pass counter (++ at its wraps, 0x400a536c)
+    .equ COND_RES,     0x400a53a4       | COND_RESET after `lea -12(%sp),%sp ; movem.l %d2/%a2-%a3,(%sp)`
 
     .equ CHAIN_OFF,    0x4009a404       | stock [PTN] + trig's steps (0x40056b2c..): chain off,
     .equ PAT_CUE,      0x400a1030       | (bank, pattern): the cue (running: pending; stopped: at once)
@@ -1949,6 +1959,17 @@ rq_fresh:
 | (stopped, or the target not playing). d0 = the job's generation. Masks interrupts itself.
 rl_stdone:
     move.l  %d2,-(%sp)
+|   2026-11-13: a whole pattern -- which tracks' sequence it changes (rl_rdiff; Clyps decides it at the request,
+|   cl_cueload): those land on the boundary, the others keep their built steps. Before the mask (16 records).
+    tst.b   rq_ptn
+    beq.b   sd_nrd
+    move.l  %d0,-(%sp)
+    move.l  %d3,-(%sp)
+    bsr.w   rl_rdiff
+    move.w  %d3,rl_rdm
+    move.l  (%sp)+,%d3
+    move.l  (%sp)+,%d0
+sd_nrd:
     move.w  %sr,%d1
     move.w  %d1,-(%sp)
     move.l  %d1,%d2
@@ -2079,32 +2100,19 @@ rl_live:
     adda.l  %d0,%a0
     rts
 
-| rl_ctr (d4 = t, d7 = t0): t's counters, phase-continuous, from its rate in the live target slab
-| (after its landing): STEP = (t0 / tps + 1) mod len, STEP-1, TICKS = t0 mod tps, its scale cache.
-| Uses d0-d3/d5/a0-a1 (the tick saved every register).
-rl_ctr:
-    bsr.w   rl_live
-    move.l  %d4,%d0
-    bsr.w   rl_rate                    | d0 = tps, d1 = len, d2 = scale
-    move.l  %d2,%d3                    | d3 = its scale
-    move.l  %d0,%d5                    | d5 = its tps
-    move.l  %d7,%d0
-    divu.l  %d5,%d0                    | t0 / tps
-    addq.l  #1,%d0
-    remu.l  %d1,%d2:%d0                | d2 = STEP
-    lea     STEP_ARR,%a0
-    move.b  %d2,(%a0,%d4.l)
-    add.l   %d1,%d2
-    subq.l  #1,%d2
-    remu.l  %d1,%d0:%d2                | d0 = (STEP + len - 1) mod len
-    lea     STEPM1_ARR,%a0
-    move.b  %d0,(%a0,%d4.l)
-    move.l  %d7,%d0
-    remu.l  %d5,%d2:%d0                | d2 = t0 mod tps (0 at a step start)
-    lea     TICKS_ARR,%a0
-    move.b  %d2,(%a0,%d4.l)
-    lea     TSCALE_ARR,%a0
-    move.b  %d3,(%a0,%d4.l)
+| rl_plive -> a0 = the PLAYING pattern's slab (PLAY_BANK, ACT_PAT). Uses d0-d1.
+rl_plive:
+    moveq   #0,%d0
+    move.b  PLAY_BANK,%d0
+    move.l  #BANKSTRIDE,%d1
+    muls.l  %d1,%d0
+    movea.l #BLOB,%a0
+    adda.l  %d0,%a0
+    moveq   #0,%d0
+    move.b  ACT_PAT,%d0
+    move.l  #PATSTRIDE,%d1
+    muls.l  %d1,%d0
+    adda.l  %d0,%a0
     rts
 
 | rl_mrate (a0 = a slab) -> d0 = the master's ticks per step, d1 = the master length (0 = INF),
@@ -2134,7 +2142,7 @@ mr2_t:
     bra.w   rl_tps
 
 | rl_wclass -> d0 = 1 when the pending landing changes the pattern's own rate -- then every track and
-| the master are re-phased (rl_rephase): a pattern whose trailer +0x8e50..55 differs from the live
+| the master are re-phased (rl_tlff, rl_mreph): a pattern whose trailer +0x8e50..55 differs from the live
 | one, or (NORMAL mode) track reloads, which bring the pattern's length / scale with them.
 | Uses d1/a0-a1.
 rl_wclass:
@@ -2162,58 +2170,513 @@ wc2_yes:
     moveq   #1,%d0
     rts
 
-| rl_rephase (d7 = t0, after the landing): the pattern's own rate changed, so the master and every
-| track go where the SAVED pattern would be had it played since this master cycle began: master
-| step = (t0 / tps_M) mod its length + 1, its tick = t0 mod tps_M, the master scale cache; every
-| track as rl_ctr. Uses d0-d5/a0-a2.
-rl_rephase:
-    bsr.w   rl_live
-    movea.l %a0,%a2                    | a2 = the live target slab (now the saved pattern)
-    bsr.w   rl_mrate                   | d0 = tps_M, d1 = master length (0 = INF), d2 = its scale
-    move.b  %d2,SCALE_IX
-    move.l  %d0,%d5
-    move.l  %d7,%d3
-    divu.l  %d5,%d3                    | d3 = master steps since the cycle began
-    tst.l   %d1
-    beq.b   rp3_inf
-    remu.l  %d1,%d0:%d3
-    move.l  %d0,%d3                    | ... within its length
-rp3_inf:
-    addq.l  #1,%d3
-    move.w  %d3,MASTER_STEP
-    move.l  %d7,%d0
-    remu.l  %d5,%d2:%d0
-    move.b  %d2,TICK_CTR               | 0 at a step start
-    moveq   #0,%d4
-rp3_l:
-    bsr.w   rl_ctr
-    addq.l  #1,%d4
-    cmpi.l  #16,%d4
-    bne.b   rp3_l
-    rts
 
-| rl_ready (d4 = t, d7 = t0) -> d0 = 1 when t starts a step at t0 at its old rate (its scale cache)
-| and at its new one (RQ_SLAB). Uses d0-d2/a0-a1.
+| ================= 2026-11-13: CLYPS' landing rules =================
+| The user (2026-11-12): whatever is approved working for Clyps applies to RELOAD_FROM_PROJECT -- Clyps KYOTI
+| CL25-CL32 (worktree trkseq, tools/clyps/patch_clyps.s; timing frozen at CL29, "that version was correct";
+| reference/handoffs/RELOAD_CLYPS_PORT.md). Until now a track landed ON the tick that starts its step (STEP =
+| t0 / tps + 1, TICKS = t0 mod tps: the scheduler's look-ahead): the step sounding at that boundary had been
+| built a step earlier from the OLD sequence, so the new one was heard a step late (Clyps' "CL24 timing
+| investigation" found it in its copy of this landing). Now, Clyps' code:
+|  1. a track lands ONE TICK BEFORE the boundary: t' = t0 + 2 = 0 mod its old and new tps (a pattern / rate
+|     change: every track's, and the master's), only when t' >= 0 and stock has no landing of its own pending for
+|     it (CNTDN < 0) -- as stock's landing and DIRECT JUMP land a track: STEP = (t' / tps) mod len, TICKS 0, its
+|     scale cache, reload tps - 2 + the first-fire bit (phase E builds the boundary's step from the new record,
+|     ahead 2: it fires exactly where the old one would have), its HOLD bit cleared, its events still pending
+|     purged (the old boundary event is a whole tick away: no race with the sample clock -- Clyps CL25 landed ON
+|     the boundary tick and the unit sometimes kept the old step), and the next tick its reload goes back to what
+|     a never-switched track holds (rl_fixup). A rate change puts the master where stock's landing does: step
+|     t' / tps_M mod its length, tick tps_M - 2 (rl_mreph). Tracks that do not land keep their built step when
+|     their rate and place are unchanged.
+|  2. a FULL slice, and a new machine's voice restart, reach the engine when the incoming sequence first
+|     TRIGGERS a sample that sounds (rl_spdo).
+|  3. trig conditions: the landed track's A:B pass counter = the passes it would have begun since the pattern's
+|     conditions last started again had it played there all along (rl_cond; rl_creset notes the restart).
+
+| rl_nrate (d6 = t) -> d0 = ticks per step, d1 = length, d2 = scale index t plays at once the pending landing
+| is copied: a whole pattern -> the staged slab's; a track reload -> the live mode (the copy keeps it): NORMAL
+| the staged pattern length / scale (rp_trk brings them), PER TRACK the record's own -- the staged one when t
+| lands, else the live one (Clyps' cl_newrate). Uses a0-a1.
+rl_nrate:
+    movea.l #RQ_SLAB,%a0
+    move.l  %d6,%d0
+    tst.b   rl_lp
+    bne.w   rl_rate
+    bsr.w   rl_live
+    movea.l %a0,%a1
+    adda.l  #PAT_SMODE,%a1
+    tst.b   (%a1)
+    bne.b   nr2_pt
+    moveq   #0,%d1
+    move.b  RQ_SLAB+PAT_LEN,%d1
+    moveq   #0,%d2
+    move.b  RQ_SLAB+PAT_SCALE,%d2
+    bra.w   rr2_t
+nr2_pt:
+    move.w  rl_lm,%d0
+    btst    %d6,%d0
+    beq.b   nr2_l
+    movea.l #RQ_SLAB,%a0
+nr2_l:
+    move.l  %d6,%d0
+    bra.w   rr2_pt
+
+| rl_ready (d6 = t, d7 = t') -> d0 = 1 when t may land on this tick: t' >= 0 (not inside the master cycle's last
+| step, where MASTER_STEP reads 0: stock's own deferred landings run there), no landing of stock's own pending
+| for t (CNTDN 0x800065c3[t] < 0), and t' ends a step at its old rate (its scale cache) and at its new one
+| (rl_nrate). Then a2 = tps_old, a3 = tps_new, a4 = len_new, a5 = scale_new (Clyps' cl_ffok + la_tracks).
+| Uses d0-d2/a0-a1.
 rl_ready:
+    tst.l   %d7
+    bmi.b   ry2_no
+    lea     CNTDN_ARR,%a0
+    tst.b   (%a0,%d6.l)
+    bpl.b   ry2_no
     lea     TSCALE_ARR,%a0
     moveq   #0,%d0
-    move.b  (%a0,%d4.l),%d0
+    move.b  (%a0,%d6.l),%d0
     bsr.w   rl_tps
+    movea.l %d0,%a2                    | a2 = tps_old
     move.l  %d7,%d1
     remu.l  %d0,%d2:%d1
     tst.l   %d2
-    bne.b   ry2_no
-    movea.l #RQ_SLAB,%a0
-    move.l  %d4,%d0
-    bsr.w   rl_rate
+    bne.b   ry2_no                     | not the end of an old step: wait
+    bsr.w   rl_nrate
+    movea.l %d0,%a3                    | a3 = tps_new
+    movea.l %d1,%a4                    | a4 = len_new
+    movea.l %d2,%a5                    | a5 = scale_new
     move.l  %d7,%d1
     remu.l  %d0,%d2:%d1
     tst.l   %d2
-    bne.b   ry2_no
+    bne.b   ry2_no                     | not the end of a new step: wait
     moveq   #1,%d0
     rts
 ry2_no:
     moveq   #0,%d0
+    rts
+
+| rl_ffland (d6 = t, d7 = t' >= 0, 0 mod tps_new; a2 = tps_old, a3 = tps_new, a4 = len_new, a5 = scale_new,
+| d5 = tps_M), the tick before that boundary -- Clyps' cl_ffland: STEP = (t' / tps_new) mod len, STEP-1, TICKS 0
+| (phase E builds it now), the scale cache, reload tps - 2 with the first-fire bit (ahead = 2: it fires on the
+| boundary, where the old one would have), no held advance; t's pending events at or after now purged; its
+| fix-up for the next tick; a landed slice waits for the incoming sequence's first trig that sounds (the
+| boundary tick without any). Keeps every register but d0-d2/a0-a1.
+rl_ffland:
+    move.l  %d7,%d0
+    move.l  %a3,%d1
+    divu.l  %d1,%d0                    | t' / tps
+    move.l  %a4,%d1
+    remu.l  %d1,%d2:%d0                | d2 = STEP
+    lea     STEP_ARR,%a0
+    move.b  %d2,(%a0,%d6.l)
+    add.l   %d1,%d2
+    subq.l  #1,%d2
+    remu.l  %d1,%d0:%d2                | d0 = (STEP + len - 1) mod len
+    lea     STEPM1_ARR,%a0
+    move.b  %d0,(%a0,%d6.l)
+    lea     TICKS_ARR,%a0
+    clr.b   (%a0,%d6.l)
+    move.l  %a5,%d0
+    lea     TSCALE_ARR,%a0
+    move.b  %d0,(%a0,%d6.l)
+|   the reload a never-switched track holds at its rate: max(0, tps - tps_M) once the master has wrapped since
+|   START, 0 before (DIRECT JUMP's dl_fixup). Unchanged rate: the one it had; a slower track holding 0 is in
+|   its first cycle: 0 again.
+    lea     RELOAD_ARR,%a0
+    moveq   #0,%d0
+    move.b  (%a0,%d6.l),%d0            | d0 = its reload until now
+    cmpa.l  %a2,%a3
+    beq.b   ff2_fx                     | the same rate: keep it
+    tst.l   %d0
+    bne.b   ff2_post
+    cmpa.l  %d5,%a2
+    bls.b   ff2_post                   | (a2 > tps_M with reload 0: before the first wrap)
+    moveq   #0,%d0
+    bra.b   ff2_fx
+ff2_post:
+    move.l  %a3,%d0
+    sub.l   %d5,%d0
+    bpl.b   ff2_fx
+    moveq   #0,%d0
+ff2_fx:
+    lea     rl_fxv,%a1
+    move.b  %d0,(%a1,%d6.l)
+    move.l  %a3,%d0
+    subq.l  #2,%d0
+    move.b  %d0,(%a0,%d6.l)            | reload = tps - 2: this tick's build fires on the next tick
+    moveq   #1,%d1
+    lsl.l   %d6,%d1
+    move.w  rl_fxm,%d0
+    or.l    %d1,%d0
+    move.w  %d0,rl_fxm
+    move.w  FFIRE,%d0
+    or.l    %d1,%d0
+    move.w  %d0,FFIRE
+    not.l   %d1
+    move.w  HOLD_MASK,%d0
+    and.l   %d1,%d0
+    move.w  %d0,HOLD_MASK
+    bsr.w   rl_tpurge
+    lea     rl_sp,%a0
+    move.l  %d6,%d1
+    add.l   %d1,%d1
+    moveq   #0,%d0
+    move.w  (%a0,%d1.l),%d0
+    cmpi.l  #0xffff,%d0
+    bne.b   ff2_out
+    lea     STEP_ARR,%a1               | armed by the copy: it waits for the incoming sequence's first trig that
+    moveq   #0,%d0                     | SOUNDS (rl_spdo); a sequence without any sample trig: the boundary
+    move.b  (%a1,%d6.l),%d0            | tick (2)
+    bsr.w   rl_ftrig
+    tst.l   %d0
+    bmi.b   ff2_bnd
+    bsr.w   rl_spwait
+    bra.b   ff2_out
+ff2_bnd:
+    moveq   #2,%d0
+    lea     rl_sp,%a0
+    move.l  %d6,%d1
+    add.l   %d1,%d1
+    move.w  %d0,(%a0,%d1.l)
+ff2_out:
+    rts
+
+| rl_tlff (d6 = t, d3 = the members, d5 = tps_M, d7 = the boundary; after a together landing): t's counters at
+| its rate in the playing pattern, through rl_ffland -- unless t is no member and keeps its rate and its place
+| (its built step is right). Clyps' tl_ff. Sets a2-a5 (rl_cond reads a3 / a4). Uses d0-d2/a0-a1.
+rl_tlff:
+    lea     TSCALE_ARR,%a0
+    moveq   #0,%d0
+    move.b  (%a0,%d6.l),%d0
+    bsr.w   rl_tps
+    movea.l %d0,%a2                    | a2 = tps_old
+    bsr.w   rl_plive
+    move.l  %d6,%d0
+    bsr.w   rl_rate                    | d0 = tps, d1 = len, d2 = scale (landed)
+    movea.l %d0,%a3                    | a3 = tps_new
+    movea.l %d1,%a4                    | a4 = len
+    movea.l %d2,%a5                    | a5 = scale
+    btst    %d6,%d3
+    bne.b   tf2_go
+    cmpa.l  %a2,%a3
+    bne.b   tf2_go
+    move.l  %d7,%d0                    | the same rate: the step it would sound next?
+    move.l  %a3,%d1
+    divu.l  %d1,%d0
+    move.l  %a4,%d1
+    remu.l  %d1,%d2:%d0
+    lea     STEP_ARR,%a0
+    moveq   #0,%d0
+    move.b  (%a0,%d6.l),%d0
+    cmp.l   %d0,%d2
+    beq.b   tf2_out                    | yes: nothing to do
+tf2_go:
+    bra.w   rl_ffland
+tf2_out:
+    rts
+
+| rl_tpurge (d6 = t): t's still-pending events (fire time >= now) cancelled the way stock cancels them (record
+| long and slot bit cleared, the time left: 0x400a43b6..0x400a4464; DIRECT JUMP's pg_table for one track) --
+| Clyps' cl_tpurge. Audio: both tables against the sample clock; MIDI: its table against the MIDI clock.
+| Keeps d2-d7/a2-a6.
+rl_tpurge:
+    lea     -20(%sp),%sp
+    movem.l %d2-%d5/%a2,(%sp)
+    cmpi.l  #8,%d6
+    bcc.b   pu2_midi
+    move.l  SCLK,%d5
+    move.l  %d6,%d3
+    movea.l #0x80001904,%a0
+    movea.l #0x46c7e998,%a1
+    movea.l #0x46c7fe44,%a2
+    bsr.b   pu2_tab
+    movea.l #0x80001984,%a0
+    movea.l #0x46c7faa4,%a1
+    movea.l #0x46c7fe8c,%a2
+    bsr.b   pu2_tab
+    bra.b   pu2_out
+pu2_midi:
+    move.l  MCLK,%d5
+    move.l  %d6,%d3
+    subq.l  #8,%d3
+    movea.l #0x46c76a26,%a0
+    movea.l #0x46c769c0,%a1
+    movea.l #0x46c77be2,%a2
+    bsr.b   pu2_tab
+pu2_out:
+    movem.l (%sp),%d2-%d5/%a2
+    lea     20(%sp),%sp
+    rts
+pu2_tab:                               | d3 = the table's track index, d5 = now; uses d0-d2/d4
+    moveq   #0,%d4                     | slot
+pu2_sl:
+    moveq   #0,%d0
+    move.b  (%a2,%d3.l),%d0
+    btst    %d4,%d0
+    beq.b   pu2_n
+    move.l  %d4,%d1
+    lsl.l   #3,%d1
+    add.l   %d3,%d1                    | idx = track + slot * 8
+    move.l  (%a0,%d1.l*4),%d2
+    sub.l   %d5,%d2
+    bmi.b   pu2_n                      | already due: stock's boundary rule leaves it
+    clr.l   (%a1,%d1.l*4)
+    bclr    %d4,%d0
+    move.b  %d0,(%a2,%d3.l)
+pu2_n:
+    addq.l  #1,%d4
+    cmpi.l  #3,%d4
+    bne.b   pu2_sl
+    rts
+
+| rl_fixup (the tick after landings): their reloads back to the never-switched value. Uses d0-d2/a0-a1.
+rl_fixup:
+    move.w  rl_fxm,%d1
+    clr.w   rl_fxm
+    lea     rl_fxv,%a0
+    lea     RELOAD_ARR,%a1
+    moveq   #0,%d0
+fx2_l:
+    btst    %d0,%d1
+    beq.b   fx2_n
+    move.b  (%a0,%d0.l),%d2
+    move.b  %d2,(%a1,%d0.l)
+fx2_n:
+    addq.l  #1,%d0
+    cmpi.l  #16,%d0
+    bne.b   fx2_l
+    rts
+
+| rl_mreph (d7 = the boundary's t', 0 mod the new tps_M; the tick before it): the pattern's own rate changed --
+| the master goes where the new pattern would be had it played since this master cycle began: step = (t' /
+| tps_M) mod its length, its tick tps_M - 2 (phase G advances it here and wraps it on the boundary tick), the
+| master scale cache (Clyps' cl_mreph). Uses d0-d2/a0-a1.
+rl_mreph:
+    bsr.w   rl_plive
+    bsr.w   rl_mrate                   | d0 = tps_M, d1 = length (0 = INF), d2 = scale
+    move.b  %d2,SCALE_IX
+    move.l  %d0,-(%sp)
+    move.l  %d7,%d2
+    divu.l  %d0,%d2                    | master steps since the cycle began
+    tst.l   %d1
+    beq.b   mp2_inf
+    remu.l  %d1,%d0:%d2
+    move.l  %d0,%d2
+mp2_inf:
+    move.w  %d2,MASTER_STEP
+    move.l  (%sp)+,%d0
+    subq.l  #2,%d0
+    move.b  %d0,TICK_CTR
+    rts
+
+| rl_cdo (phase D, d7 = the boundary's t', d5 = tps_M): the trig conditions of a wrap's landings (stock's re-home
+| after the wrap body has counted their pass start). Uses d0-d4/d6/a0-a4.
+rl_cdo:
+    move.w  rl_cdm,%d3
+    clr.w   rl_cdm
+    moveq   #0,%d6
+cdo2_l:
+    btst    %d6,%d3
+    beq.b   cdo2_n
+    bsr.w   rl_plive
+    move.l  %d6,%d0
+    bsr.w   rl_rate                    | d0 = tps, d1 = len (its rate in the playing pattern)
+    movea.l %d0,%a3
+    movea.l %d1,%a4
+    bsr.w   rl_cond
+cdo2_n:
+    addq.l  #1,%d6
+    cmpi.l  #16,%d6
+    bne.b   cdo2_l
+    rts
+
+| rl_cond (d6 = t, d7 = the boundary's t' (signed), a3 = t's tps, a4 = its length): t's trig conditions after an
+| in-place landing (Clyps' cl_cond, instant kind; the user, 2026-11-11): its A:B pass counter becomes the passes
+| it would have begun since the pattern's conditions last started again (rl_Tres) had it played there all along.
+| A track's pass starts (measured in Clyps, M1-M3 2026-11-11, every track every tick): its own wraps (stock's
+| 0x400a536c when STEP goes len -> 0: t' = j * len * tps - tps) and the master's restart (the wrap body at
+| t' = C - tps_M), once when they coincide. F(x) below counts them before tick x; the counter is
+| F(now) - F(rl_Tres). Keeps d2-d7/a2-a6.
+rl_cond:
+    lea     -44(%sp),%sp
+    movem.l %d2-%d7/%a2-%a6,(%sp)
+    move.l  %a4,%d0
+    move.l  %a3,%d1
+    muls.l  %d1,%d0
+    movea.l %d0,%a5                    | a5 = c = len * tps (one pass)
+    bsr.w   rl_plive
+    bsr.w   rl_mrate                   | d0 = tps_M, d1 = the master length (0 = INF)
+    move.l  %d0,%d5                    | d5 = tps_M
+    muls.l  %d1,%d0
+    movea.l %d0,%a6                    | a6 = C (0 = INF)
+    move.l  rl_T,%d0
+    addq.l  #1,%d0
+    sub.l   %d7,%d0
+    movea.l %d0,%a2                    | a2 = B: this master cycle's first tick (d7 is the next tick's t')
+    move.l  rl_T,%d0
+    bsr.b   cd2_F
+    move.l  %d0,%d3                    | F(now)
+    move.l  rl_Tres,%d0
+    bsr.b   cd2_F
+    sub.l   %d0,%d3
+    bpl.b   cd2_set
+    moveq   #0,%d3
+cd2_set:
+    lea     COND_CNT,%a0
+    move.l  %d3,(%a0,%d6.l*4)
+    movem.l (%sp),%d2-%d7/%a2-%a6
+    lea     44(%sp),%sp
+    rts
+cd2_F:                                 | d0 = tick x -> d0 = F(x) (a2 = B, a3 = tps, a5 = c, a6 = C, d5 = tps_M);
+    sub.l   %a2,%d0                    | uses d1-d2/d4/d7/a0-a1. d0 = x - B
+    move.l  %a6,%d1
+    beq.w   cd2_inf
+    move.l  %d0,%d2
+    divs.l  %d1,%d2                    | q, toward 0
+    move.l  %d2,%d4
+    muls.l  %d1,%d4
+    move.l  %d0,%d7
+    sub.l   %d4,%d7                    | u = x - B - q * C
+    bpl.b   cd2_q
+    subq.l  #1,%d2                     | floor
+    add.l   %d1,%d7
+cd2_q:
+    movea.l %d2,%a0                    | a0 = q
+    movea.l %d7,%a1                    | a1 = u, in [0, C)
+    move.l  %a6,%d0
+    sub.l   %d5,%d0
+    add.l   %a3,%d0                    | C - tps_M + tps
+    move.l  %a5,%d1
+    move.l  %d0,%d4
+    divu.l  %d1,%d4                    | d4 = J: own wraps up to the wrap body
+    remu.l  %d1,%d2:%d0                | d2 != 0: the master's restart is a pass start of its own
+    move.l  %d4,%d7
+    tst.l   %d2
+    beq.b   cd2_k
+    addq.l  #1,%d7                     | d7 = K: pass starts per master cycle
+cd2_k:
+    move.l  %a0,%d0
+    muls.l  %d7,%d0
+    movea.l %d0,%a0                    | a0 = q * K
+    move.l  %a1,%d0
+    add.l   %a3,%d0
+    subq.l  #1,%d0
+    divu.l  %d1,%d0                    | own wraps before u
+    cmp.l   %d4,%d0
+    bls.b   cd2_j
+    move.l  %d4,%d0
+cd2_j:
+    tst.l   %d2
+    beq.b   cd2_f
+    move.l  %a6,%d1
+    sub.l   %d5,%d1                    | the wrap body's t'
+    cmpa.l  %d1,%a1
+    bls.b   cd2_f
+    addq.l  #1,%d0                     | ... before u
+cd2_f:
+    add.l   %a0,%d0
+    rts
+cd2_inf:                               | INF: no master restarts
+    add.l   %a3,%d0
+    subq.l  #1,%d0
+    move.l  %a5,%d1
+    move.l  %d0,%d2
+    divs.l  %d1,%d2
+    move.l  %d2,%d4
+    muls.l  %d1,%d4
+    cmp.l   %d4,%d0
+    bge.b   cd2_i
+    subq.l  #1,%d2                     | floor
+cd2_i:
+    move.l  %d2,%d0
+    rts
+
+| ================= rl_creset: detour at COND_RESET 0x400a539c =================
+| Replaces `lea -12(%sp),%sp ; movem.l %d2/%a2-%a3,(%sp)` (8 B; Clyps' cl_creset). A reset of every track (an
+| argument above 15: -1) is the moment the pattern's A:B passes start again -- PLAY, stock's pattern switch, a
+| DIRECT JUMP jump: its running tick. Stock's switch (phase G, after its tick's passes) counts from the next
+| tick. d0-d1 are the caller's scratch. Then stock's body.
+    .global rl_creset
+rl_creset:
+    move.l  4(%sp),%d0
+    moveq   #15,%d1
+    cmp.l   %d0,%d1
+    bcc.b   cr2_go                     | one track (stock's own test: 15 >= t unsigned)
+    move.l  rl_T,%d0
+    move.l  (%sp),%d1
+    cmpi.l  #0x400a4856,%d1            | stock's switch (phase G, after its tick's passes): from the next tick
+    bne.b   cr2_t
+    addq.l  #1,%d0
+cr2_t:
+    move.l  %d0,rl_Tres
+cr2_go:
+    lea     -12(%sp),%sp
+    movem.l %d2/%a2-%a3,(%sp)
+    jmp     COND_RES
+
+| rl_rdiff -> d3 = the tracks whose staged record differs from the live one: every byte but audio +0x899 (the one
+| the bank file never holds) and the record's own length / scale, which count only in PER TRACK mode (the track's
+| effective rate) -- Clyps' cl_samein / cl_same. The worker, after staging a whole pattern (Clyps decides at the
+| request too): a whole-pattern landing then lands these tracks (and those whose slice changes) on the boundary
+| and leaves the others' built steps alone. Keeps every register but d0-d3/a0-a1.
+rl_rdiff:
+    lea     -16(%sp),%sp
+    movem.l %d4-%d6/%a2,(%sp)
+    bsr.w   rl_live
+    movea.l %a0,%a2                    | a2 = the live slab
+    movea.l %a0,%a1
+    adda.l  #PAT_SMODE,%a1
+    moveq   #0,%d5
+    move.b  (%a1),%d5                  | d5 != 0: PER TRACK
+    moveq   #0,%d3
+    moveq   #0,%d6
+rd2_t:
+    move.l  %d6,%d0
+    bsr.w   rl_toff
+    movea.l %a2,%a0
+    adda.l  %d0,%a0                    | a0 = the live record
+    movea.l #RQ_SLAB,%a1
+    adda.l  %d0,%a1                    | a1 = the staged one
+    move.l  #TRAC_A/2,%d1              | its words
+    moveq   #0x50/2,%d4                | the rate word
+    cmpi.l  #8,%d6
+    bcs.b   rd2_a
+    move.l  #TRAC_M/2,%d1
+    moveq   #0x28/2,%d4
+rd2_a:
+    moveq   #0,%d2                     | d2 = word index
+rd2_w:
+    move.w  (%a0)+,%d0
+    cmp.w   (%a1)+,%d0
+    beq.b   rd2_n
+    cmp.l   %d4,%d2
+    bne.b   rd2_x
+    tst.l   %d5
+    beq.b   rd2_n                      | NORMAL: the record's own rate is not its rate
+    bra.b   rd2_d
+rd2_x:
+    cmpi.l  #8,%d6
+    bcc.b   rd2_d                      | MIDI: every byte is on the card
+    cmpi.l  #0x898/2,%d2
+    bne.b   rd2_d
+    move.b  -2(%a0),%d0                | +0x898 counts, +0x899 does not
+    cmp.b   -2(%a1),%d0
+    beq.b   rd2_n
+rd2_d:
+    moveq   #1,%d0
+    lsl.l   %d6,%d0
+    or.l    %d0,%d3
+    bra.b   rd2_tn
+rd2_n:
+    addq.l  #1,%d2
+    cmp.l   %d1,%d2
+    bcs.b   rd2_w
+rd2_tn:
+    addq.l  #1,%d6
+    cmpi.l  #16,%d6
+    bne.b   rd2_t
+    movem.l (%sp),%d4-%d6/%a2
+    lea     16(%sp),%sp
     rts
 
 | ================= rl_tick: phase D of the sequencer tick, 0x400a2530 =================
@@ -2221,81 +2684,99 @@ ry2_no:
 | Every path of phase D converges here -- the tick gate's skip (0x400a1f6e), DIRECT JUMP's landing
 | countdown (0x400a1f72, DIRECT JUMP KYOTI's site) and the count-in -- before the per-track
 | scheduler (phase E, 0x400a2982): CLYPS' landing point (scope §3.4), one site later. Slices that
-| are not a tick (0x46107568 != 0) pass straight through.
-| The rule is CLYPS' (measured on the A4..A8 oracles): t0 = (MASTER_STEP - 1) * tps_M + TICK_CTR.
-|   * a pending track lands on the first tick that starts a step of its old AND its new rate, then
-|     plays phase-continuous (rl_ctr) -- each track on its own;
-|   * a pattern lands all 16 on the first such tick they share (and the master's, when its rate
-|     changes), then every track's counters;
-|   * a landing that changes the pattern's own length / scale (rl_wclass) waits for the tick that is a
-|     step start of every track and the master, old and new, and re-phases them all (rl_rephase).
-| A target that no longer plays lands at once, data only. The master's first tick is rl_wrap's.
+| are not a tick (0x46107568 != 0) pass straight through; every tick slice passes 0x400a1f72 first
+| (nothing branches into stock's landing block 0x400a1f72..0x400a2530 from outside), so rl_T counts
+| exactly the ticks Clyps' cl_land counts.
+| t' = t0 + 2, t0 = (MASTER_STEP - 1) * tps_M + TICK_CTR (signed: MASTER_STEP reads 0 in the master
+| cycle's last step), the boundary a landing on this tick aims at:
+|   * a pending track lands on the first tick whose t' ends a step of its old AND its new rate (rl_ready),
+|     fired for that boundary (rl_ffland), its trig conditions set (rl_cond) -- each track on its own;
+|   * a pattern lands all 16 on the first such tick they share, then its members' counters (those whose
+|     sequence or slice changes) -- the others keep their built steps;
+|   * a landing that changes the pattern's own length / scale (rl_wclass) waits for the tick that is a step
+|     end of every track and the master, old and new, and re-phases them all (rl_tlff, rl_mreph).
+| A target that no longer plays lands at once, data only. What the master wrap lands is rl_wrap's.
     .global rl_tick
 rl_tick:
+    tst.l   TICK_GATE
+    bne.w   rt3_out                    | not a tick
+    tst.l   RUNNING
+    bne.b   rt3_run
+    clr.l   rl_T                       | stopped: the running-tick count starts again at PLAY
+    clr.w   rl_cdm
+    clr.w   rl_fxm                     | ... and stock's start sets every track's reload itself
+    bra.w   rt3_out                    | (the UI tick lands what is pending / flushes the publishes)
+rt3_run:
+    addq.l  #1,rl_T                    | running ticks (rl_creset notes the trig conditions' restarts)
     tst.b   rl_arm
     bne.b   rt3_any
     tst.b   rl_spn
-    beq.w   rt3_out                    | nothing armed or pending: two byte tests per tick
+    bne.b   rt3_any
+    tst.w   rl_fxm
+    bne.b   rt3_any
+    tst.w   rl_cdm
+    beq.w   rt3_out                    | nothing armed, published or owed: a few tests per tick
 rt3_any:
-    tst.l   TICK_GATE
-    bne.w   rt3_out
-    tst.l   RUNNING
-    beq.w   rt3_out                    | stopped: the UI tick lands it / flushes the publishes
     lea     -60(%sp),%sp
     movem.l %d0-%d7/%a0-%a6,(%sp)
-    tst.b   rl_spn
-    beq.b   rt3_land
-    bsr.w   rl_spcount                 | the deferred publishes (2026-11-09)
-rt3_land:
+    tst.w   rl_fxm
+    beq.b   rt3_nfx
+    bsr.w   rl_fixup                   | the tick after a landing: the reload a never-switched track holds
+rt3_nfx:
+    tst.b   rl_arm
+    bne.b   rt3_t0
+    tst.w   rl_cdm
+    beq.w   rt3_done                   | only a publish is pending
+rt3_t0:
+    moveq   #0,%d0
+    move.b  SCALE_IX,%d0
+    bsr.w   rl_tps
+    move.l  %d0,%d5                    | d5 = tps_M
+    moveq   #0,%d0
+    move.w  MASTER_STEP,%d0
+    subq.l  #1,%d0
+    muls.l  %d5,%d0
+    moveq   #0,%d1
+    move.b  TICK_CTR,%d1
+    add.l   %d1,%d0                    | t0
+    addq.l  #2,%d0
+    move.l  %d0,%d7                    | d7 = t' = t0 + 2 (signed): the boundary a landing now aims at
+    tst.w   rl_cdm
+    beq.b   rt3_ncd
+    bsr.w   rl_cdo                     | the wrap's landings: their trig conditions now
+rt3_ncd:
     tst.b   rl_arm
     beq.w   rt3_done
     moveq   #1,%d0
-    move.b  %d0,rl_defer               | an in-phase landing: its publishes wait for the new step to sound
+    move.b  %d0,rl_defer               | an in-phase landing: its publishes wait for the incoming sequence to sound
     move.b  rl_tpat,%d0
     cmp.b   ACT_PAT,%d0
     bne.w   rt3_off
     move.b  rl_tbank,%d0
     cmp.b   PLAY_BANK,%d0
     bne.w   rt3_off
-    moveq   #0,%d0
-    move.b  SCALE_IX,%d0
-    bsr.w   rl_tps
-    move.l  %d0,%d5                    | d5 = tps_M
-    moveq   #0,%d3
-    move.w  MASTER_STEP,%d3
-    tst.l   %d3
-    beq.w   rt3_done                   | no master step yet (transport start)
-    moveq   #0,%d1
-    move.b  TICK_CTR,%d1
-    move.l  %d3,%d0
-    subq.l  #1,%d0
-    muls.l  %d5,%d0
-    add.l   %d1,%d0
-    move.l  %d0,%d7                    | d7 = t0
-    beq.w   rt3_done                   | the master's first tick: rl_wrap has landed it
     bsr.w   rl_wclass
-    move.l  %d0,%d6                    | d6 = 1: the pattern's own rate changes
+    move.l  %d0,%d4                    | d4 = 1: the pattern's own rate changes
     tst.b   rl_lp
-    bne.b   rt3_all
-    tst.l   %d6
-    bne.b   rt3_all
+    bne.w   rt3_all
+    tst.l   %d4
+    bne.w   rt3_all
 |   ---- tracks, each on its own step ----
-    moveq   #0,%d4
+    moveq   #0,%d6
 rt3_tl:
     move.w  rl_lm,%d0
-    btst    %d4,%d0
+    btst    %d6,%d0
     beq.b   rt3_tn
-    bsr.w   rl_ready
+    bsr.w   rl_ready                   | -> a2-a5: its old / new rate
     tst.l   %d0
     beq.b   rt3_tn
-    move.l  %d4,%d0
-    bsr.w   rl_landtrk
-    bsr.w   rl_ctr
-    moveq   #1,%d0
-    move.b  %d0,rl_post
+    move.l  %d6,%d0
+    bsr.w   rl_landtrk                 | the record (+ its slice, published when it sounds)
+    bsr.w   rl_ffland                  | its counters, fired for the boundary
+    bsr.w   rl_cond                    | its trig conditions
 rt3_tn:
-    addq.l  #1,%d4
-    cmpi.l  #16,%d4
+    addq.l  #1,%d6
+    cmpi.l  #16,%d6
     bne.b   rt3_tl
     tst.w   rl_lm
     bne.w   rt3_done
@@ -2306,16 +2787,16 @@ rt3_tn:
 |   temp reload, on the first step all its tracks share, in phase. (A reload of a pattern you are NOT on
 |   is one: it lands offline and stock's cue takes the OT there -- CHAIN AFTER, or DIRECT JUMP when on.)
 rt3_all:
-    moveq   #0,%d4
+    moveq   #0,%d6
 rt3_al:
     bsr.w   rl_ready
     tst.l   %d0
-    beq.w   rt3_done                   | not every track starts a step here: wait
-    addq.l  #1,%d4
-    cmpi.l  #16,%d4
+    beq.w   rt3_done                   | not every track ends a step here (or t' < 0, or stock lands one): wait
+    addq.l  #1,%d6
+    cmpi.l  #16,%d6
     bne.b   rt3_al
-    tst.l   %d6
-    beq.b   rt3_go
+    tst.l   %d4
+    beq.b   rt3_mem
     move.l  %d7,%d1                    | the master too, old and new
     remu.l  %d5,%d2:%d1
     tst.l   %d2
@@ -2326,20 +2807,50 @@ rt3_al:
     remu.l  %d0,%d2:%d1
     tst.l   %d2
     bne.w   rt3_done
+|   the members (Clyps' together landing): track reloads -- theirs (a NORMAL one may change the pattern's rate;
+|   the others then move only if their rate or place does, rl_tlff); a whole pattern -- every track when it
+|   changes the pattern's rate (Clyps' cl_noskip), else the tracks whose sequence differs (rl_rdm, at the
+|   staging) or whose slice changes (rl_chg, all of them on a Part-link change)
+rt3_mem:
+    moveq   #0,%d3
+    move.w  rl_lm,%d3
+    tst.b   rl_lp
+    beq.b   rt3_go
+    move.w  rl_rdm,%d3
+    tst.l   %d4
+    beq.b   rt3_go
+    move.l  #0xffff,%d3
 rt3_go:
+    clr.w   rl_chg
     bsr.w   rl_landall
-    tst.l   %d6
-    beq.b   rt3_ca
-    bsr.w   rl_rephase
-    bra.b   rt3_done
-rt3_ca:
-    moveq   #0,%d4
-rt3_cl:
-    bsr.w   rl_ctr
-    addq.l  #1,%d4
-    cmpi.l  #16,%d4
-    bne.b   rt3_cl
-    bra.b   rt3_done
+    move.w  rl_chg,%d0
+    or.l    %d0,%d3
+    andi.l  #0xffff,%d3                | d3 = the members
+    tst.l   %d4
+    beq.b   rt3_m0
+    bsr.w   rl_plive
+    bsr.w   rl_mrate
+    move.l  %d0,%d5                    | a rate change: the reloads below count from the new master's rate
+rt3_m0:
+    moveq   #0,%d6                     | counters at the new rates, fired at once: the members, and on a rate
+rt3_c:                                 | change every track whose rate or place moves
+    btst    %d6,%d3
+    bne.b   rt3_cc
+    tst.l   %d4
+    beq.b   rt3_cn
+rt3_cc:
+    bsr.w   rl_tlff
+    btst    %d6,%d3
+    beq.b   rt3_cn
+    bsr.w   rl_cond                    | a member: its trig conditions
+rt3_cn:
+    addq.l  #1,%d6
+    cmpi.l  #16,%d6
+    bne.b   rt3_c
+    tst.l   %d4
+    beq.w   rt3_done
+    bsr.w   rl_mreph
+    bra.w   rt3_done
 rt3_off:
 |   the target no longer plays (a pattern change, a DIRECT JUMP): no phase to keep, land it now
     clr.b   rl_defer
@@ -2348,7 +2859,7 @@ rt3_done:
     clr.b   rl_defer
     tst.b   rl_spn
     beq.b   rt3_rest
-    bsr.w   rl_spcount0                | the ones armed in THIS tick get their count now
+    bsr.w   rl_spdo                    | the slices due now reach the engine
 rt3_rest:
     movem.l (%sp),%d0-%d7/%a0-%a6
     lea     60(%sp),%sp
@@ -2361,11 +2872,13 @@ rt3_out:
 | a stock pattern change lands. CLYPS' measured rule (A1/A2 oracles): a copy HERE equals a stock
 | change, because the wrap body re-homes every track right after; phase D of the next tick is one
 | tick too late. So whatever is pending lands here, data only, with the scale caches set before the
-| re-home -- or, when a pattern change lands or the target no longer plays, just the data.
+| re-home -- or, when a pattern change lands or the target no longer plays, just the data. Its trig
+| conditions are set on the next tick (rl_cdo: the re-home counts the landed tracks' pass first; Clyps'
+| cl_wrcond), its publishes wait for the incoming sequence's first sounding trig (rl_spdo).
     .global rl_wrap
 rl_wrap:
     tst.b   rl_arm
-    beq.b   rw2_out
+    beq.w   rw2_out
     lea     -60(%sp),%sp
     movem.l %d0-%d7/%a0-%a6,(%sp)
     moveq   #2,%d0                     | a stock pattern change lands here: no publish (stock applies
@@ -2382,9 +2895,18 @@ rl_wrap:
     move.b  rl_tbank,%d1
     cmp.b   PLAY_BANK,%d1
     bne.b   rw2_off
-    moveq   #1,%d0                     | it plays on: published when its first new step sounds
+    moveq   #1,%d0                     | it plays on: published when its incoming sequence first sounds
     move.b  %d0,rl_defer
+    move.l  #0xffff,%d2                | the tracks landing here
+    tst.b   rl_lp
+    bne.b   rw2_m
+    moveq   #0,%d2
+    move.w  rl_lm,%d2
+rw2_m:
     bsr.w   rl_landall
+    move.w  rl_cdm,%d0
+    or.l    %d2,%d0
+    move.w  %d0,rl_cdm                 | ... their trig conditions on the next tick
     bsr.w   rl_scales                  | the scale caches before stock's re-home
     bra.b   rw2_done
 rw2_off:
@@ -2740,19 +3262,22 @@ rr3_m:
     move.b  %d0,rl_mch                 | PICKUP setup at the UI half: stock runs it BEFORE the restart
     rts
 
-| ================= 2026-11-09: the Part slice reaches the engine when the new step SOUNDS =================
-| (Found in CLYPS by its session, kyoti-m4-ac, trkseq 4a0e54f; the user heard it there.) The scheduler
-| builds each step one step AHEAD: a record landed at a step start is first HEARD one track-step later.
-| Publishing the slice (TRK_APPLY / the MIDI apply) or restarting a new machine's voice in the landing
-| tick changed the sound a step early, on the old sequence. Stock's own switch stamps its Part change
-| one master step later too (0x800019e4). So an in-phase landing (rl_defer 1) copies the slice into the
-| Part at once -- the builder reads it there -- but only ARMS the publish: rl_sp[t] = 0xff, its bank /
-| Part, a pending restart bit. At the end of the next phase D (rl_spcount; the landing tick's own, or
-| after a wrap the next one, when stock's re-home has set TSCALE_ARR) the count becomes tps(t's scale);
-| at 0 the publish runs (restart bit first, then the apply: stock's machine-edit order). Stopped, or the
-| target not playing: at once (rl_defer 0). A stock pattern change landing: none (rl_defer 2: stock
-| applies the new pattern's Part). A publish whose Part no longer sounds by then is dropped; a stop with
-| one pending flushes it from the UI tick.
+| ================= the Part slice reaches the engine when the incoming sequence first SOUNDS =================
+| 2026-11-09 (found in CLYPS by its session, kyoti-m4-ac, trkseq 4a0e54f): publishing the slice (TRK_APPLY / the
+| MIDI apply) or restarting a new machine's voice in the landing tick changed the sound before the new sequence
+| did. 2026-11-13, Clyps CL28-CL32 (the user, 2026-11-12: "a user should simply never hear the incoming
+| sequence's track settings applied to what they are changing away from"): an in-phase landing (rl_defer 1)
+| copies the slice into the Part at once -- the builder reads it there -- and ARMS its publish (rl_sp[t] =
+| 0xffff, its bank / Part, a pending restart bit). A tick landing (rl_ffland) then waits (0xfffe, rl_spwait)
+| for a pending event of the track with record bit 2 (the builder's 29 / 61 = a sample / note trig; 25 is a
+| trigless trig, 1 an empty step; a trig whose condition fails is never built) whose fire time is at or after
+| the landing, and publishes on the tick that fire time is less than half a tick away (rl_sptrig: micro-timing
+| honoured); a sequence without any sample trig publishes on the boundary tick (a count of 2). A wrap landing's
+| (stock re-homes after it) is resolved at the next phase D (rl_spdo): a trig anywhere -> the same wait, none ->
+| one step of its rate. Restart bit first, then the apply (stock's machine-edit order). Stopped, or the target not
+| playing: at once (rl_defer 0). A stock pattern change landing: none (rl_defer 2: stock applies the new
+| pattern's Part). A publish whose Part no longer sounds by then is dropped; a stop with one pending flushes it
+| from the UI tick.
 | rl_pubt (d0 = t 0..15, d2 = the Part, d6 = the bank). Keeps every register.
 rl_pubt:
     lea     -16(%sp),%sp
@@ -2766,8 +3291,9 @@ rl_pubt:
     lea     rl_spbk,%a0
     move.b  %d6,(%a0,%d0.l)
     lea     rl_sp,%a0
+    add.l   %d0,%d0
     moveq   #-1,%d1
-    move.b  %d1,(%a0,%d0.l)            | armed: the count is set at the end of a phase D
+    move.w  %d1,(%a0,%d0.l)            | armed: the landing (or, after a wrap, rl_spdo) sets what it waits for
     moveq   #1,%d1
     move.b  %d1,rl_spn
     bra.b   pt3_out
@@ -2816,108 +3342,217 @@ p1_out:
     movem.l (%sp),%d0-%d1/%a0-%a1
     lea     16(%sp),%sp
     rts
-| rl_spcount (tick: phase D, first, every tick while one is pending): counts the armed publishes down
-| and runs those that reach 0 -- if their Part still sounds -- (rl_spcount0 gives the newly armed their
-| count at the end of the tick). Uses d0-d7/a0-a1 (the tick saved every register; t0 is computed after).
-rl_spcount:
-|   the Part that sounds: the PLAYING pattern's own link (slab(PLAY_BANK, ACT_PAT) + 0x8e57) -- not the UI's
-|   mirror 0x80000003, which stock's switch reaches a UI pass later (CLYPS' session, 2026-11-09)
-    moveq   #0,%d0
-    move.b  PLAY_BANK,%d0
-    move.l  %d0,%d7                    | d7 = the playing bank
-    move.l  #BANKSTRIDE,%d1
-    muls.l  %d1,%d0
-    movea.l #BLOB,%a0
-    adda.l  %d0,%a0
-    moveq   #0,%d0
-    move.b  ACT_PAT,%d0
-    move.l  #PATSTRIDE,%d1
-    muls.l  %d1,%d0
-    adda.l  %d0,%a0
-    adda.l  #PAT_PART,%a0
+| rl_spdo (the sequencer tick, phase D's end; every register saved): the armed publishes (Clyps' cl_spdo). Per
+| track a word: 0 none; 0xffff armed at a wrap (resolved here: its new cycle's step 0 sounds a step later, then
+| its first trig); 0xfffe waiting for a sounding trig (rl_sptrig); else ticks to go. Uses d0-d7/a0-a1.
+rl_spdo:
     moveq   #0,%d6
-    move.b  (%a0),%d6
-    andi.l  #3,%d6                     | d6 = the sounding Part
-    moveq   #0,%d3                     | d3 = 1: something still pending
-    moveq   #0,%d4
-sp3_l:
+    moveq   #0,%d3                     | d3 = 1: one is still pending
+sd3_l:
+    move.l  %d6,%d1
+    add.l   %d1,%d1                    | d1 = word index
     lea     rl_sp,%a0
-    moveq   #0,%d5
-    move.b  (%a0,%d4.l),%d5
-    beq.b   sp3_n
-    cmpi.l  #0xff,%d5
-    beq.b   sp3_k                      | armed, not counting yet: still pending
-    subq.l  #1,%d5
-    move.b  %d5,(%a0,%d4.l)
-    bne.b   sp3_k
-|   its new step sounds now: publish, if its Part is still the sounding one
-    lea     rl_spbk,%a0
-    moveq   #0,%d1
-    move.b  (%a0,%d4.l),%d1
-    cmp.l   %d7,%d1
-    bne.b   sp3_drop
-    lea     rl_spp,%a0
-    moveq   #0,%d2
-    move.b  (%a0,%d4.l),%d2
-    cmp.l   %d6,%d2
-    bne.b   sp3_drop
-    andi.l  #0xff,%d1
-    move.l  %d4,%d0
-    bsr.w   rl_pub1
-    bra.b   sp3_n
-sp3_drop:
-    move.b  rl_spr,%d1
-    bclr    %d4,%d1
-    move.b  %d1,rl_spr
-    bra.b   sp3_n
-sp3_k:
+    moveq   #0,%d0
+    move.w  (%a0,%d1.l),%d0
+    beq.b   sd3_n
+    cmpi.l  #0xfffe,%d0
+    beq.b   sd3_wt
+    cmpi.l  #0xffff,%d0
+    bne.b   sd3_dec
+    moveq   #0,%d0
+    bsr.w   rl_ftrig                   | a sample trig anywhere in the incoming sequence?
+    tst.l   %d0
+    bmi.b   sd3_wnt
+    bsr.w   rl_spwait                  | yes: wait for the first one that sounds
     moveq   #1,%d3
-sp3_n:
-    addq.l  #1,%d4
-    cmpi.l  #16,%d4
-    bne.b   sp3_l
+    bra.b   sd3_n
+sd3_wnt:
+    lea     TSCALE_ARR,%a1             | none: when its new cycle's step 0 sounds, a step of its rate later
+    moveq   #0,%d0
+    move.b  (%a1,%d6.l),%d0
+    bsr.w   rl_tps
+    move.l  %d6,%d1
+    add.l   %d1,%d1
+    lea     rl_sp,%a0
+    move.w  %d0,(%a0,%d1.l)
+    moveq   #1,%d3
+    bra.b   sd3_n
+sd3_wt:
+    bsr.w   rl_sptrig                  | a sounding trig of the incoming sequence fires within half a tick?
+    tst.l   %d0
+    bne.b   sd3_go
+    moveq   #1,%d3
+    bra.b   sd3_n
+sd3_dec:
+    subq.l  #1,%d0
+    move.w  %d0,(%a0,%d1.l)
+    beq.b   sd3_go
+    moveq   #1,%d3
+    bra.b   sd3_n
+sd3_go:
+    bsr.w   rl_sppub
+sd3_n:
+    addq.l  #1,%d6
+    cmpi.l  #16,%d6
+    bne.b   sd3_l
     move.b  %d3,rl_spn
     rts
-| rl_spcount0: the newly armed (0xff) get their count, tps(the track's scale cache, as the landing
-| or stock's re-home set it). End of phase D. Uses d0/d3-d4/a0.
-rl_spcount0:
-    moveq   #0,%d3
+| rl_sppub (d6 = t): its pending slice to the engine now (and a new machine's restart) -- unless its Part no
+| longer sounds (a pattern change or DIRECT JUMP landed meanwhile: that Part is the engine's now): the PLAYING
+| pattern's own link (slab(PLAY_BANK, ACT_PAT) + 0x8e57), not the UI's mirror 0x80000003, which stock's switch
+| reaches a UI pass later (CLYPS' session, 2026-11-09). Keeps d2-d7/a2-a6.
+rl_sppub:
+    move.l  %d2,-(%sp)
     lea     rl_sp,%a0
-    moveq   #0,%d4
-sp3_any:
-    tst.b   (%a0,%d4.l)
-    beq.b   sp3_an0
-    moveq   #1,%d3                     | something is pending
-sp3_an0:
-    addq.l  #1,%d4
-    cmpi.l  #16,%d4
-    bne.b   sp3_any
-    moveq   #0,%d4
-sp3_a:
-    lea     rl_sp,%a0
-    move.b  (%a0,%d4.l),%d0
-    cmpi.b  #-1,%d0
-    bne.b   sp3_an
-    lea     TSCALE_ARR,%a0
+    move.l  %d6,%d0
+    add.l   %d0,%d0
+    clr.w   (%a0,%d0.l)
+    lea     rl_spbk,%a0
+    move.b  (%a0,%d6.l),%d0
+    cmp.b   PLAY_BANK,%d0
+    bne.b   sq3_drop
+    bsr.w   rl_plive
+    adda.l  #PAT_PART,%a0
     moveq   #0,%d0
-    move.b  (%a0,%d4.l),%d0
-    bsr.w   rl_tps
-    tst.l   %d0
-    bne.b   sp3_c
-    moveq   #1,%d0
-sp3_c:
-    cmpi.l  #254,%d0
-    bls.b   sp3_s
-    move.l  #254,%d0
-sp3_s:
+    move.b  (%a0),%d0
+    andi.l  #3,%d0                     | the sounding Part
+    lea     rl_spp,%a0
+    moveq   #0,%d2
+    move.b  (%a0,%d6.l),%d2
+    cmp.l   %d0,%d2
+    bne.b   sq3_drop
+    moveq   #0,%d1
+    move.b  PLAY_BANK,%d1
+    move.l  %d6,%d0
+    bsr.w   rl_pub1
+    bra.b   sq3_out
+sq3_drop:
+    move.b  rl_spr,%d1
+    bclr    %d6,%d1
+    move.b  %d1,rl_spr
+sq3_out:
+    move.l  (%sp)+,%d2
+    rts
+| rl_spwait (d6 = t): t's landed slice waits for the incoming sequence's first trig that SOUNDS: state 0xfffe,
+| and the clock at the landing (nothing pending of t is older: the landing purged it). Keeps d1-d7/a1-a6.
+rl_spwait:
+    move.l  %d1,-(%sp)
+    move.l  %d6,%d1
+    add.l   %d1,%d1
     lea     rl_sp,%a0
-    move.b  %d0,(%a0,%d4.l)
-    moveq   #1,%d3
-sp3_an:
-    addq.l  #1,%d4
-    cmpi.l  #16,%d4
-    bne.b   sp3_a
-    move.b  %d3,rl_spn
+    move.w  #0xfffe,%d0
+    move.w  %d0,(%a0,%d1.l)
+    move.l  SCLK,%d0
+    cmpi.l  #8,%d6
+    bcs.b   sw2_a
+    move.l  MCLK,%d0
+sw2_a:
+    add.l   %d1,%d1
+    lea     rl_sptm,%a0
+    move.l  %d0,(%a0,%d1.l)
+    move.l  (%sp)+,%d1
+    rts
+| rl_sptrig (d6 = t, waiting) -> d0 = 1 when one of t's pending events is a sounding trig (record bit 2) of the
+| incoming sequence (fire time at or after the landing's clock) that fires before half a tick from now: the
+| slice is published on the tick nearest its sound. Audio: the primary table vs the sample clock (a tick
+| 0x285ff0); MIDI: its table vs the MIDI clock (a tick 16800). Clyps' cl_sptrig. Keeps d1-d7/a2-a6.
+rl_sptrig:
+    lea     -28(%sp),%sp
+    movem.l %d1-%d5/%a2-%a3,(%sp)
+    move.l  %d6,%d0
+    lsl.l   #2,%d0
+    lea     rl_sptm,%a0
+    move.l  (%a0,%d0.l),%d4            | d4 = the landing's clock
+    move.l  %d6,%d3                    | d3 = t's index in its table
+    cmpi.l  #8,%d6
+    bcc.b   st2_m
+    move.l  SCLK,%d2                   | d2 = now
+    move.l  #0x142ff8,%d5              | d5 = half a tick
+    movea.l #0x46c7fe44,%a2            | a2 = slot masks, a0 = fire times, a1 = records
+    movea.l #0x80001904,%a0
+    movea.l #0x46c7e998,%a1
+    bra.b   st2_go
+st2_m:
+    subq.l  #8,%d3
+    move.l  MCLK,%d2
+    move.l  #8400,%d5
+    movea.l #0x46c77be2,%a2
+    movea.l #0x46c76a26,%a0
+    movea.l #0x46c769c0,%a1
+st2_go:
+    moveq   #0,%d1                     | d1 = slot
+st2_l:
+    moveq   #0,%d0
+    move.b  (%a2,%d3.l),%d0
+    btst    %d1,%d0
+    beq.b   st2_n                      | nothing pending in it
+    move.l  %d1,%d0
+    lsl.l   #3,%d0
+    add.l   %d3,%d0
+    movea.l %d0,%a3                    | a3 = idx = track + slot * 8
+    move.l  (%a1,%d0.l*4),%d0
+    btst    #2,%d0
+    beq.b   st2_n                      | not a sounding trig
+    move.l  %a3,%d0
+    move.l  (%a0,%d0.l*4),%d0          | its fire time
+    move.l  %d0,%a3
+    sub.l   %d4,%d0
+    bmi.b   st2_n                      | older than the landing: not the incoming sequence's
+    move.l  %a3,%d0
+    sub.l   %d2,%d0                    | fire time - now
+    cmp.l   %d5,%d0
+    blt.b   st2_yes                    | within half a tick (or past: a negative micro)
+st2_n:
+    addq.l  #1,%d1
+    cmpi.l  #3,%d1
+    bne.b   st2_l
+    moveq   #0,%d0
+    bra.b   st2_out
+st2_yes:
+    moveq   #1,%d0
+st2_out:
+    movem.l (%sp),%d1-%d5/%a2-%a3
+    lea     28(%sp),%sp
+    rts
+| rl_ftrig (d6 = t, d0 = a step k): d0 = the steps from k (0 = k itself) to t's first sample trig in the playing
+| pattern, its length wrapping; -1 without any (nothing will ever trigger). The note / sample trig layer is the
+| record's first 8 bytes, a big-endian 64-bit mask, bit s = step s (the builder 0x4009d1e8: steps 0..31 in +4,
+| 32..63 in +0). Clyps' cl_ftrig. Keeps d1-d7/a2-a6.
+rl_ftrig:
+    lea     -20(%sp),%sp
+    movem.l %d1-%d4/%a2,(%sp)
+    move.l  %d0,%d4                    | d4 = k
+    bsr.w   rl_plive
+    movea.l %a0,%a2
+    move.l  %d6,%d0
+    bsr.w   rl_rate                    | d1 = its length
+    move.l  %d1,%d3                    | d3 = len
+    move.l  %d6,%d0
+    bsr.w   rl_toff
+    adda.l  %d0,%a2                    | a2 = t's record
+    moveq   #0,%d2                     | d2 = d
+ft2_l:
+    move.l  %d4,%d0
+    add.l   %d2,%d0
+    remu.l  %d3,%d1:%d0                | d1 = (k + d) mod len
+    cmpi.l  #32,%d1
+    bcc.b   ft2_hi
+    move.l  4(%a2),%d0
+    bra.b   ft2_t
+ft2_hi:
+    subi.l  #32,%d1
+    move.l  (%a2),%d0
+ft2_t:
+    btst    %d1,%d0
+    bne.b   ft2_got
+    addq.l  #1,%d2
+    cmp.l   %d3,%d2
+    bcs.b   ft2_l
+    moveq   #-1,%d2
+ft2_got:
+    move.l  %d2,%d0
+    movem.l (%sp),%d1-%d4/%a2
+    lea     20(%sp),%sp
     rts
 | rl_spflush: every pending publish now (the transport stopped with one pending). UI task.
 rl_spflush:
@@ -2926,9 +3561,11 @@ rl_spflush:
     moveq   #0,%d0
 sf3_l:
     lea     rl_sp,%a0
-    tst.b   (%a0,%d0.l)
+    move.l  %d0,%d1
+    add.l   %d1,%d1
+    tst.w   (%a0,%d1.l)
     beq.b   sf3_n
-    clr.b   (%a0,%d0.l)
+    clr.w   (%a0,%d1.l)
     lea     rl_spbk,%a0
     moveq   #0,%d1
     move.b  (%a0,%d0.l),%d1
@@ -3512,7 +4149,8 @@ rl_lf:
 rl_chg:
     .space 2                           | tracks whose slice a pattern landing changes (2026-11-09)
 rl_sp:
-    .space 16                          | per track: 0 none, 0xff armed, else ticks until its publish
+    .space 32                          | per track (word): 0 none, 0xffff armed, 0xfffe waiting for a sounding
+                                       | trig (rl_sptrig), else ticks until its publish (2026-11-13)
 rl_spp:
     .space 16                          | ... its Part
 rl_spbk:
@@ -3528,6 +4166,21 @@ rl_lnk1:
 rl_defer:
     .space 1                           | rl_put's publishes: 0 now, 1 deferred, 2 none
     .align 2
+|   2026-11-13: Clyps' landing rules (rl_ffland, rl_cond, rl_creset, rl_spdo)
+rl_T:
+    .space 4                           | running ticks since PLAY (rl_tick; 0 while stopped)
+rl_Tres:
+    .space 4                           | ... at the last reset of every track's trig conditions (rl_creset)
+rl_sptm:
+    .space 64                          | per track (long): the clock at its landing (rl_spwait)
+rl_fxv:
+    .space 16                          | per track: the reload its fix-up writes (rl_fixup)
+rl_fxm:
+    .space 2                           | ... the tracks whose reload is fixed up on the next tick
+rl_cdm:
+    .space 2                           | tracks a wrap landed: their trig conditions on the next tick (rl_cdo)
+rl_rdm:
+    .space 2                           | a staged whole pattern: the tracks whose record differs (rl_rdiff)
 rl_ldm:
     .space 2                           | tracks landed (for the UI half)
 rl_ldf:
