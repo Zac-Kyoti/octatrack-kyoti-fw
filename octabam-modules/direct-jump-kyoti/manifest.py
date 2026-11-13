@@ -6,8 +6,9 @@ A cued pattern takes over on the NEXT STEP instead of waiting for the current
 one to finish, and the landing is LOCKED TO THE MASTER CLOCK: the new pattern
 plays exactly where it would be had it been running since START, whatever its
 track lengths, scales or master settings -- never shifted by a step, never a
-fraction of a step off, and its first trig always wins. The Part, START SILENT
-and trig conditions change as on a stock pattern change, and the last MIDI
+fraction of a step off, and its first trig always wins. The Part and START SILENT
+change as on a stock pattern change; trig conditions stand where the new pattern's
+would, had it played since START (V7.0.2, WIP), and the last MIDI
 Program Change sent always names the pattern that plays. The arranger and
 pattern chains are untouched. (The Analog Rytm's own DIRECT JUMP, by contrast,
 lands shifted or fractional whenever lengths or scales differ; that difference
@@ -44,8 +45,9 @@ MEASURED. Hardware-confirmed on the author's MKI: the clock-locked timing and th
 change, from the ROM cave (2026-09-27/28) and from DRAM in an octabam-built image with
 all six KYOTI modules (2026-10-01; also OFF at power-on, the PTN+YES toggle, OFF again
 after a power cycle). Emulator-verified only (ot_emu, real image bytes):
-Program Change on fast re-cues, MIDI tracks, START SILENT and the trig-condition
-reset (the last two identical to a stock pattern change in the emulator).
+Program Change on fast re-cues, MIDI tracks, START SILENT (identical to a stock
+pattern change in the emulator) and V7.0.2's trig conditions (equal to a never-switched
+reference run at every tick, tools/cmp_reflock.py --cond; not flashed).
 Standalone image and version string: tools/build_direct_jump_kyoti.py -> 140C_KDJ7.
 """
 
@@ -80,10 +82,11 @@ PTN_LAYER_YES_PRESS = PTN_LAYER_YES + 2                # the u32 press handler
 # ---- the author's oracle -------------------------------------------------------
 # patch_directjump_v7.s, m68k-elf-as -mcpu=5407 or 54455 (identical bytes), no symbols
 # (DJ_MODE in the unit and DJ_TOAST_DUR = 0x44 are the source's defaults), linked at
-# 0x400d6d38: byte for byte the DIRECT JUMP code of the KYOTI V1.0 image the author
-# flashed on 2026-09-30 (syx 576756fd...; the 2026-10-01 re-promotion places it 16 B lower
-# because RELOAD shrank). octabam re-links it there on every build and compares.
-REFERENCE = (0x400d6d38, "a0f480909d91b7fac0fb77d08dd8b5e2199fc14731d4bb427be71478e296bf9e")
+# 0x400d6d38. octabam re-links it there on every build and compares. V7.0.1 (2026 B,
+# a0f48090...) was byte for byte the DIRECT JUMP code of the KYOTI V1.0 image the author
+# flashed on 2026-09-30; V7.0.2 (2188 B, WIP 2026-11-13: dj_cond, the trig conditions of a
+# never-switched pattern instead of COND_RESET(-1)) is not flashed yet.
+REFERENCE = (0x400d6d38, "2444840d6110f3d4997e61aa3412ed0e074e589fd84e46483328738264b39c3d")
 
 MODULE = Module(
     name="direct-jump-kyoti",

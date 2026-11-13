@@ -11,7 +11,9 @@ always wins.
 Off by default, and it comes up OFF at every power-on: a unit that never enables
 it behaves exactly as stock.
 
-- The Part, START SILENT and trig conditions change as on a stock pattern change.
+- The Part and START SILENT change as on a stock pattern change. Trig conditions do not
+  start again: every A:B counter stands where the new pattern's would, had it played since
+  START (V7.0.2, WIP; a stock change restarts them).
 - The last MIDI Program Change sent always names the pattern that plays.
 - The arranger and pattern chains are untouched.
 
@@ -83,8 +85,10 @@ octabam-built image with all six KYOTI modules (2026-10-01). That image also con
 OFF at power-on, the `[PTN]`+`[YES]` toggle, and OFF again after a power cycle.
 
 **Emulator only** (`ot_emu`, Unicorn on real image bytes): Program Change on fast
-re-cues, MIDI tracks, and START SILENT and the trig-condition reset (both behave exactly
-as on a stock pattern change in the emulator, but were not exercised on the unit).
+re-cues, MIDI tracks, and START SILENT (exactly as on a stock pattern change in the
+emulator, not exercised on the unit). V7.0.2's trig conditions (WIP, not flashed): every
+track's A:B counter and the FILL / PRE latches equal a never-switched reference run's at
+every tick after each jump (`tools/cmp_reflock.py --cond`).
 
 Everything the emulators prove is control flow and image bytes, not how the unit
 sounds. Nothing here has been tested on an MKII.
@@ -124,7 +128,7 @@ Either can be selected without the other; the sites are disjoint.
 
 - MKII is untested.
 - Hardware confirmation of Program Change on fast re-cues, MIDI tracks, START SILENT
-  and the trig-condition reset.
+  and V7.0.2's trig conditions.
 
 ## Design notes
 

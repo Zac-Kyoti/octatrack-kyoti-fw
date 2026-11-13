@@ -4,7 +4,7 @@
 """
 Session 107/108 -- the V7 REFERENCE-LOCK oracle, comparer half (see diag_reflock.py).
 
-  python3 tools/cmp_reflock.py RUN.json REF_A.json [REF_B.json ...]
+  python3 tools/cmp_reflock.py [--cond] RUN.json REF_A.json [REF_B.json ...]
 
 For every segment of RUN during which ACT_PAT == P and a reference for P was given:
   * CLOCK   : metronome counters (beat-in-bar, tick-in-beat) must equal the reference's at
@@ -24,6 +24,10 @@ For every segment of RUN during which ACT_PAT == P and a reference for P was giv
               tick of the segment.  EXTRA = RUN will play something the reference will not
               (e.g. the outgoing pattern's leftover -- primacy says purge it); MISSING = the
               reverse.  A landing that fires the right tick with the wrong step shows here.
+  * COND    : (--cond, runs recorded with diag_reflock --cond) the trig-condition state: every
+              track's A:B pass counter 0x46107918 vs the reference at every tick of the segment
+              (part of the verdict), and the latch bytes 0x46107959 / 69 (FILL) / 79 (PRE)
+              reported beside it (the latches are part of the verdict too, unless --cond-cnt).
 """
 import collections
 import json
@@ -90,7 +94,23 @@ def vec(s, keys_arr, keys_scl):
     return tuple(tuple(s[k]) for k in keys_arr) + tuple(s[k] for k in keys_scl)
 
 
+def cond_check(run, ref, a, b, keys):
+    """first tick from which RUN == REF on `keys` to the segment's end, and the first mismatch."""
+    eq = [t in ref["by_t"] and all(run["by_t"][t][k] == ref["by_t"][t][k] for k in keys)
+          for t in range(a, b)]
+    locked_from = None
+    for i in range(len(eq) - 1, -1, -1):
+        if not eq[i]:
+            break
+        locked_from = a + i
+    first_bad = a + eq.index(False) if False in eq else None
+    return locked_from, first_bad
+
+
 def main(argv):
+    cond = "--cond" in argv or "--cond-cnt" in argv
+    cond_latch = "--cond" in argv
+    argv = [x for x in argv if x not in ("--cond", "--cond-cnt")]
     run = load(argv[0])
     refs = {}
     for p in argv[1:]:
@@ -167,6 +187,25 @@ def main(argv):
             d, sc, n = best
             tag = "IN PHASE" if d == 0 else f"SHIFTED {d:+d} ticks = {d / tps:+.2f} steps at 1x"
             print(f"   SHIFT : best fit d={d:+d} ({sc:.0%} of {n} ticks match) -> {tag}")
+        if cond:
+            if "cond" not in run["states"][0] or "cond" not in ref["states"][0]:
+                print("   COND  : not recorded (diag_reflock --cond) -- FAIL")
+                worst = "FAIL"
+            else:
+                for keys, name, gating in ((["cond"], "A:B counters", True),
+                                           (["c59", "c69"], "FILL latches 59/69", cond_latch),
+                                           (["c79"], "PRE latch 79", cond_latch)):
+                    lf, fb = cond_check(run, ref, a, b, keys)
+                    if lf is not None and lf <= a + 1:
+                        print(f"   COND  : {name}: LOCKED from t{lf} (segment start t{a})")
+                        continue
+                    sr, sf = run["by_t"][fb], ref["by_t"][fb]
+                    k = keys[0] if sr[keys[0]] != sf[keys[0]] else keys[-1]
+                    print(f"   COND  : {name}: " + (f"locked only from t{lf}" if lf is not None else "LOCK FAILED")
+                          + f" -- first mismatch t{fb}: run {k}={sr[k]} ref {sf[k]}"
+                          + ("" if gating else "   (reported, not graded)"))
+                    if gating:
+                        worst = "FAIL"
         if run["states"] and "ev_a" in run["states"][0] and "ev_a" in ref["states"][0]:
             rp = ref_pend[pat]
             bad_t = [t for t in range(a, b) if t in rp and run_pend.get(t) != rp[t]]

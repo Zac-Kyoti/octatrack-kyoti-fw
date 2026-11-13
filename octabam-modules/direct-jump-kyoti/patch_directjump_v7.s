@@ -17,6 +17,9 @@
 | since V6 -- schedules every track exactly; uniform-scale patterns land on the next master
 | step as before.  Plus: primacy purge of the outgoing pattern's pending events, and the
 | reload fix-up the reference requires.  Nothing touches the wrap-change body.
+| V7.0.2 (2026-11-13, WIP; the user's rule from Clyps): a jump no longer restarts the trig
+| conditions (COND_RESET(-1)); dj_cond puts every A:B counter where the never-switched
+| reference holds it (graded by tools/cmp_reflock.py --cond).
 | =========================================================================================
 | SPDX-License-Identifier: MIT
 | SPDX-FileCopyrightText: 2026 Zac Kyoti
@@ -688,10 +691,95 @@ ho_mt3:
     move.l  #P_PART,%d1
     move.b  (%a2,%d1.l),%d0
     move.b  %d0,ENG_MPART
-|   conditional trigs start fresh, as on every stock switch (0x400a484c-0x400a4856)
-    pea     -1
-    jsr     COND_RESET
-    addq.l  #4,%sp
+|   V7.0.2 (2026-11-13, the user's rule from Clyps, scope §1.29 C): the trig conditions stand where
+|   a never-switched incoming pattern would have them -- stock's switch (and V7.0.1) restarted them
+|   with COND_RESET(-1) 0x400a539c here.  dj_cond (below) sets every track's A:B pass counter.
+    bra.w   dj_cond
+
+| dj_cond: every track's trig-condition state at the landing tick t_L (dj_tland), as a reference run
+| that had played the incoming pattern since START holds it (REF-LOCK: tools/cmp_reflock.py --cond).
+|   A:B pass counter 0x46107918[t] = F(t_L): the passes track t would have begun since PLAY, in the
+|     incoming pattern's model (dj_bparams' tps_M / C / tps_t / len_t; time = dj_T, PLAY = 0, the
+|     master cycle starting at 0 mod C -- dj_tprime).  The measured stock facts (Clyps M1-M3,
+|     reference/handoffs/RELOAD_CLYPS_PORT.md rule 3): a pass starts at each own wrap (0x400a536c,
+|     t' = j*c - tps, c = len*tps) and at the master's restart (the wrap body, t' = C - tps_M), once
+|     when they coincide.  Per master cycle K = J + (rem != 0), J = (C - tps_M + tps) / c (rem its
+|     remainder); F(x) = q*K + min((u + tps - 1) / c, J) + (rem && u > C - tps_M), q = x / C,
+|     u = x mod C.  INF (C = 0): F(x) = (x + tps - 1) / c.  F(0) = 0, so nothing to subtract.
+|   PRE latch 0x46107979[t] = 1, as COND_RESET sets it: the incoming pattern's own last condition
+|     result is unknown here; 1 is what the reference holds while none has been evaluated.
+|   FILL latches 0x46107959 / 69 [t]: KEPT.  They hold the performer's FILL press (0x400a5460),
+|     which a reference run would hold as well; COND_RESET(-1) used to drop a latched FILL.
+|   Every register is free (dl_commit's caller, dj_land, saved them all); a2 is no longer needed.
+dj_cond:
+    move.l  dj_tland,%d7               | x = t_L (>= 0)
+    tst.l   dj_C
+    beq.b   cn_init                    | INF: no master cycle
+    move.l  dj_C,%d6
+    move.l  %d6,%d0
+    sub.l   dj_tpsM,%d0
+    movea.l %d0,%a6                    | a6 = C - tps_M: the master restart's t'
+    move.l  %d7,%d0
+    divu.l  %d6,%d0
+    movea.l %d0,%a5                    | a5 = q = x / C
+    muls.l  %d6,%d0
+    move.l  %d7,%d1
+    sub.l   %d0,%d1
+    movea.l %d1,%a2                    | a2 = u = x - q*C
+cn_init:
+    lea     dj_tps,%a3
+    lea     dj_len,%a4
+    lea     0x46107918,%a0             | A:B pass counters, long[16]
+    lea     0x46107979,%a1             | PRE latch, byte[16]
+    moveq   #16,%d5
+cn_loop:
+    moveq   #0,%d4
+    move.b  (%a3)+,%d4                 | tps
+    moveq   #0,%d3
+    move.b  (%a4)+,%d3                 | len
+    bne.b   1f
+    moveq   #1,%d3                     | (a length of 0 never plays: count it as 1)
+1:  muls.l  %d4,%d3                    | d3 = c = len * tps (> 0)
+    tst.l   dj_C
+    bne.b   cn_cyc
+    move.l  %d7,%d0                    | INF: F = (x + tps - 1) / c
+    add.l   %d4,%d0
+    subq.l  #1,%d0
+    divu.l  %d3,%d0
+    bra.b   cn_store
+cn_cyc:
+    move.l  %a6,%d0
+    add.l   %d4,%d0                    | C - tps_M + tps
+    move.l  %d0,%d1
+    divu.l  %d3,%d1                    | d1 = J: own wraps up to the wrap body
+    move.l  %d1,%d2
+    muls.l  %d3,%d2
+    sub.l   %d2,%d0                    | d0 = rem (!= 0: the master's restart is a pass start of its own)
+    move.l  %d1,%d2
+    tst.l   %d0
+    beq.b   2f
+    addq.l  #1,%d2                     | d2 = K: pass starts per master cycle
+2:  move.l  %a5,%d6
+    muls.l  %d2,%d6                    | d6 = q * K
+    move.l  %a2,%d2
+    add.l   %d4,%d2
+    subq.l  #1,%d2
+    divu.l  %d3,%d2                    | own wraps before u ...
+    cmp.l   %d1,%d2
+    bls.b   3f
+    move.l  %d1,%d2                    | ... at most J
+3:  tst.l   %d0
+    beq.b   4f
+    cmpa.l  %a6,%a2
+    bls.b   4f
+    addq.l  #1,%d2                     | the master's restart before u
+4:  move.l  %d6,%d0
+    add.l   %d2,%d0                    | F(x)
+cn_store:
+    move.l  %d0,(%a0)+
+    move.b  #1,(%a1)+
+    subq.l  #1,%d5
+    bne.w   cn_loop
     rts
 
 | ho_bits: OR (1 << (t+8)) into d4 for each of 8 tracks whose START SILENT byte is 1, or -1

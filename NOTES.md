@@ -37945,3 +37945,37 @@ Now 936 / 932 (<= 945): the pair fits, SC's donor becomes PLATE REV.
   `e855f6ca…`: verify_hooks + make check (32 FREE LOOP port scenarios) pass; octabam check + reach pass on `f7d72906`.
 - Trap: a FREE LOOP test remix must carry RLEN PLEN (the port fixture's recorder setups); without it undo / undoto /
   undostep / replace fail. Not flashed.
+
+## 2026-11-13 (`dj-clyps`) — DIRECT JUMP V7.0.2 (WIP, NOT flashed): trig conditions as a never-switched pattern; purge race and Part timing measured
+
+Handoff: `reference/handoffs/DJ_CLYPS_PORT.md` (trkseq). Item 1 only is implemented; items 2-3 are measured, not changed.
+- **Item 1:** `dj_handoff` no longer calls COND_RESET(-1); `dj_cond` sets every track's A:B counter 0x46107918[t] to
+  F(t_L) = the passes it would have begun since PLAY in the incoming pattern's model (Clyps' rule 3 formula, R = PLAY,
+  B = 0 in dj_T: F(0) = 0). PRE latch 0x46107979[t] = 1 (COND_RESET's value; the incoming pattern's own last result is
+  unknown), FILL latches 0x46107959 / 69 kept (the performer's press). No COND_RESET detour: no collision with Clyps'
+  `cl_creset` (0x400a539c) in KYOTI-with-Clyps, where `cl_Tres` now stays at its PLAY value across jumps (0 in c1/c2).
+- Measured: PLAY never calls COND_RESET (KEY_PLAY and FW_TRANSPORT probed, 0 calls); STOP does (0x400a12b8, by reading).
+  `diag_reflock.py --cond` records the counters + latches, `--stop-reset` runs STOP's COND_RESET(-1) before PLAY (the
+  harness otherwise starts with PRE = RAM's 0); `cmp_reflock.py --cond` grades them per segment.
+- Gates (emulator only): REF-LOCK with --cond on the standalone image (3214517c…): 16↔7 NORMAL 4 jumps, A07↔A08
+  PER-TRACK master 1x↔2x, DJMAST2 1x↔2x, master INF -- PASS (counters + latches from the landing tick, state from the
+  tick after, pending events identical); mixed 3/4x+3/2x+1/4x: PASS for 2 of 3 jumps, the third is a PRE-EXISTING
+  V7.0.1 race (identical on the old image, run o4): a cue in the outgoing pattern's last step arms DJ for the lcm grid
+  (24 ticks with a 1/4x track), stock's wrap-change takes the cue first (t372, step 0, conditions reset), DJ re-lands
+  at t383 -- 11 ticks off the reference. V7.0.1 (old image) fails --cond on every jump, as expected. KYOTI default and
+  KYOTI-with-Clyps: 16↔7 + A07↔A08 PASS. DJ-OFF and DJ-ON-idle identity vs stock: IDENTICAL. Bugbuild (WIP base
+  entry in build_bugbuilds.py, BUG_DJC1): DISJOINT / ALL PRESERVED / NO STRAYS. octabam REFERENCE re-pinned
+  (2444840d…, 2188 B); octabam's own build not run.
+- **Item 2 (purge race), measured on the 16↔7 run:** at dj_purge the outgoing boundary event's fire time equals the
+  sample clock EXACTLY (fire - SCLK = +0.0000 tick, both landings): purged by `bmi` only because the tie counts as
+  "not yet due". The incoming step's events are written with fire - SCLK = 0 (ahead 1). The engine does not protect:
+  its switch (0x4000af24..0x4000b1dc, at ENG_ATIME's frame) applies the Part and resets 0x8000182a..39; the firing loop
+  (0x4000b834..) drops events only for the mute masks -- nothing drops old-pattern events. So DIRECT JUMP has the CL25
+  tie; on the unit it would flip only if SCLK is re-derived from the frame clock (0x4000ae06, armed by 0x80006686)
+  between the old event's scheduling and the landing. Not observed by the user. Not changed.
+- **Item 3:** the light Part apply (0x40009e00 via 0x4000b1d8) ran in the frame right after the landing (frame clock
+  - landing SCLK = 0.017 tick) -- the same frame the incoming first step fires; a track whose incoming sequence has no
+  trig there keeps ringing under the new Part. Not changed.
+- Builds (WIP): standalone `out/OCTATRACK_OS1.40C_DIRECT_JUMP_KYOTI.syx` (140C_KDJC1); KYOTI V1.7 image (reads
+  "KYOTI V1.7"); KYOTI-with-Clyps built in a scratch trkseq@ae75d15 tree + this DJ source (KYOTI DJC1); Bugbuild
+  BUG_DJC1. None flashed. Evidence: out/djc/ (runs, launch.sh, probes).
