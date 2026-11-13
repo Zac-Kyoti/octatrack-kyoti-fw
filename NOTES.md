@@ -38005,3 +38005,16 @@ Now 936 / 932 (<= 945): the pair fits, SC's donor becomes PLATE REV.
   `140C_RLCP2`, DRAM 10 pages); BUG_RL3 mainos `4f8a579b…` (syx `9f0c1230…`); KYOTI V1.7 mainos `ce93776d…`
   (syx `f1881e0c…`; OS VERSION still reads KYOTI V1.7). octabam REFERENCE `5e04de53…` (51,600 B), twelve detours (the
   manifest's hooks and reference checked locally; no octabam build run, no pin PR).
+- **Follow-up (same day): Clyps CL33's STOP fix.** Stock STOP (`0x400a12b8`) calls COND_RESET(-1) after clearing
+  RUNNING but before the next tick clears `rl_T`, so `rl_creset` stamped `rl_Tres` with the last running count; PLAY
+  never calls COND_RESET (logged in the emulator: one call at STOP, return `0x400a12be`, `rl_T` 259 -> `rl_Tres` 259,
+  none at PLAY). Now `rl_tick`'s stopped branch clears `rl_Tres` beside `rl_T`. New harness op `X` (STOP, then PLAY
+  -- route A: PLAY's handler alone left the transport stopped, so `start_transport_live` follows), the graders
+  re-base the model at a restart. Scenario LXP (T1 / T2 16 steps, SEQ reload, ~4 passes, STOP, PLAY, ~3 passes, SEQ
+  reload): before the fix the second landing's A:B counter was 0 where untouched T2 had 1 (RULES FAIL); after it,
+  model + RULES PASS. Standalone `diag_reload_quant.py` 32/32 PASS; L1 / L2 (SEQ 1x, FULL) model + RULES PASS, FULL
+  4/4. DIRECT JUMP-on I failures: the FINAL KYOTI V1.7 (`ee151d9c…`, main's out/KYOTI) with main's gate gives the
+  same 30 ok / 2 FAIL (I's precondition, 300 and 1500 ms) -- they predate this port.
+- **Builds (WIP, NOT flashed):** standalone mainos `ff5cac49…` (syx `601caf6b…`, `140C_RLCP3`); BUG_RL3 mainos
+  `7d94fcf2…` (syx `54856c4e…`); KYOTI V1.7 mainos `c735613c…` (syx `00c1f5c0…`). octabam REFERENCE `4d80ed06…`
+  (51,608 B).

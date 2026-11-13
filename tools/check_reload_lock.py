@@ -76,31 +76,42 @@ def grade(path):
             if t > tk:
                 p = q
         return p
-    # calibrate the tick offset on the run before the first landing (every track)
-    first = min([x[0] for x in L] or [S[-1][0]])
-    best = None
-    for off in range(-8, 9):
-        bad = 0
-        for st in S:
-            t = st[0] + off
-            if st[0] >= first or t < 1:
-                continue
-            tpsM, mlen = rate(p0, None)
-            for k in range(8):
-                _, _, tps, ln = rate(p0, k)
-                es, et, _ = model(t, tpsM, mlen, tps, ln)
-                bad += st[4][k] != es or st[5][k] != et
-        if best is None or bad < best[1]:
-            best = (off, bad)
-    off = best[0]
-    print(f"   tick offset {off} (pre-landing mismatches {best[1]})")
+    # calibrate the tick offset on the run before the first landing (every track); a STOP + PLAY (op X,
+    # d["restarts"] = [stop tick, play tick]) starts the model again: each segment gets its own offset, calibrated
+    # before its first landing with the params in force then, and the stopped ticks are not graded
+    RS = d.get("restarts", [])
+    segs = [0] + [pl for _, pl in RS]
+    stopped = lambda t0: any(a < t0 <= b for a, b in RS)
+    seg_of = lambda t0: max(sg for sg in segs if sg < t0 or sg == 0)   # a PLAY at tick sg: its first tick is sg + 1
+    offs = {}
+    for sg in segs:
+        nxt_sg = min([x for x in segs if x > sg] + [S[-1][0] + 1])
+        first = min([x[0] for x in L if sg < x[0] < nxt_sg] or [nxt_sg])
+        pz = pars(sg + 1) if sg else p0
+        best = None
+        for off in range(-8, 9):
+            bad = 0
+            for st in S:
+                t = st[0] - sg + off
+                if not sg < st[0] < first or t < 1 or stopped(st[0]):
+                    continue
+                tpsM, mlen = rate(pz, None)
+                for k in range(8):
+                    _, _, tps, ln = rate(pz, k)
+                    es, et, _ = model(t, tpsM, mlen, tps, ln)
+                    bad += st[4][k] != es or st[5][k] != et
+            if best is None or bad < best[1]:
+                best = (off, bad)
+        offs[sg] = best[0] - sg
+        print(f"   tick offset {best[0]} from tick {sg} (pre-landing mismatches {best[1]})")
+    off = offs[0]
     land_ticks = {x[0] for x in L}
     fails = {}
     for st in S:
         t0 = st[0]
-        if t0 in land_ticks or t0 + 0 < 1:
+        if t0 in land_ticks or t0 + 0 < 1 or stopped(t0) or t0 in [b + 1 for _, b in RS]:
             continue
-        t = t0 + off
+        t = t0 + offs[seg_of(t0)]
         p = pars(t0)
         tpsM, mlen = rate(p, None)
         for k in range(8):
@@ -144,7 +155,7 @@ def grade(path):
         p = pars(lt + 1)
         tpsM, mlen = rate(p, None)
         _, _, tps, ln = rate(p, k)
-        _, _, tln = model(newf[0] + off, tpsM, mlen, tps, ln)
+        _, _, tln = model(newf[0] + offs[seg_of(newf[0])], tpsM, mlen, tps, ln)
         print(f"   landing T{k + 1}: request t{rq[0]} (m {rq[4]}.{rq[5]}, code {rq[2]:#x} now {rq[3]}) -> landed t{lt} "
               f"in {where} (m {ms}.{mt}); new sound from t{newf[0]} step {newf[1]} (ahead {newf[4]}; t' {tln}); "
               f"old steps heard after the request: {len(olds)} {olds}")
@@ -168,7 +179,7 @@ def grade(path):
             exp = None
             if kind:
                 for tt in range(rq[0], rq[0] + 400):         # the next ISR may land it (DJ: "a request on a boundary tick lands that tick")
-                    _, _, tl_ = model(tt + 1 + off, tpsM0, mlen0, tps0, 1)   # phase D of the next tick
+                    _, _, tl_ = model(tt + 1 + offs[seg_of(tt + 1)], tpsM0, mlen0, tps0, 1)   # phase D of the next tick
                     tl_ += 1                                  # CL26: the boundary it aims at is the tick after
                     if tl_ >= 0 and tl_ % L_ == 0:
                         exp = tt

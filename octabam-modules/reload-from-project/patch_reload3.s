@@ -2703,6 +2703,7 @@ rl_tick:
     tst.l   RUNNING
     bne.b   rt3_run
     clr.l   rl_T                       | stopped: the running-tick count starts again at PLAY
+    clr.l   rl_Tres                    | STOP's COND_RESET(-1) noted its last count; PLAY never resets
     clr.w   rl_cdm
     clr.w   rl_fxm                     | ... and stock's start sets every track's reload itself
     bra.w   rt3_out                    | (the UI tick lands what is pending / flushes the publishes)

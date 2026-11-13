@@ -125,10 +125,10 @@ HOOKS = (
 # ---- the author's oracle -------------------------------------------------------
 # patch_reload3.s, m68k-elf-as -mcpu=5407 or 54455 (identical bytes; RL_DONE is the
 # source's default), linked at 0x400d6500 -- the address the standalone image uses:
-# 51600 bytes: ~8.2 KB of code + the 43 KB staging buffers of the quantized landing (2100 before the
+# 51608 bytes: ~8.2 KB of code + the 43 KB staging buffers of the quantized landing (2100 before the
 # 8 Nov 2026 Part-slice, pattern and quantized reloads; 50044 before Clyps' landing rules, 13 Nov 2026). octabam re-links it there on every build
 # and compares.
-REFERENCE = (0x400d6500, "5e04de536e1607d03b1aeb9e2c90b6d9718feba8219f18a0b0e993f043a6365b")
+REFERENCE = (0x400d6500, "4d80ed060236e9d94bd14223a4bf813f00f7a90a5e9c8aefb4510c1e6a14f5fb")
 
 MODULE = Module(
     name="reload-from-project",

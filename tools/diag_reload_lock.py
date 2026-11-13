@@ -21,6 +21,7 @@ grades it against DIRECT JUMP's position model; tools/check_reload_full.py the F
       [--cond] [--cpoke OFF=VAL[:SIZE] ...] [--lpoke OFF=VAL[:SIZE] ...] [--ops x0,s0,...] [--start P]
   ops (track t 0-based): sT = [PTN] + [TRACK t+1] (SEQ), fT = [BANK] + [TRACK t+1] (FULL), p = [PTN] + [BANK] +
        trig of the playing pattern (the whole pattern in place), xT = flip T's first trig-mask byte (a live edit),
+       X = STOP, then PLAY again (the graders re-base the model on the restart),
        WT = a FULL reload of audio T forced to land in the wrap body (diag_reload_quant.py's W; the model is off
        around it: the master length is cut for one cycle),
        yT = flip audio T's machine page 1 byte in the playing Part (a live slice edit), w = wait 1 s;
@@ -128,7 +129,7 @@ def main(argv):
                     chain=tr[6], trk=trk)
 
     st = dict(tick=0, q=0)
-    states, builds, lands, reqs, snaps, fires, pubs = [], [], [], [], [], [], []
+    states, builds, lands, reqs, snaps, fires, pubs, restarts = [], [], [], [], [], [], [], []
 
     def on_tick(uc, ad, sz, ud):
         st["tick"] += 1
@@ -225,6 +226,10 @@ def main(argv):
             u.hook_add(er.eb.UC_HOOK_CODE, mk(name), begin=ad, end=ad)
     u.hook_add(er.eb.UC_HOOK_MEM_WRITE, lambda uc, acc, ad, sz, val, ud: applies.append(
         [st["tick"], "ENG_RESTART", [val & 0xFF], rd(SCLK, 4), st["q"]]), begin=0x8000184C, end=0x8000184C)
+    cresets = []         # every COND_RESET call: (tick, argument, return address, rl_T, rl_Tres before)
+    u.hook_add(er.eb.UC_HOOK_CODE, lambda uc, ad, sz, ud: cresets.append(
+        [st["tick"], rd(uc.reg_read(er.eb.UC_M68K_REG_A7) + 4, 4), rd(uc.reg_read(er.eb.UC_M68K_REG_A7), 4),
+         rd(syms["rl_T"], 4), rd(syms["rl_Tres"], 4)]), begin=0x400A539C, end=0x400A539C)
     purges = []          # (tick, track, the slot mask before / after rl_tpurge, the pending fire times - now)
     pst = {}
 
@@ -272,6 +277,24 @@ def main(argv):
         nl = len(lands)
         if op == "w":
             settle(1000)
+            continue
+        if op == "X":                          # STOP (stock's COND_RESET(-1) at 0x400a12b8), then PLAY again
+            t_stop = st["tick"]                # (Clyps' diag_clyps_lock.py op x, CL33)
+            key(0x27, 1); key(0x27, 0)
+            settle(600)
+            stopped = rd(RUNNING, 4)
+            t_play = st["tick"]
+            rt.press_play_live()               # PLAY's own handler (0x4000a200), then the eight tracks
+            settle(100)
+            how = "PLAY's handler"
+            if not rd(RUNNING, 4):             # route A: PLAY's handler alone left the transport stopped
+                rt.start_transport_live()      # (measured 2026-11-13) -- FW_TRANSPORT(0) as at the run's start
+                how = "PLAY's handler, then start_transport_live"
+            settle(200)
+            restarts.append([t_stop, t_play])
+            print(f"#{i} X: stopped ({stopped}) at tick {t_stop}, PLAY at {t_play} ({how}), running {rd(RUNNING, 4)}; "
+                  f"COND_RESET calls since: {[c for c in cresets if c[0] >= t_stop]}; rl_T {rd(syms['rl_T'], 4)} "
+                  f"rl_Tres {rd(syms['rl_Tres'], 4)}", flush=True)
             continue
         if op[0] == "x":                       # a live edit of T's trigs: the next reload brings them back
             t = int(op[1:])
@@ -340,7 +363,8 @@ def main(argv):
                                              pokes=dict(card=a.cpoke, live=a.lpoke), ops=a.ops, pattern=act,
                                              bank=bank),
                                    states=states, builds=builds, fires=fires, lands=lands, reqs=reqs, snaps=snaps,
-                                   purges=purges, applies=applies)))
+                                   purges=purges, applies=applies, restarts=restarts,
+                                   cresets=cresets)))
     print(f"wrote {out}: ticks {st['tick']}, landings {len(lands)}", flush=True)
     return 0
 
