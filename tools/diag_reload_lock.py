@@ -230,6 +230,12 @@ def main(argv):
     u.hook_add(er.eb.UC_HOOK_CODE, lambda uc, ad, sz, ud: cresets.append(
         [st["tick"], rd(uc.reg_read(er.eb.UC_M68K_REG_A7) + 4, 4), rd(uc.reg_read(er.eb.UC_M68K_REG_A7), 4),
          rd(syms["rl_T"], 4), rd(syms["rl_Tres"], 4)]), begin=0x400A539C, end=0x400A539C)
+    conds = []           # every rl_cond on its way out: (tick, track, A:B counter, FILL latches, PRE latch) -- PRE = 1
+    if "cd2_out" in syms:  # since 2026-11-13 (Clyps CL34)
+        u.hook_add(er.eb.UC_HOOK_CODE, lambda uc, ad, sz, ud: conds.append(
+            [st["tick"], uc.reg_read(er.eb.UC_M68K_REG_D6), rd(0x46107918 + 4 * uc.reg_read(er.eb.UC_M68K_REG_D6), 4),
+             rd(0x46107959 + uc.reg_read(er.eb.UC_M68K_REG_D6), 1), rd(0x46107969 + uc.reg_read(er.eb.UC_M68K_REG_D6), 1),
+             rd(0x46107979 + uc.reg_read(er.eb.UC_M68K_REG_D6), 1)]), begin=syms["cd2_out"], end=syms["cd2_out"])
     purges = []          # (tick, track, the slot mask before / after rl_tpurge, the pending fire times - now)
     pst = {}
 
@@ -364,7 +370,7 @@ def main(argv):
                                              bank=bank),
                                    states=states, builds=builds, fires=fires, lands=lands, reqs=reqs, snaps=snaps,
                                    purges=purges, applies=applies, restarts=restarts,
-                                   cresets=cresets)))
+                                   cresets=cresets, conds=conds)))
     print(f"wrote {out}: ticks {st['tick']}, landings {len(lands)}", flush=True)
     return 0
 

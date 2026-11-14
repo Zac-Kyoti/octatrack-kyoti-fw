@@ -110,7 +110,8 @@ the master where stock's landing does. A Part slice reaches the engine on the ti
 sequence's first **sounding** trig fires (micro-timing and trig conditions honoured; without any
 sample trig, on the boundary). The reloaded track's trig-condition pass counter becomes what it
 would be had it played there since the pattern's conditions last started again (COND_RESET's
-entry, `0x400a539c`, notes when). The UI task's 1/60 s
+entry, `0x400a539c`, notes when), and its PRE latch starts again at 1, as COND_RESET sets it
+(the FILL latches are kept). The UI task's 1/60 s
 tick (`0x40056c28`) then runs the UI half, and lands a reload still pending when the transport
 stops. Stopped, or the target not playing: at once. A pattern you are *not* on is a pattern
 change: stock's cue, so CHAIN AFTER (or DIRECT JUMP when it is on) decides when. Several chords

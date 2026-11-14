@@ -196,6 +196,13 @@ def grade(path):
                 print(f"      RULE purge: {pg[:1]} {'PASS' if pg else 'FAIL (no purge)'}")
                 if not pg:
                     bad_rules.append(("purge", lt))
+            if "conds" in d and where == "tick":     # Clyps CL34: an instant landing's PRE latch starts again at 1
+                cs_ = [c for c in d["conds"] if c[0] == lt and c[1] == k]
+                okc = bool(cs_) and cs_[-1][5] == 1
+                print(f"      RULE PRE latch: {'PASS' if okc else 'FAIL'} (rl_cond out: counter, FILL, FILL2, PRE "
+                      f"{cs_[-1][2:] if cs_ else None})")
+                if not okc:
+                    bad_rules.append(("pre", lt))
             if len(S[0]) > 7:
                 nxt = min([x[0] for x in L if x[0] > lt and x[1] == k] + [S[-1][0]])
                 pl = pars(lt + 2)

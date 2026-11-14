@@ -477,6 +477,7 @@
     .equ MCLK,         0x46107564       | MIDI-domain clock (a tick 16800)
     .equ COND_RESET,   0x400a539c       | (t | -1): A:B pass counters / FILL latches fresh (stock's switch)
     .equ COND_CNT,     0x46107918       | long[16]: a track's A:B pass counter (++ at its wraps, 0x400a536c)
+    .equ COND_PRE,     0x46107979       | byte[16]: a track's PRE latch (COND_RESET sets it to 1)
     .equ COND_RES,     0x400a53a4       | COND_RESET after `lea -12(%sp),%sp ; movem.l %d2/%a2-%a3,(%sp)`
 
     .equ CHAIN_OFF,    0x4009a404       | stock [PTN] + trig's steps (0x40056b2c..): chain off,
@@ -2524,6 +2525,13 @@ rl_cond:
 cd2_set:
     lea     COND_CNT,%a0
     move.l  %d3,(%a0,%d6.l*4)
+|   2026-11-13 (the user; Clyps CL34, DIRECT JUMP V7.0.2): the PRE latch starts again at 1, as COND_RESET(t)
+|   sets it (0x400a53e6: 0x46107979 + t); FILL (0x46107959 / 69) is kept. d0 is scratch here.
+    lea     COND_PRE,%a0
+    adda.l  %d6,%a0
+    moveq   #1,%d0
+    move.b  %d0,(%a0)
+cd2_out:
     movem.l (%sp),%d2-%d7/%a2-%a6
     lea     44(%sp),%sp
     rts

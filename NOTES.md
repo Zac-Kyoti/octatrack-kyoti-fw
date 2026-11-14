@@ -38018,3 +38018,17 @@ Now 936 / 932 (<= 945): the pair fits, SC's donor becomes PLATE REV.
 - **Builds (WIP, NOT flashed):** standalone mainos `ff5cac49…` (syx `601caf6b…`, `140C_RLCP3`); BUG_RL3 mainos
   `7d94fcf2…` (syx `54856c4e…`); KYOTI V1.7 mainos `c735613c…` (syx `00c1f5c0…`). octabam REFERENCE `4d80ed06…`
   (51,608 B).
+- **Follow-up (same day): the PRE latch on an instant landing (the user's decision, 2026-11-13, for Clyps CL34,
+  DIRECT JUMP and RELOAD alike).** `rl_cond` (every RELOAD landing's trig conditions; instant kind) now also sets the
+  PRE latch byte `0x46107979[t]` to 1, as stock COND_RESET(t) does (`moveb #1` at 0x400a53e6); the FILL latches
+  `0x46107959` / `69` are kept. Clyps' cl_cond `cd_set` (trkseq `c83ba6e`) as written; d0 is scratch there (rl_cond
+  keeps only d2-d7/a2-a6; no caller reads d0 after it). New symbol `cd2_out`: `diag_reload_lock.py` records every
+  rl_cond exit (`conds`), `check_reload_lock.py --rules` grades a new RULE PRE latch. `build_kyoti.py`: env
+  `KYOTI_VERSTR` overrides the OS VERSION for WIP test images.
+- **Emulator gates (OT DEMO, standalone `fc25a994…`):** `diag_reload_quant.py` 32/32 PASS; L1 (SEQ x5) / L2 (FULL x4)
+  / LXP (STOP + PLAY, 2 landings): model PASS every tick, RULES PASS (11 landings: landing, purge, conditions, PRE
+  latch), FULL publishes 4/4 PASS. PRE was 0 before the first landing in each run and 1 on the tick after every
+  landing (the rlcp3 recordings stay 0); no other track's PRE moved except at STOP's own COND_RESET(-1).
+- **Builds (WIP, NOT flashed):** standalone mainos `fc25a994…` (syx `28ae269e…`, `140C_RLCP4`); BUG_RL3 mainos
+  `188ec12c…` (syx `cde59614…`); KYOTI mainos `ecbdb4cc…` (syx `3e4f4816…`, OS VERSION `KYOTI RLC4`; files still
+  named V1.7). octabam REFERENCE `8035e2fa…` (51,620 B; -mcpu=5407 and 54455 identical).

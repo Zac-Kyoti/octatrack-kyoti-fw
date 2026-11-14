@@ -469,8 +469,10 @@ def apply_without(argv):
 
 
 def main():
+    global VERSTR
     apply_with(sys.argv)
     apply_without(sys.argv)
+    VERSTR = os.environ.get("KYOTI_VERSTR") or VERSTR   # a WIP test image's own OS VERSION (2026-11-13)
     # a reclaim zone is zeroed only when this plan puts something in it
     for z in [z for z in RECLAIM_WHOLE if not PLAN.get(z)]:
         del RECLAIM_WHOLE[z]
