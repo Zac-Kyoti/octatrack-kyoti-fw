@@ -37945,3 +37945,18 @@ Now 936 / 932 (<= 945): the pair fits, SC's donor becomes PLATE REV.
   `e855f6ca…`: verify_hooks + make check (32 FREE LOOP port scenarios) pass; octabam check + reach pass on `f7d72906`.
 - Trap: a FREE LOOP test remix must carry RLEN PLEN (the port fixture's recorder setups); without it undo / undoto /
   undostep / replace fail. Not flashed.
+
+## 2026-11-13 (`bp-base`) — BLACKPYRAMIDS_303: the voice's Modwerk-base form (WIP, not flashed)
+- Modwerk retired card firmware (12 Nov): a module is listed on a package for the Modwerk base, tested on a unit. Over
+  the base BlackPyramids' voice is one packaged DSP engine on the per-track source site's hook chain (Modwerk
+  `dsp-sites.json` site 5), not words over SPRING REV.
+- `tools/ot303/base_engine.py` writes `octabam-modules/blackpyramids-303/bp_base_engine.asm` + `bp_base_data.py`: the
+  same `ot303_engine.asm` + `host.asm` (untouched: the card FINAL's words do not move) with no RELOC (run 1 = the X
+  claim's initial words), the raw-path test reading RAWF (X:$7b05, 1 on core 0, 0 on core 1) at run time, `bra
+  sg_entry` at word 0 (a chain member is entered there) and the exit a long BRA at `bp_exit` with a zero displacement
+  (the base writes it per core). 923 words, the same on both cores; X claim $7b04-$7bfb, Y claim $7a5-$feb.
+- `host_check.py` with `OT303_BASE=1` (`host_probe.cpp` skips the junk fill of RELOC's block when DIR/base.txt says
+  so): both payloads BIT-EXACT against the twin (324,368 samples, 43 notes, slides, ties, claims), saw 450.6 / 450.0 and
+  square 590.7 / 590.1 cycles a sample (card form 450.1 / 590.2). The card form's run: ALL GOOD, unchanged.
+- Trap: Modwerk's toolchain `dsp_asm` alone mis-encodes this voice (TFR's source, XY moves beside an ALU op, `dc`);
+  its packager assembles it through `tools/dsp_xasm.py`, carried in the module's upstream.
