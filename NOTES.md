@@ -38076,7 +38076,7 @@ the publish bytes at its trigs (voice code 0x4000b4f6.. / 0x4000c9e8 records ban
   V7.1 and V7.1.1 images). Bugbuild BUG_DJC2: DISJOINT / ALL PRESERVED / NO STRAYS. octabam REFERENCE 5ba3ac14…
   (3716 B, 5407 = 54455), manifest + README list the fourth detour.
 - **Builds (all WIP, NONE flashed):** standalone `out/OCTATRACK_OS1.40C_DIRECT_JUMP_KYOTI.syx` (140C_KDJC5, syx
-  b0cc35cf…, mainos 617af798…); Bugbuild BUG_DJC2 (syx 890cabeb…); KYOTI default "KYOTI DJC2" (out/djc3/
+  7ce3f777…, mainos 617af798…); Bugbuild BUG_DJC2 (syx 890cabeb…); KYOTI default "KYOTI DJC2" (out/djc3/
   kyoti_default/, syx bf84e47a…, mainos e4ca6bb1…); KYOTI-with-Clyps "KY+CL DJC2" from trkseq c83ba6e in a scratch
   detached tree + this DJ source merged onto trkseq's (DJ_SELFHOOK kept; out/djc3/kyoti_clyps/, syx bae3d5ad…,
   mainos 428b495e…). Evidence: out/djc2/ (REF-LOCK v/w/x/y/k/c runs, identity), out/djc3/ (Part dumps, traces).
