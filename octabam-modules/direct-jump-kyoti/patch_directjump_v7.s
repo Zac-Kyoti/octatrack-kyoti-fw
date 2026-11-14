@@ -147,6 +147,11 @@
     .equ ENG_MBANK,   0x46c7a850
     .equ ENG_MPART,   0x46c7a934
     .equ COND_RESET,  0x400a539c        | FUN_400a539c(track | -1): reset A:B cycle counters / pending FILL
+    .equ P_CHAINQ,    0x8e56            | pattern blob: CHAIN AFTER index (signed; < 0 = the project's)
+    .equ PROJ_QUANT,  0x8000004e        | byte: the project's CHAIN AFTER index
+    .equ QUANT_TBL,   0x400d80dc        | long[]: CHAIN AFTER length in master steps (<= 0 = off)
+    .equ END_STEP,    0x8000662c        | long: a pattern-end override step (-1 = none), stock 0x400a431a
+    .equ STOP_END,    0x8000667e        | byte: stop at the next master step (stock 0x400a4006)
     .equ MSG_PAT,     0x400d816b        | message 0x11: {code, pattern, 1} -- stock's WRAP-CHANGE
     .equ MSG_PAT_ARG, 0x400d816c        |   post @0x400a4b9a.  NOT 0x400d8164 -- see dl_commit.
 
@@ -268,6 +273,7 @@ dj_msg_off:
 dj_land:
     lea     -60(%sp),%sp
     movem.l %d0-%d7/%a0-%a6,(%sp)
+    bsr.w   dj_unhide                  | V7.1.1: the cue dj_hide held back last tick
     .ifdef DJ_DIAG
     move.b  LAND_CNTDN,%d0
     move.b  %d0,dj_obs_c
@@ -454,9 +460,126 @@ dl_arm2:
     moveq   #ST_ARMED,%d0
     move.b  %d0,dj_state
 dl_done:
+    move.b  dj_state,%d0
+    cmpi.b  #ST_ARMED,%d0
+    bne.b   dl_out
+    bsr.w   dj_hide                    | V7.1.1: stock's switch must not take an armed cue
+dl_out:
     movem.l (%sp),%d0-%d7/%a0-%a6
     lea     60(%sp),%sp
     move.b  LAND_CNTDN,%d0             | displaced original -- sets the flags for ble.w
+    rts
+
+| ================= V7.1.1: an armed cue is DIRECT JUMP's, not stock's switch's =================
+| The race (found 2026-11-13, REF-LOCK run o4/n4): a cue made shortly before the outgoing pattern's
+| switch point (its last master step, or a CHAIN AFTER boundary) is armed for the incoming pattern's
+| landing grid, up to L - 1 ticks away (L = 24 with a 1/4x track).  Stock's phase G reached its
+| switch point first: the wrap body (0x400a43a0) commits PEND whenever it is set (0x400a44b8-
+| 0x400a44dc, whatever d6 says) and, PEND != ACT, runs the full switch (step 0 one master step on,
+| COND_RESET(-1)); DIRECT JUMP then re-landed on its grid -- 11 ticks of the incoming pattern from
+| step 0, off the reference.  Fix: on the one tick whose phase G will take the switch (stock's own
+| decision 0x400a3fdc-0x400a439c, replayed by dj_hide), PEND reads as the playing pattern -- the
+| wrap body then wraps the outgoing pattern as if nothing were cued -- and the next tick, first
+| thing in phase D, dj_unhide puts the cue back (unless the performer cued meanwhile) and repaints
+| the UI with the wrap's own {0x11} message.  No stock site, no new hook.
+| dj_hide (dj_land's saved-register context, state ARMED): d0-d3/a0/a2 used.
+dj_hide:
+    tst.b   STOP_END
+    bne.w   dh_no                      | stock's stop at the step end commits the cue: leave it
+    moveq   #0,%d0
+    move.b  ACT_BANK,%d0
+    moveq   #0,%d1
+    move.b  ACT_PAT,%d1
+    bsr.w   dj_blob                    | a2 = the playing pattern (stock's a4 in phase G)
+    moveq   #0,%d1
+    move.b  SCALE_IX,%d1
+    moveq   #SCALE_MAX,%d0
+    cmp.l   %d0,%d1
+    bls.b   1f
+    moveq   #SCALE_1X,%d1              | out of range: 1x (as everywhere here)
+1:  lea     LEN_TBL,%a0
+    move.l  (%a0,%d1.l*4),%d2          | the live tps_M
+    move.b  TICK_CTR,%d1
+    extb.l  %d1
+    addq.l  #1,%d1                     | phase G: ++tick, a master step when it reaches tps_M
+    cmp.l   %d2,%d1
+    blt.w   dh_no
+    moveq   #0,%d2
+    move.w  MASTER_STEP,%d2
+    addq.l  #1,%d2
+    andi.l  #0xffff,%d2                | d2 = the master step phase G is about to start (mvz.w)
+    move.l  #P_CHAINQ,%d0
+    move.b  (%a2,%d0.l),%d1
+    extb.l  %d1
+    bpl.b   2f
+    move.b  PROJ_QUANT,%d1
+    extb.l  %d1
+2:  lea     QUANT_TBL,%a0
+    move.l  (%a0,%d1.l*4),%d3          | N = CHAIN AFTER (master steps)
+    tst.l   %d3
+    ble.b   dh_end
+    move.l  %d2,%d0
+    rems.l  %d3,%d1:%d0                | a cue switches where the step is 0 mod N
+    tst.l   %d1
+    beq.b   dh_yes
+dh_end:
+    move.l  END_STEP,%d0
+    moveq   #-1,%d1
+    cmp.l   %d1,%d0
+    beq.b   dh_len
+    cmp.l   %d2,%d0
+    bgt.b   dh_no
+    bra.b   dh_yes
+dh_len:
+    move.l  #P_SCALE_MODE,%d0
+    tst.b   (%a2,%d0.l)
+    beq.b   3f
+    move.l  #P_MLEN_WORD,%d0
+    move.w  (%a2,%d0.l),%d1            | PER-TRACK: master length (-1 = INF)
+    ext.l   %d1
+    bra.b   4f
+3:  move.l  #P_LEN_BYTE,%d0
+    move.b  (%a2,%d0.l),%d1            | NORMAL: the pattern length
+    extb.l  %d1
+4:  moveq   #-1,%d0
+    cmp.l   %d0,%d1
+    beq.b   dh_no
+    cmp.l   %d2,%d1
+    bgt.b   dh_no                      | the pattern's end is not reached
+dh_yes:
+    move.b  ACT_PAT,%d0
+    move.b  %d0,PEND_PAT
+    move.b  ACT_BANK,%d0
+    move.b  %d0,PEND_BANK
+    moveq   #1,%d0
+    move.b  %d0,dj_hid
+dh_no:
+    rts
+
+| dj_unhide: first thing in phase D, every tick (DJ on or off: the cue is the performer's).  The
+| cue goes back only while PEND still reads as the playing pattern -- one cued in between stands
+| (dj_land's re-cue rule handles it).  Uses d0 (+ KPOST's scratch).
+dj_unhide:
+    tst.b   dj_hid
+    beq.b   du_out
+    clr.b   dj_hid
+    move.b  PEND_PAT,%d0
+    cmp.b   ACT_PAT,%d0
+    bne.b   du_out
+    move.b  PEND_BANK,%d0
+    cmp.b   ACT_BANK,%d0
+    bne.b   du_out
+    move.b  dj_armpat,%d0
+    move.b  %d0,PEND_PAT
+    move.b  dj_armbank,%d0
+    move.b  %d0,PEND_BANK
+    move.b  ACT_PAT,%d0                | the wrap's {0x11, pattern, 1} again: the UI repaints the cue
+    move.b  %d0,MSG_PAT_ARG
+    pea     MSG_PAT
+    pea     UI_QUEUE
+    jsr     KPOST
+    addq.l  #8,%sp
+du_out:
     rts
 
 | dl_commit: the landing tick.  Registers are free (saved by the caller).
@@ -1091,6 +1214,7 @@ dj_zero:   .byte 0                     | constant 0 for Hook N's flag trick
 dj_pcbank: .byte -1                    | V7.0.1: bank the last PC was sent for
 dj_armpat: .byte -1                    | V7.0.1: the cue this arm is for
 dj_armbank: .byte -1
+dj_hid:    .byte 0                     | V7.1.1: 1 = dj_hide held the armed cue back this tick
     .align 2
     .ifdef DJ_MODE_IN_CAVE
 | The combined image (tools/build_kyoti.py) carries MUTE MODE, whose ANDY restore

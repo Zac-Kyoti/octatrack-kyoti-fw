@@ -38006,3 +38006,26 @@ The user's decision (2026-11-13), item 2 of DJ_CLYPS_PORT: fix the boundary tie 
   t189 takes it. Fixed by V7.1.1 (next entry). DJMAST2's first cue moved to t93 (as V7.0.2's run n3b: a cue
   written in the very phase G of a wrap is a harness artifact no unit can produce).
 - Builds: none committed with this step (the final builds come with V7.2). Evidence: out/djc2/ (v1-v5, vpp*).
+
+## 2026-11-13 cont. (2) (`dj-clyps`) — DIRECT JUMP V7.1.1 (WIP, NOT flashed): stock's wrap-change no longer takes an armed cue
+
+Item 4 (the race found with V7.0.2, run o4/n4). **Cause, read on our image:** a cue made shortly before the
+outgoing pattern's switch point (its last master step, or a CHAIN AFTER boundary) is armed for the incoming
+pattern's grid, up to L - 1 ticks away (24 with a 1/4x track). Phase G reaches its switch point first: the
+wrap body 0x400a43a0 commits PEND into ACT whenever PEND is set (0x400a44b8-0x400a44dc, whatever the d6
+"real switch" flag says) and with PEND != ACT runs the full switch (step 0 a master step on, COND_RESET(-1));
+DJ then re-landed on its grid. V7.1 makes it likelier (the cue deadline is a tick earlier).
+- **Fix (no stock site, no new hook):** dj_hide, at the end of dj_land while ARMED, replays stock's decision
+  for this tick's phase G (0x400a3fdc-0x400a439c: the master step rolls; CHAIN AFTER N from blob +0x8e56 or
+  0x8000004e via 0x400d80dc with step mod N == 0, or the 0x8000662c override, or the pattern's master length;
+  not when STOP_END 0x8000667e is set) and, only when the switch would be taken, makes PEND read as the playing
+  pattern for that one tick -- the wrap body then wraps the outgoing pattern as if nothing were cued.
+  dj_unhide, first thing in the next phase D, puts the cue back (unless the performer cued meanwhile) and
+  posts the wrap's own {0x11, pattern, 1} so the UI repaints the cue.
+- **REF-LOCK** (standalone 140C_KDJC3 1d43b88e…): the mixed 3/4x+3/2x+1/4x run's third jump -- before (V7.1,
+  run v4): stock's wrap at t372 took the cue, state locked only from t384 (11 ticks late), A:B counters 0 vs
+  the reference's [3,5,1,3,…], 10 ticks of wrong pending events (pattern 4 from step 0); after (run w4):
+  plain wrap at t372, DJ lands at t382, LOCKED from the tick after, counters + latches + pending IDENTICAL:
+  PASS. All five scenarios (16<->7, A07<->A08, DJMAST2, INF, mixed) PASS. octabam REFERENCE 64968ef9… (2610 B).
+- **Open (by design):** for that one tick the PTN page's cued LED reads PEND == playing; the repaint post
+  restores it on the next tick. A cue cancel pressed exactly in that tick is lost (the old cue comes back).
