@@ -134,7 +134,7 @@ nothing placed in the parameter-page descriptor table (V1.0, withdrawn 2026-10-0
 because it did). RELOAD_FROM_PROJECT in DRAM.
 """)
 
-VERSTR = "KYOTI V1.7"
+VERSTR = os.environ.get("KYOTI_VERSTR") or "KYOTI V1.7"   # a WIP image names itself (KYOTI_ALLOW_WIP builds)
 TAG = "KYOTI_V1.7"
 BASE = 0x40000400
 ROOT = pathlib.Path(__file__).resolve().parent.parent
