@@ -102,7 +102,7 @@ def main(argv):
             # Age it, as the time between this gate's taps would on hardware.
             u.mem_write(0x460D5DE0, (100).to_bytes(4, "big"))
         try:
-            rt.call_as_main(SET_KEY, args=(code, ev), budget=a.budget)
+            main_call_r(SET_KEY, args=(code, ev), budget=a.budget)
         except er.RtosFault as e:
             import collections
             pcs = collections.Counter()
@@ -139,6 +139,15 @@ def main(argv):
         b = bank if b is None else b
         t = rd(0x80000000, 1) if t is None else t   # the active audio track
         return bytes(u.mem_read(BLOB + b * BANKSTRIDE + pat * PATSTRIDE + t * TRAC_A, TRAC_A))
+
+    def main_call_r(addr, args=(), budget=600000):
+        # call_as_main leaves its pushed arguments on main's stack (8 B per key event): over a full run the leak
+        # reached main's TCB 0x46c7ae84 (~4 KB below the stack top 0x46c7becc) and the next switch jumped to
+        # garbage (CL34 gate, 2026-11-13: the "[PTN] + trig" UcError). Restore main's SP after every call.
+        sp0 = u.reg_read(er.eb.UC_M68K_REG_A7)
+        r_ = rt.call_as_main(addr, args=args, budget=budget)
+        u.reg_write(er.eb.UC_M68K_REG_A7, sp0)
+        return r_
 
     fails = []
     # FULL loads (scope §1.7): a track's Part slice (as patch_clyps.s cl_slA / cl_slM)
@@ -251,7 +260,7 @@ def main(argv):
         seen, trace = set(), []
         for _ in range(35):
             rt.run(until=lambda x: x.pc == er.MAIN_SPIN)
-            rt.call_as_main(0x40056C28, budget=600000)
+            main_call_r(0x40056C28, budget=600000)
             seen.add(rd(syms["cl_fph"], 1))
             trace.append(rd(syms["cl_fph"], 1))
         flips = sum(1 for i in range(1, len(trace)) if trace[i] != trace[i - 1])
@@ -282,10 +291,13 @@ def main(argv):
         s = state()
         check(s["cur"] == (s0["cur"] + 2) % 16 and s["bank"] == s0["bank"], "DOWN x2: the box moves, bank kept")
         c1 = s["cur"]
-        tap(LEFT)
-        check(state()["cur"] == c1 ^ 8, "LEFT: the other column")
-        tap(RIGHT)
-        check(state()["cur"] == c1, "RIGHT: back")
+        out_, back_ = (RIGHT, LEFT) if c1 < 8 else (LEFT, RIGHT)
+        tap(back_)
+        check(state()["cur"] == c1, f"{'LEFT' if back_ == LEFT else 'RIGHT'} at the edge: nothing (no wrap, CL34)")
+        tap(out_)
+        check(state()["cur"] == c1 ^ 8, f"{'RIGHT' if out_ == RIGHT else 'LEFT'}: the other column")
+        tap(back_)
+        check(state()["cur"] == c1, "and back")
         check(led(c1) == (1, 1), "the box's slot (not the track's sequence) is solid yellow (the user, 2026-11-04)")
         shot("C1_box")
         key(BANK, 1)
@@ -302,8 +314,10 @@ def main(argv):
         key(BANK, 0)
         s = state()
         check(s["open"] == 1 and s["showwin"] == 0, "[BANK] released: still in Clyps, no SELECT BANK")
-        check(all(led(n) != (1, 0) for n in range(16)) and all(led(n) != (1, 1) for n in range(16)),
-              "another bank: no red (your pattern) and no yellow (the box) on the grid")
+        check(all(led(n) != (1, 0) for n in range(16)) and state()["sbank"] == b2 and state()["cur"] == c1
+              and led(c1) == (1, 1) and all(led(n) != (1, 1) for n in range(16) if n != c1),
+              f"another bank: no red (your pattern); the arrows came along to slot {c1 + 1} -- its yellow only "
+              f"(CL34 cl_pfollow, the user 2026-11-13)")
         shot("C2_otherbank")
         tap(DOWN)
         s = state()
@@ -316,6 +330,14 @@ def main(argv):
         check(rd(0x80000000, 1) == 2, "TRACK 3 selects track 3")
         check(rd(0x460FAB40, 4) == 0, "no track key left marked held (0x460fab40)")
         check(state()["open"] == 1 and rec(act, 2) == before, "Clyps stays, nothing loaded")
+        # CL34 (the user, 2026-11-13): [FUNC]+[CUE] -- stock's Part reload 0x4005e038 -- does nothing in Clyps
+        hits_pr = []
+        h_pr = u.hook_add(er.eb.UC_HOOK_CODE, lambda uc, ad, sz, ud: hits_pr.append(ad), begin=0x4005E038, end=0x4005E038)
+        key(FUNC, 1)
+        tap(0x2A)
+        key(FUNC, 0)
+        u.hook_del(h_pr)
+        check(not hits_pr and state()["open"] == 1, "[FUNC]+[CUE] in Clyps: no Part reload (0x4005e038 not run), Clyps stays")
         # [FUNC]+TRACK: stock's FUNC sub-map mute 0x40083dfc (it toggles through 0x4007d6a4 /
         # 0x4007d7b0); our FUNC sub-map no longer shadows it. (0x40033970 is NOT a readable mute
         # state -- it did not change with a real mute: measured.)
@@ -365,7 +387,7 @@ def main(argv):
         rt.run(until=lambda x: x.pc == er.MAIN_SPIN)
         if rd(0x80000012, 4) == 0:         # some projects load with the MIDI tracks showing
             rt.run(until=lambda x: x.pc == er.MAIN_SPIN)
-            rt.call_as_main(0x40055548, args=(0x35, 0), budget=600000)
+            main_call_r(0x40055548, args=(0x35, 0), budget=600000)
             rt.run(ms=60)
         check(rd(0x80000012, 4) != 0, "stock's toggle switched to the MIDI tracks (0x80000012)")
         tap(0x11)
@@ -611,7 +633,7 @@ def main(argv):
         check(rec(act, 1) == e2, "... and that save reloads")
         # the Recording Setup menu over Clyps: its keys are stock's, TRACK + [YES] / [NO] = ARM / DISARM
         rt.run(until=lambda x: x.pc == er.MAIN_SPIN)
-        rt.call_as_main(0x4002FEC4, budget=600000)
+        main_call_r(0x4002FEC4, budget=600000)
         rt.run(ms=100)
         rs = rd(0x460D10CC, 4)
         sv = saved(1)
@@ -749,7 +771,7 @@ def main(argv):
 
         def worker(fn, ms, args=()):
             rt.run(until=lambda x: x.pc == er.MAIN_SPIN)
-            rt.call_as_main(fn, args=args, budget=600000)
+            main_call_r(fn, args=args, budget=600000)
             try:
                 rt.run(ms=ms)
             except Exception:
@@ -920,7 +942,7 @@ def main(argv):
             tap(0x35)
         def worker(fn, ms, args=()):
             rt.run(until=lambda x: x.pc == er.MAIN_SPIN)
-            rt.call_as_main(fn, args=args, budget=600000)
+            main_call_r(fn, args=args, budget=600000)
             rt.run(ms=ms)
         tap(0x10)
         act = rd(0x800065BE, 1)
@@ -1501,7 +1523,7 @@ def main(argv):
         print("I: SAVE PROJECT, a Clyps load, then the card reloads: no edited mark, the box home")
         def worker(fn, ms, args=()):
             rt.run(until=lambda x: x.pc == er.MAIN_SPIN)
-            rt.call_as_main(fn, args=args, budget=600000)
+            main_call_r(fn, args=args, budget=600000)
             rt.run(ms=ms)
         if rd(0x80000012, 4):
             tap(0x35)
@@ -1623,12 +1645,12 @@ def main(argv):
                 (rd(uc.reg_read(er.eb.UC_M68K_REG_A7) + 4, 4), rd(uc.reg_read(er.eb.UC_M68K_REG_A7) + 8, 4))),
                 begin=0x40013784, end=0x40013784)
             rt.run(until=lambda x: x.pc == er.MAIN_SPIN)
-            rt.call_as_main(syms["cl_blink"], budget=600000)
+            main_call_r(syms["cl_blink"], budget=600000)
             u.hook_del(h)
             return got
         def repaint():
             rt.run(until=lambda x: x.pc == er.MAIN_SPIN)
-            rt.call_as_main(0x4007E998, args=(0,), budget=600000)
+            main_call_r(0x4007E998, args=(0,), budget=600000)
         tap(0x10)
         act = rd(0x800065BE, 1)
         u.mem_write(syms["cl_pre"], bytes(32))      # a fresh start: no arrows left by the scenarios before
@@ -1676,9 +1698,10 @@ def main(argv):
         tap(0x10)
         check(state()["cur"] == q, f"back to T1: its arrows where they were left ({q + 1}); cur {state()['cur'] + 1}")
         tap(rd(0x800065BE, 1))  # CL29: ORIG = the trig of the pattern you are on ([PAGE] does nothing)
-        check(state()["cur"] == q and pm() == 1 and rd(syms["cl_ftgt"], 1) == 1 and rd(syms["cl_flk"], 1),
-              f"the trig of your own pattern (ORIG TRK SEQ): the arrows stay on {q + 1}; the header's ORIG flash "
-              f"(CL32, the user; cur {state()['cur'] + 1}, shown {pm()}, flash {rd(syms['cl_ftgt'], 1)}/"
+        check(state()["cur"] == q and pm() == 1 and rd(syms["cl_ftgt"], 1) == 2 and rd(syms["cl_flk"], 1)
+              and rd(syms["cl_fcode"] + 1, 1) == rd(0x800065BE, 1),
+              f"the trig of your own pattern (ORIG TRK SEQ): the arrows stay on {q + 1}; its slot flashes, the header "
+              f"reads ORIG without flashing (CL34, the user; cur {state()['cur'] + 1}, shown {pm()}, flash {rd(syms['cl_ftgt'], 1)}/"
               f"{rd(syms['cl_flk'], 1)})")
         tap(0x11)
         tap(0x10)
@@ -1876,7 +1899,7 @@ def main(argv):
         print("X: SAVE PROJECT, then the card reload of the playing pattern: no record differs from its original")
         def worker(fn, ms, args=()):
             rt.run(until=lambda x: x.pc == er.MAIN_SPIN)
-            rt.call_as_main(fn, args=args, budget=600000)
+            main_call_r(fn, args=args, budget=600000)
             rt.run(ms=ms)
         TRAC_M_, MIDI_BASE_ = 0x8B0, 0x48D0
         def recoff(t):
@@ -2003,7 +2026,7 @@ def main(argv):
                     u.hook_del(ha)
                     costs.append(ninstr[0])
                 rt.run(until=lambda x: x.pc == er.MAIN_SPIN)
-                rt.call_as_main(0x40056C28, budget=600000)
+                main_call_r(0x40056C28, budget=600000)
                 trace.append(rd(syms["cl_fph"], 1))
             for h_ in hk:
                 u.hook_del(h_)
@@ -2034,7 +2057,7 @@ def main(argv):
 
         def callm(addr, *args):
             rt.run(until=lambda x: x.pc == er.MAIN_SPIN)
-            rt.call_as_main(addr, args=args, budget=600000)
+            main_call_r(addr, args=args, budget=600000)
 
         def tabs():
             # stock's sidebars 0x4003fed8: 0x40052200 runs them on every pass on hardware, route A never
@@ -2168,6 +2191,13 @@ def main(argv):
         check(all(pre[2 * k] & 0x80 and pre[2 * k + 1] == cq for k in m),
               f"[CUE] held + DOWN: every member's arrows on slot {cq + 1} ({[pre[2 * k:2 * k + 2] for k in m]}; "
               f"the user, 2026-11-06)")
+        key(CUE, 1)                        # CL34 (the user, 2026-11-13): [CUE] held, an arrow, [YES] -- the group loads
+        tap(DOWN)
+        cy = state()["cur"]
+        tap(YES)
+        key(CUE, 0)
+        check(all(rec(act, k) == rec(cy, k) for k in m),
+              f"[CUE] held + DOWN + [YES]: every member slot {cy + 1} (was: [CUE]+[YES] did nothing)")
         key(CUE, 1)                        # every member its original: [CUE] + the trig of your pattern (CL29:
         tap(rd(0x800065BE, 1))             # [PAGE] restored every member; it does nothing now)
         key(CUE, 0)

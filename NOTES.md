@@ -38448,6 +38448,28 @@ Now 936 / 932 (<= 945): the pair fits, SC's donor becomes PLATE REV.
   14/14 --rules PASS, check_clyps_full PASS, timecmp (CL29 vs CL34) identical in all 18 runs; PRE on the landed track 1
   after every instant landing (out/clyps/lock/precheck.py; CL33: 0). The arrows change follows in the same CL34.
 
+- **Clyps FULL-load settings blip -- study only** (2026-11-13): sequencer-side apply exact (TRK_APPLY on the tick whose
+  sample clock equals the first sounding trig's fire time); residual is below the tick (engine frame / the retriggered
+  voice's fade through the shared track path). Frame-exact apply rejected by the user (engine context); machine-byte
+  deferral skipped (the builder reads it at 0x400a2e80). Details + the stock A/B to start from: scope §1.36. Also logged:
+  one CL34 sighting of a playing slot's summary text going blank after a cued [YES] load (DJ off), slot number kept,
+  back after the next redraw -- not reproduced.
+
+- **KYOTI CL34, part 2** (2026-11-13 / 14; syx f5d8fb7e..., FLASHED by the user, no issues reported): the user's CL34
+  list -- the cursor is always on screen (box or arrows: tucked arrows under the box / the highlight, back where they were
+  when it goes or moves; `cl_tuck`, `cl_ychk` yc_t, `cl_boxhome`; [YES] with nothing on screen loads nothing, `ex2_none`);
+  the active pattern's LED is never yellow for the arrows (option b); a cued load's arrows blink 120 BPM fixed, 20 on /
+  10 off UI ticks (`cl_cblink` from cl_uitick); [CUE]+[YES] = the group's load (was nothing); LEFT / RIGHT no wrap;
+  [FUNC]+[CUE] (stock Part reload) nothing in Clyps; ORIG TRK SEQ / ALL flash the playing slot, header steady
+  (`cl_florig`, cl_ftgt 2); the arrows follow the viewed bank (`cl_pfollow`). Scope §1.33-1.36.
+  Gates: diag_clyps_ui 9/9 sets PASS (291 checks), diag_clyps_quant PASS (DJ off + on); walk-throughs AR1-4, BK1-2, BL1-2
+  (diag_clyps_lock ops Y / v / bK / k+ / k- / x). **Harness trap found:** diag_clyps_ui called `rt.call_as_main`
+  directly -- it leaves the args on main's stack (8 B per key event); ~500 events in, the leak reached main's TCB
+  (0x46c7ae84, ~4 KB below the top 0x46c7becc) and the next switch jumped to garbage (a UcError at "[PTN] + trig" in
+  section K, on every image incl. the PRE-only one, once CL34's checks added key events). Now `main_call_r` restores SP
+  after every call. A firmware cause was ruled out first (state diff before the step: identical with / without the extra
+  keys).
+
 ## 2026-11-10 (`reload-slice`) — RELOAD_FROM_PROJECT beside FREE LOOP: octabam HOOKS bridge `ui_tick` (PR sambanks/octabam#1083)
 
 - Sam merged #1079 (`d01cf1c3`) and asked for the HOOKS chain at `0x40056c28` in place of the FREE LOOP conflict.

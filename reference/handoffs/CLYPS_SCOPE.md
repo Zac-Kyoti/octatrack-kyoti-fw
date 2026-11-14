@@ -1485,6 +1485,59 @@ the investigation (NOTES "CL24 timing investigation", harness `tools/diag_clyps_
   Decided: **PRE = 1 on every instant load, in Clyps, DIRECT JUMP and RELOAD** (as COND_RESET(t) and stock's STOP /
   pattern change leave it). FILL (0x46107959 / 69) kept. `cl_cond` cd_set.
 
+### 1.35 The cursor is always on screen: the box or the arrows (the user, 2026-11-13; KYOTI CL34)
+
+- The goal (the user): flip between, e.g., an original and a slot load as often as you like without re-arrowing each
+  time, always seeing where [YES] goes -- the select box or the pre-select arrows.
+- **Tucked arrows:** once the slot under the arrows has landed and the select box is drawn there, the arrows (and their
+  solid yellow) hide under the box (`cl_tuck`: cl_ysup + box = arrows' slot + not the pattern's own slot). The next
+  arrow press shows them again (cl_pshow). Re-arrowing onto the box's slot shows both.
+- **The box goes or moves -> the arrows show again where they were:** an original / ORIG PTN+PRT / SAVED / a card reload
+  / a pattern change (no box), or a trig load of another slot (the box moves). [YES] then loads the arrows' slot.
+- **No arrows yet:** a landing that puts the box on a slot tucks the arrows under it (`cl_ychk` yc_t); opening Clyps or
+  a track change with a box does the same (`cl_boxhome`). Visible arrows are never moved by a load (CL32).
+- **Nothing on screen** (no box, no arrows: the track plays its pattern's own sequence and nothing was aimed): [YES]
+  loads nothing (`ex2_none`; was: the own slot = ORIG). Trigs load as always. Group members keep their own rule.
+- **The highlight stands for the box on the pattern you are on** (the user, 2026-11-13): an original (ORIG / SAVED /
+  card) landing from arrows on your own slot tucks them under the highlight -- no arrows, the LED stays red.
+- **The active pattern's LED is never yellow for the arrows** (option b): arrows aimed at your own slot (e.g. after a
+  trig load elsewhere, [YES] = back to the original) show on screen; that slot's LED stays red (cl_paint). The grid
+  mirrors the screen everywhere else.
+- **ORIG TRK SEQ / ALL confirmation** (the user, 2026-11-13): the highlighted slot (the pattern you are on) flashes as
+  any loaded slot does; the header reads ORIG TRK SEQ / ALL steadily for the flash's length (cl_florig, cl_ftgt 2). ORIG
+  PTN+PRT keeps its header flash (cl_ftgt 1).
+- **The arrows follow the viewed bank** (the user, 2026-11-13; `cl_pfollow`): [BANK] + an arrow, or a pattern change
+  into another bank, takes them to the same slot number there. Tucked under the box at home, they show in the other bank
+  and tuck again back home; moved there, they stay shown. No arrows yet: none.
+- **A cued load blinks** (the user, 2026-11-13): from the execution until it lands, arrows on the active track's cued
+  slot blink at a fixed 120 BPM, whatever the tempo (as the grid's red / yellow flash): a 0.5 s period, shown for the
+  first two thirds, hidden for the last (`cl_cblink`, 30 UI ticks: 20 on, 10 off; each cue starts shown; from the
+  UI task's 1/60 s tick, cl_uitick -- the LED layer's tick may not draw). When it lands they go: the box appears there
+  (and arrows aimed there tuck under it). Visible arrows aimed elsewhere stay solid; arrows aimed at the cued slot
+  blink instead. An original / saved / card source blinks on the pattern's own slot.
+
+### 1.36 FULL loads: the residual settings blip (study, 2026-11-13; NOT pursued -- a start for a future audio pass)
+
+- The user (CL34, careful listening): on FULL loads only (not SEQ), DJ on or off, the incoming track settings are heard on
+  the outgoing sample for an extremely brief moment before the new sample takes over.
+- Measured (emulator, `diag_clyps_lock.py --partreads`, out/clyps/study S1-S3, `out/clyps/lock/study.py`): TRK_APPLY runs on
+  the tick whose sample clock EQUALS the first sounding trig's fire time (+0.000 tick in all three: DJ on, DJ off cued,
+  the shared-Part T3 case) -- the sequencer side is exact. Live readers of the copied slice between the landing and the
+  apply: stock 0x40006912 reads every track's machine byte (Part +0x22 + t, "== 4", PICKUP) every frame; the sequencer at
+  0x400a2e80 reads it while building an event (STATIC vs the rest); the event code 0x4000bfd0 / 0x4000c458 at trigs;
+  SIDE-CHAIN's sn_track (0x400d7708) reads FX types +0x00..+0x0f every frame.
+- The engine (0x4000aee6..) places events at sub-frame positions (16 per frame) while a track's settings change per
+  frame; a frame-exact apply (a call from the engine's event pass) could move the apply by at most one frame. Rejected by
+  the user (2026-11-13): audio-engine context, no stock precedent for TRK_APPLY there (its callers: 0x40043d1a,
+  0x40094096/158, 0x40096c3e/d9a, 0x400973da).
+- Likely irreducible cause: a retriggered voice fades out (declick) through the track's single sound path, which already
+  carries the new settings. **Next step if resumed:** an A/B on stock -- [PTN]+trig between two patterns on different
+  Parts with clearly different settings on one track, a sample ringing up to the change: the same blip on stock = the
+  shared path, as good as it gets.
+- The machine byte cannot simply move to the apply: the builder reads it a tick before the trig sounds (0x400a2e80); the
+  correct variant (write it at the first sounding trig's build) only matters when that trig is after the boundary and a
+  PICKUP machine is involved. Skipped.
+
 ### 1.27 Combinations that must never ship (the user, 2026-11-07)
 
 - Clyps + RELOAD_FROM_PROJECT never; Clyps + DIRECT_JUMP_KYOTI only as KYOTI's integrated pair (SUPERSEDE).

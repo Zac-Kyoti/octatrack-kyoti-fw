@@ -17,7 +17,7 @@ grades it against DIRECT JUMP's position model.
   CLYPS_SYMS=out/clyps/kyoti_cl24_syms.txt python3 tools/diag_clyps_lock.py --image IMG --project DIR \
       --name N --out out/clyps/lock/N.json [--dj] [--chain STEPS] [--poke P:OFF=VAL[:SIZE] ...] \
       [--ops s1,s15,o@m0,...] [--track 0]
-  ops: sK = slot K (pattern K of the playing bank, 0-based), fK = FULL slot K, x = STOP then PLAY, o = ORIG SEQ, of = ORIG
+  ops: sK = slot K (pattern K of the playing bank, 0-based), fK = FULL slot K, x = STOP then PLAY, Y = a bare [YES], v = print the view, bK / bY = a load sampled for the cued blink, k+ / k- = [BANK] + DOWN / UP, o = ORIG SEQ, of = ORIG
        SEQ/MCH/FX (the trig of the pattern you are on, [FUNC] for the FULL form); a suffix @mK waits for master step K first (0 = the cycle's last audible step), @kN
        waits N ms; without one, an irregular delay walks the press through every tick of a step.
 """
@@ -50,6 +50,9 @@ def main(argv):
     ap.add_argument("--start", type=int, default=None, help="the pattern to play (0-based), default: as loaded")
     ap.add_argument("--stride", type=int, default=29)
     ap.add_argument("--tail", type=int, default=800, help="ms after the last landing")
+    ap.add_argument("--partreads", action="store_true",
+                    help="CL34 study: log every read of the playing pattern's Part (pc, offset, tick, sample clock)")
+    ap.add_argument("--shots", default=None, help="CL34: a directory for screen PNGs (op v and the b ops' phases)")
     ap.add_argument("--cond", action="store_true", help="also record the trig-condition counters per tick")
     ap.add_argument("--leds", action="store_true", help="also record the LED base / invert bitmaps per tick")
     ap.add_argument("--parts", type=lambda v: int(v, 0), default=0,
@@ -65,6 +68,13 @@ def main(argv):
     import toolpath  # noqa: F401
     sys.path.insert(0, str(OCTABAM / "tools" / "emu"))
     import emu_rtos as er
+    shots = None
+    if a.shots:
+        import lcd_view
+        shots = pathlib.Path(a.shots)
+        if not shots.is_absolute():
+            shots = ROOT / shots
+        shots.mkdir(parents=True, exist_ok=True)
     card, staged = er.stage_project(a.project, "OCTABAM", a.name, tree=f"out/_emu_clyps_lock_{a.name}")
     r, rt = er.attach(a.image, card, ips=3990.0, pit_clock_hz=264e6, quantum=4096, step_quantum=32, tick=True)
     if not rt.gate_m6a()[0]:
@@ -152,7 +162,8 @@ def main(argv):
     def on_fire(uc, ad, sz, ud):
         idx = uc.reg_read(er.eb.UC_M68K_REG_A1)
         d7 = uc.reg_read(er.eb.UC_M68K_REG_D7)
-        fires.append([st["tick"], idx & 7, idx >> 3, d7 // 0x285FF0, st["q"]])
+        fires.append([st["tick"], idx & 7, idx >> 3, d7 // 0x285FF0, st["q"], uc.reg_read(er.eb.UC_M68K_REG_D0),
+                      rd(SCLK, 4)])
 
     def on_landin(uc, ad, sz, ud):
         ctx["where"] = "tick"
@@ -189,6 +200,18 @@ def main(argv):
             u.hook_add(er.eb.UC_HOOK_CODE, mk(name), begin=ad, end=ad)
     u.hook_add(er.eb.UC_HOOK_MEM_WRITE, lambda uc, acc, ad, sz, val, ud: applies.append(
         [st["tick"], "ENG_RESTART", [val & 0xFF], rd(SCLK, 4), st["q"]]), begin=0x8000184C, end=0x8000184C)
+    preads = {}          # CL34 study: (pc, Part offset) -> [count, first tick, last tick, first sample clock]
+    if a.partreads:
+        def on_pread(uc, acc, ad, sz, val, ud):
+            pc = uc.reg_read(er.eb.UC_M68K_REG_PC)
+            k = (pc, ad - pr_base[0])
+            e = preads.get(k)
+            if e is None:
+                preads[k] = [1, st["tick"], st["tick"], rd(SCLK, 4)]
+            else:
+                e[0] += 1
+                e[2] = st["tick"]
+        pr_base = [0]
     purges = []          # CL25: (tick, track, the slot mask before / after cl_tpurge)
     if "cl_tpurge" in syms:
         pst = {}
@@ -222,6 +245,27 @@ def main(argv):
     key(0x2E, 1, 40); key(0x2F, 1, 40); key(0x2F, 0, 40); key(0x2E, 0, 40)
     print(f"running {rd(RUNNING, 4)}, Clyps open {rd(syms['cl_open'], 1)}, DJ {a.dj}", flush=True)
     settle(200)
+
+    ledtbl = [rd(0x400A74CE + 4 * k_, 4) for k_ in range(16)]
+
+    def shot(nm):
+        if shots:
+            main_call(0x40056C28)     # one UI tick: the screen is composed as on the unit's next frame
+            lcd_view.png(lcd_view.pixels(bytes(u.mem_read(0x46C7E0EA, 1024))), str(shots / f"{nm}.png"))
+
+    def view():     # CL34: the arrows (shown / tucked under the box), and their slot's LED (base bits)
+        tk = main_call(syms["cl_tuck"]) & 0xFF if "cl_tuck" in syms else -1
+        cur, base = rd(syms["cl_cur"], 1), bytes(u.mem_read(0x460BA98C, 17))
+        bit = lambda die: (base[die // 8] >> (die % 8)) & 1
+        led = {(1, 1): "yellow", (1, 0): "red", (0, 1): "green", (0, 0): "off"}[(bit(ledtbl[cur]), bit(ledtbl[cur] + 1))]
+        return (f"arrows on {rd(syms['cl_sbank'], 1) + 1}:{cur + 1} pmoved {rd(syms['cl_pmoved'], 1)} "
+                f"ysup {rd(syms['cl_ysup'], 1)} tucked {tk} -> {'SHOWN' if rd(syms['cl_pmoved'], 1) and not tk else 'not shown'}; "
+                f"their slot's LED {led}")
+
+    if a.partreads:     # the playing pattern's Part, from here on (after the start: the stock start's own reads stay out)
+        pr_base[0] = bb + 0x8ED80 + (rd(slab_ad + 0x8E57, 1) & 3) * 0x18B2
+        u.hook_add(er.eb.UC_HOOK_MEM_READ, on_pread, begin=pr_base[0], end=pr_base[0] + 0x18B1)
+        print(f"Part reads watched: 0x{pr_base[0]:08x} (Part {(rd(slab_ad + 0x8E57, 1) & 3) + 1})", flush=True)
 
     for i, opx in enumerate(a.ops.split(",")):
         op, _, when = opx.partition("@")
@@ -265,6 +309,59 @@ def main(argv):
             print(f"#{i} P: cur {rd(syms['cl_cur'], 1) + 1} shown {rd(syms['cl_pmoved'], 1)} "
                   f"sbank {rd(syms['cl_sbank'], 1)}", flush=True)
             continue
+        if op == "Y":                         # a bare [YES]: whatever the screen shows
+            nl0 = len(reqs)
+            key(0x31, 1); key(0x31, 0)
+            settle(1500)
+            print(f"#{i} Y: requests {len(reqs) - nl0}; {view()}", flush=True)
+            continue
+        if op[0] == "b":                      # CL34: a load (bK = trig K, bY = [YES]) sampled until it lands: the
+            nl0 = len(lands)                  # cued slot's arrows' blink phase (cl_cph) against cl_T mod 24
+            if op[1:] == "Y":
+                key(0x31, 1); key(0x31, 0)
+            else:
+                key(int(op[1:]), 1); key(int(op[1:]), 0)
+            seq, g = [], 0
+            tk = (a.track or 0) * 2
+            while len(lands) == nl0 and g < 400:
+                rt.run(ms=40)
+                main_call(0x40056C28)         # route A runs no UI tick (task 0x40056c40's 1/60 s message): call its
+                g += 1                        # patched site (-> cl_uitick -> cl_cblink), as diag_clyps_ui does
+                cue = rd(syms["cl_cue"] + tk, 2)
+                seq.append((st["tick"], rd(syms["cl_T"], 4) % 24, rd(syms["cl_cph"], 1),
+                            0xFFFFFFFF if cue == 0xFFFF else cue))
+                if shots and (len(seq) < 2 or seq[-1][2] != seq[-2][2]) and len(seq) < 12:
+                    shot(f"{i:02d}_{op}_{len(seq):03d}_ph{seq[-1][2]}")
+            settle(400)
+            shot(f"{i:02d}_{op}_landed")
+            runs = []
+            for t_, m_, ph, cq in seq:
+                if not runs or runs[-1][1] != ph:
+                    runs.append([t_, ph, m_, cq])
+            on_ = [x for x in seq if x[3] != 0xFFFFFFFF]       # CL34: 120 BPM fixed -- per UI tick: 20 on, 10 off
+            lens, cur_ = [], None
+            for x in on_:
+                if cur_ and cur_[0] == x[2]:
+                    cur_[1] += 1
+                else:
+                    cur_ = [x[2], 1]
+                    lens.append(cur_)
+            bad = [l_ for l_ in lens[1:-1] if l_[1] != (20 if l_[0] else 10)]
+            print(f"      blink runs (phase, UI ticks): {lens[:12]}", flush=True)
+            print(f"#{i} {opx}: cued {hex(seq[0][3]) if seq else None}, landed {lands[-1] if len(lands) > nl0 else None}; "
+                  f"phase runs (tick, on, T mod 24) {[(r[0], r[1], r[2]) for r in runs][:16]}; samples {len(seq)}, "
+                  f"runs off 20 / 10 {len(bad)} {bad[:3]}; after: cph {rd(syms['cl_cph'], 1)}; {view()}", flush=True)
+            continue
+        if op in ("k+", "k-"):                # CL34: [BANK] held + DOWN / UP -- the view to the next / previous bank
+            key(0x2F, 1); key(0x20 if op == "k+" else 0x33, 1); key(0x20 if op == "k+" else 0x33, 0); key(0x2F, 0)
+            settle(400)
+            print(f"#{i} {op}: view bank {rd(syms['cl_bank'], 1) + 1}; {view()}", flush=True)
+            continue
+        if op == "v":                         # the view now
+            settle(300)
+            print(f"#{i} v: {view()}", flush=True)
+            shot(f"{i:02d}_v")
+            continue
         if op[0] == "y":                      # the arrows to slot K, then [YES]
             g2 = 0
             while rd(syms["cl_cur"], 1) != int(op[1:]) and g2 < 20:
@@ -288,7 +385,7 @@ def main(argv):
         snaps.append([st["tick"], params(act)])
         l = lands[-1] if len(lands) > nl else None
         print(f"#{i} {opx}: requests {[x[:6] for x in reqs if x[0] >= (l[0] - 400 if l else 0)][-2:]} landing "
-              f"{l}; cur {rd(syms['cl_cur'], 1) + 1} shown {rd(syms['cl_pmoved'], 1)}", flush=True)
+              f"{l}; {view()}", flush=True)
     settle(a.tail)
     parts = None
     if a.parts:     # CL29: the playing pattern's Part now vs as loaded (the snapshot, cl_bss + bank * BANKSZ)
@@ -302,7 +399,8 @@ def main(argv):
     out.write_text(json.dumps(dict(meta=dict(name=a.name, dj=a.dj, chain=a.chain, pokes=a.poke, ops=a.ops,
                                              track=a.track, pattern=act, bank=bank),
                                    states=states, builds=builds, fires=fires, lands=lands, reqs=reqs, snaps=snaps,
-                                   purges=purges, applies=applies, parts=parts)))
+                                   purges=purges, applies=applies, parts=parts,
+                                   preads=[[pc, off] + v for (pc, off), v in sorted(preads.items())])))
     print(f"wrote {out}: ticks {st['tick']}, landings {len(lands)}", flush=True)
     return 0
 

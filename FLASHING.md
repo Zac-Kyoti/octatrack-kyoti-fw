@@ -268,7 +268,21 @@ quick check for each:
 - **PART_CHANGE_CARRYOVER_FIX** — a track that is PICKUP on one Part and FLEX on
   another: switching patterns across the Parts plays the FLEX sample, not the old loop.
 - **KYOTI CL34 walk-through** (WIP; `out/KYOTI_WIP/KYOTI_V1.7_WITH_CLYPS/OCTATRACK_OS1.40C_KYOTI_V1.7_WITH_CLYPS.syx`)
-  = CL33 + one rule; timing unchanged from CL29.
+  = CL33 + two changes; timing unchanged from CL29.
+  0. **The cursor is always on screen** (the box or the arrows): open Clyps on T1 (playing its own sequence, no box):
+     [YES] does nothing. Load slot 5 by its trig: the box on 5, no arrows. Your own pattern's trig (ORIG): the box
+     goes, the arrows show on 5 (solid yellow). [YES]: 5 loads, the arrows tuck under its box again. ORIG again: the
+     arrows on 5. Repeat as often as you like -- no arrow key needed. Trig-load 7: the box on 7, the arrows still on 5.
+     An arrow press shows tucked arrows again and moves them. Also after ORIG PTN+PRT, a card reload, a pattern change.
+     The reverse: arrows on your own slot, [YES] (ORIG): they hide under the highlight, its LED red. Trig slot 7:
+     the box on 7, the arrows back on your own slot on screen -- its LED stays red (never yellow). [YES]: ORIG again.
+     **Arrows follow the bank:** arrows on slot 7 in bank A, [BANK] + DOWN: they show on slot 7 of bank B; back to A:
+     as they were there (hidden under the box after a load from them). Moved in B: they stay shown, on the new slot.
+     **ORIG's confirmation:** the trig of your own pattern: the highlighted slot flashes; the header reads ORIG TRK
+     SEQ (ALL with [FUNC]) without flashing. ORIG PTN+PRT still flashes the header.
+     **Cued loads blink:** DJ off, load a slot (trig or [YES]): arrows on that slot blink (120 BPM at any tempo: on
+     two thirds, off one) until it lands,
+     then the box appears there. Arrows aimed elsewhere stay solid meanwhile.
   1. **PRE after an instant load** (DJ on): a track whose outgoing sequence's last conditional trig FAILED (e.g. a 1:2
      on its off pass); load a slot whose first conditional trig is PRE: it plays (CL33 followed the outgoing failure
      and stayed silent). As after STOP or a stock pattern change. A held FILL still carries over.
