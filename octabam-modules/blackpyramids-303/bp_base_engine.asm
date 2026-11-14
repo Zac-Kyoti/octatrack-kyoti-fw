@@ -164,6 +164,7 @@ THM     equ     TH+512          ; TH + 2*256: x = 0
 ; (hwprobe_image.py, host=False) empties them, so DIAG14 assembles as it always did
 
 
+        bra     sg_entry                        ; a chain member is entered at its word 0
 ot303:
         move    r3,x:>OUTP
         move    r7,n6                           ; the count (r7 becomes the 43-tap's pointer)

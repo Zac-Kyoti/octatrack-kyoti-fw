@@ -11,7 +11,8 @@
 #   * the raw-path test (payload A's RAWCHK, folded out of payload B at build time) reads RAWF, X:$7b05, at run time:
 #     the claim starts it at 1 on core 0 (payload A) and 0 on core 1 (B);
 #   * the exit is `jmp CONT` with CONT left as @CONT@: the base's engine tools write each core's exit (a long branch);
-#   * the Y image ($7a5-$feb, the tables and the state block) is the Y claim's initial words.
+#   * the Y image ($7a5-$feb, the tables and the state block) is the Y claim's initial words;
+#   * its first word branches to the seam's entry (sg_entry): a chain member is entered at its word 0.
 # The chain's contract is the card seam's: the engine replays `move a,x:>$20e` itself, returns (rts) for a track that
 # is not its own and drops the seam's return (move ssh,x0) before its exit.
 #
@@ -65,6 +66,8 @@ def source(cont=None):
     eng = (ROOT / 'tools/ot303/ot303_engine.asm').read_text()
     lay = dict(XD=0, NXD=0, CONT=cont or 0, RAWP=1)
     text = asm_macros.layout(eng, XB=xb, YS=H.YS, LT=H.LT, TH=H.TH) + asm_macros.layout(_wrap(), **lay)
+    text = _one(text, '\not303:\n', '\n        bra     sg_entry                        ; a chain member is entered at its '
+                'word 0\not303:\n', 'the engine\'s first label')
     if cont is None:
         text = _one(text, 'CONT    equ     $0 ', 'CONT    equ     @CONT@ ', 'the CONT line')
     return asm_macros.expand(text), asm_macros.yspace(eng)
