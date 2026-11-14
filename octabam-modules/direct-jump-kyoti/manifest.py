@@ -85,8 +85,9 @@ PTN_LAYER_YES_PRESS = PTN_LAYER_YES + 2                # the u32 press handler
 # 0x400d6d38. octabam re-links it there on every build and compares. V7.0.1 (2026 B,
 # a0f48090...) was byte for byte the DIRECT JUMP code of the KYOTI V1.0 image the author
 # flashed on 2026-09-30; V7.0.2 (2188 B, WIP 2026-11-13: dj_cond, the trig conditions of a
-# never-switched pattern instead of COND_RESET(-1)) is not flashed yet.
-REFERENCE = (0x400d6d38, "2444840d6110f3d4997e61aa3412ed0e074e589fd84e46483328738264b39c3d")
+# never-switched pattern instead of COND_RESET(-1)) and V7.1 (2262 B, WIP 2026-11-13: a jump lands one
+# tick before the boundary, ahead 2, like Clyps CL26) are not flashed yet.
+REFERENCE = (0x400d6d38, "ad6c6a82987ddc8c852737e8b2a7714a0eb4ab3b247227488f41fbbca24c2ef4")
 
 MODULE = Module(
     name="direct-jump-kyoti",

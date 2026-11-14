@@ -20,6 +20,12 @@
 | V7.0.2 (2026-11-13, WIP; the user's rule from Clyps): a jump no longer restarts the trig
 | conditions (COND_RESET(-1)); dj_cond puts every A:B counter where the never-switched
 | reference holds it (graded by tools/cmp_reflock.py --cond).
+| V7.1 (2026-11-13, WIP; the user's decision, Clyps CL26's fix): a jump lands one tick BEFORE the
+| boundary (the next tick's t' = 0 mod L) and fires for it -- every reload and the master tick one
+| less after stock's loader (ahead 2), the engines' switch one tick ahead, and dj_purge a tick
+| ahead with a half-tick margin.  V7.0.x landed ON the boundary tick, where the outgoing boundary
+| event tied the sample clock exactly (+0.0000 tick) and only `bmi` decided it.  The new step
+| fires exactly where the old boundary event would have (REF-LOCK unchanged).
 | =========================================================================================
 | SPDX-License-Identifier: MIT
 | SPDX-FileCopyrightText: 2026 Zac Kyoti
@@ -169,6 +175,8 @@
     .equ T_FLAG,     4                  |   !=0: stock keeps the LIVE scale (does not reload)
     .equ SCLK,       0x4610757c         | audio-domain sample clock (fire-time base)
     .equ MCLK,       0x46107564         | MIDI-domain clock (MIDI fire-time base)
+    .equ TICK_A,     0x285ff0           | one sequencer tick in SCLK units (44100*60: tempo-independent)
+    .equ TICK_M,     16800              | one sequencer tick in MCLK units (stock's 0x400a4728)
     .ifndef DJ_TOFS
     .equ DJ_TOFS,    0                  | t of this ISR = dj_T + DJ_TOFS.  MEASURED 0 (rl_v70: t - dj_T == 0
                                         | at all 301 ticks); the first build's guess of 1 landed
@@ -410,7 +418,8 @@ dl_arm:
 da_scan:
     move.l  %d7,%d0
     add.l   %d6,%d0
-    bsr.w   dj_tprime                  | d0 = t' (signed) for tick d0
+    addq.l  #1,%d0                     | V7.1: the NEXT tick's t' -- a jump lands one tick before
+    bsr.w   dj_tprime                  | the boundary (Clyps CL26); d0 = t' (signed) of tick d0
     tst.l   %d0
     blt.b   da_next
     move.l  dj_L,%d1
@@ -493,7 +502,7 @@ dc_noc:
     move.l  %d4,RESUME_L
     move.l  %d0,%d5
     sub.l   %d3,%d5
-    addq.l  #1,%d5                     | d5 = t' (>= 0: t' = 0 mod L by construction)
+    addq.l  #2,%d5                     | d5 = the boundary's t' = t'(t_L) + 1 (>= 0, 0 mod L: dl_arm)
     lea     SNAP_STEP,%a0
     lea     SNAP_TICK,%a1
     lea     dj_tps,%a3
@@ -602,6 +611,25 @@ dj_nofa:
     bne.b   dn_stock
     moveq   #ST_FIXUP,%d0              | V7: next tick fixes reload (D0 dead here, see above)
     move.b  %d0,dj_state
+|   V7.1: the landing is one tick before the boundary.  Stock's loader (just above, 0x400a1fd0-
+|   0x400a2072) set every reload to tps - 1 and the master tick to tps_M - 1 (fire at once); one
+|   less each: phase E's first fire is scheduled a tick ahead (ahead 2), on the boundary, exactly
+|   where the outgoing boundary event would have sounded; the master steps on the boundary too.
+    move.l  %a0,-(%sp)
+    move.l  %d1,-(%sp)
+    lea     RELOAD,%a0
+    moveq   #16,%d1
+dn_rl:
+    move.b  (%a0),%d0                  | (ColdFire: subq is long-only)
+    subq.l  #1,%d0
+    move.b  %d0,(%a0)+
+    subq.l  #1,%d1
+    bne.b   dn_rl
+    move.b  TICK_CTR,%d0
+    subq.l  #1,%d0
+    move.b  %d0,TICK_CTR
+    move.l  (%sp)+,%d1
+    movea.l (%sp)+,%a0
     tst.b   dj_zero                    | Z = 1 -> "do not send"
     rts
 dn_stock:
@@ -644,7 +672,8 @@ dj_handoff:
     move.l  #A_STRIDE,%d6
     bsr.w   ho_bits
     move.l  %d4,ENG_AFLAGS
-    move.l  SCLK,%d0                   | stock: a3 + sclk; V7 switches now
+    move.l  SCLK,%d0                   | stock: sclk + tps_M * TICK_A (a master step ahead)
+    addi.l  #TICK_A,%d0                | V7.1: the boundary is the NEXT tick (V7.0.x: "now")
     move.l  %d0,ENG_ATIME
     move.b  ACT_BANK,%d0
     move.b  %d0,ENG_ABANK
@@ -657,8 +686,8 @@ dj_handoff:
     move.l  #M_STRIDE,%d6
     bsr.w   ho_bits
     move.l  %d4,ENG_MFLAGS
-|   MIDI switch times, 0x400a470a-0x400a47b2 (d5 = 0): the offsets depend on the MIDI clock
-|   settings exactly as in stock
+|   MIDI switch times, 0x400a470a-0x400a47b2 (stock's d5 = ticks ahead; V7.1: 1, the boundary is the
+|   next tick -- V7.0.x: 0): the offsets depend on the MIDI clock settings exactly as in stock
     moveq   #0,%d5                     | d5 = 1: the "fast" branch
     tst.b   0x80001860
     bne.b   ho_mt
@@ -670,6 +699,7 @@ dj_handoff:
     moveq   #1,%d5
 ho_mt:
     move.l  MCLK,%d0
+    addi.l  #TICK_M,%d0                | V7.1: d5 = 1 tick ahead
     tst.l   %d5
     bne.b   ho_mt1
     addi.l  #12600,%d0
@@ -678,6 +708,7 @@ ho_mt1:
     moveq   #1,%d0
     move.l  %d0,ENG_MFLAG
     move.l  MCLK,%d0
+    addi.l  #TICK_M,%d0                | V7.1: d5 = 1 tick ahead
     tst.l   %d5
     beq.b   ho_mt2
     subi.l  #16800,%d0
@@ -949,11 +980,17 @@ tp_noc:
     addq.l  #1,%d0
     rts
 
-| dj_purge: cancel every still-pending event (fire time >= now) in the two audio tables and
-| the MIDI table, with stock's own cancellation (0x400a43b6-0x400a4464): clear the record
-| long and the slot's bit in the track mask; the fire time itself is left alone.
+| dj_purge: cancel every pending event of the outgoing pattern from the boundary on in the two
+| audio tables and the MIDI table, with stock's own cancellation (0x400a43b6-0x400a4464): clear the
+| record long and the slot's bit in the track mask; the fire time itself is left alone.
+| V7.1 (2026-11-13, the user: Clyps CL26's fix): the landing is one tick BEFORE the boundary, so an
+| event is the outgoing pattern's from the boundary on when it fires half a tick or more from now.
+| The boundary events sit a whole tick ahead and events due on this tick stay: half a tick of margin
+| either way (V7.0.x purged on the boundary tick itself with fire - now >= 0, where the boundary
+| events tied the sample clock exactly -- measured +0.0000 tick).
 dj_purge:
     move.l  SCLK,%d5
+    move.l  #TICK_A/2,%d3              | half an audio tick
     lea     0x80001904,%a0
     lea     0x46c7e998,%a1
     lea     0x46c7fe44,%a3
@@ -963,11 +1000,13 @@ dj_purge:
     lea     0x46c7fe8c,%a3
     bsr.b   pg_table
     move.l  MCLK,%d5
+    move.l  #TICK_M/2,%d3              | half a MIDI tick
     lea     0x46c76a26,%a0
     lea     0x46c769c0,%a1
     lea     0x46c77be2,%a3
 |   fall through
-| pg_table: a0 = times[t + slot*8] (longs), a1 = records (same layout), a3 = mask[8], d5 = now
+| pg_table: a0 = times[t + slot*8] (longs), a1 = records (same layout), a3 = mask[8], d5 = now,
+| d3 = half a tick in this table's clock
 pg_table:
     moveq   #0,%d6                     | track
 pg_trk:
@@ -982,7 +1021,8 @@ pg_slot:
     add.l   %d6,%d1                    | idx = track + slot*8
     move.l  (%a0,%d1.l*4),%d2
     sub.l   %d5,%d2
-    bmi.b   pg_next                    | already due: leave it (stock's boundary rule)
+    cmp.l   %d3,%d2
+    blt.b   pg_next                    | fires before the boundary: the outgoing pattern's, leave it
     clr.l   (%a1,%d1.l*4)
     bclr    %d4,%d0
     move.b  %d0,(%a3,%d6.l)

@@ -37979,3 +37979,30 @@ Handoff: `reference/handoffs/DJ_CLYPS_PORT.md` (trkseq). Item 1 only is implemen
 - Builds (WIP): standalone `out/OCTATRACK_OS1.40C_DIRECT_JUMP_KYOTI.syx` (140C_KDJC1); KYOTI V1.7 image (reads
   "KYOTI V1.7"); KYOTI-with-Clyps built in a scratch trkseq@ae75d15 tree + this DJ source (KYOTI DJC1); Bugbuild
   BUG_DJC1. None flashed. Evidence: out/djc/ (runs, launch.sh, probes).
+
+## 2026-11-13 cont. (`dj-clyps`) — DIRECT JUMP V7.1 (WIP, NOT flashed): a jump lands one tick before the boundary (Clyps CL26)
+
+The user's decision (2026-11-13), item 2 of DJ_CLYPS_PORT: fix the boundary tie the Clyps CL26 way.
+- **Change:** dl_arm looks for the tick whose NEXT tick has t' = 0 mod L (t' >= 0); dl_commit's snapshot is
+  the boundary's (t'(t_L) + 1); Hook N, after stock's loader, takes one off every RELOAD byte and off TICK_CTR
+  (ahead 2: phase E builds the landing step a tick early, fired for the boundary; the master steps on the
+  boundary); dj_handoff stamps the engines' switch one tick ahead (ENG_ATIME = SCLK + 0x285ff0, the two MIDI
+  times + 16800, i.e. stock's d5 = 1); dj_purge runs a tick ahead and cancels events firing half a tick or more
+  from now (0x142ff8 audio / 8400 MIDI); dl_fixup unchanged (next tick = the boundary tick). dj_cond reads
+  F(t_L): no pass starts on t_L (t'(t_L) = -1 mod every tps), so it equals V7.0.2's F(boundary).
+- **Why half a tick, not Clyps' "fire >= now":** DJ's landing grid is the INCOMING pattern's lcm; an outgoing
+  track (another rate / length) can have a step on the landing tick itself (fire - now = 0). V7.0.x played it
+  (it was due before the boundary); "fire >= now" would drop it. Clyps never meets this (it lands each track on
+  its own old AND new grid).
+- **Measured purge margin** (out/djc2/probe_purge2.py, 16<->7 and the mixed run, every purge): the only pending
+  outgoing events at the purge are the boundary events at fire - now = **+1.0000 tick** (purged; half a tick
+  from the threshold, a full tick from the clock; V7.0.x: +0.0000). The engine's switch applies 0.0065-0.0174
+  tick after the boundary (as before).
+- **REF-LOCK** (tools/cmp_reflock.py --cond vs out/djc/r*.json, standalone 140C_KDJC2 a1114bb5…): 16<->7 NORMAL,
+  A07<->A08, INF: PASS (state from the tick after each landing, counters + latches, pending events identical --
+  the new step fires exactly where the old boundary event would have). DJMAST2 and the mixed 3/4x+3/2x+1/4x run
+  fail only by the item-4 race (a stock wrap-change taking an armed cue): the cue deadline is now one tick
+  earlier, so DJMAST2's cue at t185 (V7.0.2 landed at once) waits for the next grid point and stock's wrap at
+  t189 takes it. Fixed by V7.1.1 (next entry). DJMAST2's first cue moved to t93 (as V7.0.2's run n3b: a cue
+  written in the very phase G of a wrap is a harness artifact no unit can produce).
+- Builds: none committed with this step (the final builds come with V7.2). Evidence: out/djc2/ (v1-v5, vpp*).
