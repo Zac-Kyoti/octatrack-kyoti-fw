@@ -6,9 +6,12 @@ A cued pattern takes over on the NEXT STEP instead of waiting for the current
 one to finish, and the landing is LOCKED TO THE MASTER CLOCK: the new pattern
 plays exactly where it would be had it been running since START, whatever its
 track lengths, scales or master settings -- never shifted by a step, never a
-fraction of a step off, and its first trig always wins. The Part and START SILENT
-change as on a stock pattern change; trig conditions stand where the new pattern's
-would, had it played since START (V7.0.2, WIP), and the last MIDI
+fraction of a step off, and its first trig always wins. START SILENT and the Part's
+pattern-wide settings (scenes, the Part itself) change as on a stock pattern change; each
+track's own Part settings reach the engine with that track's first sounding trig of the new
+pattern (V7.2, WIP), so a sound still ringing from the old pattern never takes the new
+settings; trig conditions stand where the new pattern's would, had it played since START
+(V7.0.2, WIP), and the last MIDI
 Program Change sent always names the pattern that plays. The arranger and
 pattern chains are untouched. (The Analog Rytm's own DIRECT JUMP, by contrast,
 lands shifted or fractional whenever lengths or scales differ; that difference
@@ -62,7 +65,7 @@ from remix.schema import Detour, Keep, Kind, Linked, Module, SymbolRef
 # one manifest serves both layouts.
 _HERE = os.path.relpath(os.path.dirname(os.path.realpath(__file__)))
 
-# ---- the three hook sites ----------------------------------------------------
+# ---- the four hook sites -----------------------------------------------------
 # Phase D of the tick handler: the countdown read this cave arms.
 LAND_HOOK = 0x400a1f72
 LAND_HOOK_STOCK = bytes.fromhex("103980006687")        # move.b (0x80006687).l,%d0
@@ -72,6 +75,10 @@ NOFA_HOOK_STOCK = bytes.fromhex("4a398000002a")        # tst.b (0x8000002a).l
 # [PTN] release: the chooser must not open when [PTN]+[YES] was the gesture.
 PTNREL_HOOK = 0x40043418
 PTNREL_HOOK_STOCK = bytes.fromhex("4879400bf0f2")      # pea 0x400bf0f2
+# V7.2: the light Part apply's LFO AUTO CHANGE test -- the one apply after a jump skips its
+# per-track part (each track's publish brings it at that track's first sounding trig).
+LFOQ_HOOK = 0x40009ebe
+LFOQ_HOOK_STOCK = bytes.fromhex("4a3980000050")        # tst.b (0x80000050).l
 
 # The [PTN]-held keymap layer (0x400bf0f2): the 26-byte record for YES (key code
 # 0x31) is all-NULL in stock, so the press slot is a free function pointer.
@@ -87,8 +94,9 @@ PTN_LAYER_YES_PRESS = PTN_LAYER_YES + 2                # the u32 press handler
 # flashed on 2026-09-30; V7.0.2 (2188 B, WIP 2026-11-13: dj_cond, the trig conditions of a
 # never-switched pattern instead of COND_RESET(-1)) and V7.1 (2262 B, WIP 2026-11-13: a jump lands one
 # tick before the boundary, ahead 2, like Clyps CL26) and V7.1.1 (2610 B: an armed cue is never taken by
-# stock's wrap-change) are not flashed yet.
-REFERENCE = (0x400d6d38, "64968ef93c226b12951d5b288941d537c7777ee20716425667318319ab5e080e")
+# stock's wrap-change) and V7.2 (3716 B: each track's Part at its first sounding trig, with LFO AUTO
+# CHANGE on) are not flashed yet.
+REFERENCE = (0x400d6d38, "5ba3ac14ca7fd2d2e9a07bf72e069535162799a4b5bb9100e5c08d88a8d94920")
 
 MODULE = Module(
     name="direct-jump-kyoti",
@@ -124,6 +132,8 @@ MODULE = Module(
                "no MIDI START (0xFA) on a jump", kind="jsr"),
         Detour(PTNREL_HOOK, PTNREL_HOOK_STOCK, "dj7", "dj_ptnrel",
                "[PTN] release: keep the chooser shut after [PTN]+[YES]"),
+        Detour(LFOQ_HOOK, LFOQ_HOOK_STOCK, "dj7", "dj_lfoq",
+               "light Part apply: per-track part deferred to each track's first trig", kind="jsr"),
     ),
     symbol_refs=(
         SymbolRef(PTN_LAYER_YES_PRESS, 0, "dj7", "dj_toggle",

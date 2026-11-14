@@ -72,7 +72,7 @@ if DIAG:
     if len(sys.argv) <= 2:
         TOAST_DUR = 0x88
 
-CAVE_DJ = kyoti_place.at("patch_directjump_v7", 0x400d7000)     # V7.0.1: moved down from 0x400d7400 (the hand-off needs room; zero in stock, vetted zone)
+CAVE_DJ = kyoti_place.at("patch_directjump_v7", 0x400d6800)     # V7.2: down from 0x400d7000 (the per-track publish needs room; V7.0.1 came from 0x400d7400; zero in stock, vetted zone, caves.md §2b; the Bugbuild keeps 0x400d6500.. for its fixes)
 FREE_END = 0x400d7c3c
 # build_kyoti.py may carry this unit in DRAM (tools/dram/, as RELOAD_FROM_PROJECT's): linked at the DRAM
 # address it is given and NOT written into this image -- only its detours and the [PTN]-layer record are;
@@ -91,7 +91,8 @@ PATCHES = [
     ("patch_directjump_v7", CAVE_DJ, f"DJ_TOAST_DUR=0x{TOAST_DUR:x}" + (f",DJ_TOFS={os.environ['DJ_TOFS']}" if os.environ.get("DJ_TOFS") else "") + (",DJ_DIAG=1" if DIAG else "") + (",DJ_MODE_IN_CAVE=1" if kyoti_place.at("dj_mode_in_cave", False) else ",DJ_MODE_IN_RAM=1"),
      [(0x400a1f72, "dj_land", "103980006687", 6, "jsr"),   # move.b (0x80006687).l,%d0
       (0x400a221c, "dj_nofa", "4a398000002a", 6, "jsr"),   # tst.b (0x8000002a).l
-      (0x40043418, "dj_ptnrel", "4879400bf0f2", 6, "jmp")]),
+      (0x40043418, "dj_ptnrel", "4879400bf0f2", 6, "jmp"),
+      (0x40009ebe, "dj_lfoq", "4a3980000050", 6, "jsr")]),   # V7.2: light Part apply's tst.b 0x80000050
 ]
 
 # [PTN]-held keymap layer 0x400bf0f2, 26-byte record for YES (code 0x31): all-NULL in stock.

@@ -11,9 +11,12 @@ always wins.
 Off by default, and it comes up OFF at every power-on: a unit that never enables
 it behaves exactly as stock.
 
-- The Part and START SILENT change as on a stock pattern change. Trig conditions do not
-  start again: every A:B counter stands where the new pattern's would, had it played since
-  START (V7.0.2, WIP; a stock change restarts them).
+- START SILENT and the Part's pattern-wide settings (the Part itself, scenes) change as on a
+  stock pattern change. Each track's own Part settings reach the engine with that track's
+  first sounding trig of the new pattern, so a sound still ringing from the old pattern
+  never takes the new pattern's settings (V7.2, WIP; a stock change applies them at once).
+- Trig conditions do not start again: every A:B counter stands where the new pattern's
+  would, had it played since START (V7.0.2, WIP; a stock change restarts them).
 - The last MIDI Program Change sent always names the pattern that plays.
 - The arranger and pattern chains are untouched.
 
@@ -25,7 +28,7 @@ build); V7 is the clock-locked landing that this module ships.
 
 | file | what it is |
 |---|---|
-| `manifest.py` | the octabam module declaration — one DRAM unit, three detours, the keymap slot |
+| `manifest.py` | the octabam module declaration — one DRAM unit, four detours, the keymap slot |
 | `patch_directjump_v7.s` | the m68k source; the only truth for the unit's bytes |
 
 The standalone image (this repo's own build, outside octabam) is
@@ -40,13 +43,14 @@ mechanism — it arms that countdown and prepares the snapshot on the landing ti
 (`0xFA`) that a jump must not send, and owns the `[PTN]`-held `[YES]` key. The
 pattern-boundary body, the rebuild loops and every per-track counter are stock.
 
-Three detours, six bytes each, plus one function pointer:
+Four detours, six bytes each, plus one function pointer:
 
 | site | symbol | what it displaces |
 |---|---|---|
 | `0x400a1f72` | `dj_land` | `move.b (0x80006687).l,%d0` — the phase-D countdown read |
 | `0x400a221c` | `dj_nofa` | `tst.b (0x8000002a).l` — the MIDI START gate |
 | `0x40043418` | `dj_ptnrel` | `pea 0x400bf0f2` — `[PTN]` release, so the chooser stays shut |
+| `0x40009ebe` | `dj_lfoq` | `tst.b (0x80000050).l` — the light Part apply's LFO AUTO CHANGE test: the one apply after a jump leaves each track's LFO setup to that track's first trig |
 | `0x400bf0c0` | `dj_toggle` | the `[PTN]`-layer YES press slot, all-NULL in stock |
 
 **State:** one word, `DJ_MODE` (0 = OFF/stock, 1 = ON), kept **inside the code unit**

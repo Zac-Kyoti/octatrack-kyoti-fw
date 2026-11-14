@@ -149,10 +149,11 @@ FEATURES = {
 # WIP bases, composed ONLY with the explicit opt-in `--wip NAME` (and KYOTI_ALLOW_WIP=1): one
 # per run, never sealed, never part of the default run above.
 WIP_FEATURES = {
-    # DIRECT JUMP V7.0.2 (trig conditions as a never-switched pattern, reference/handoffs/DJ_CLYPS_PORT.md),
-    # WIP until the user promotes it: then it returns to FEATURES' BUG_DJV7 entry and this one goes.
-    "DIRECT_JUMP_KYOTI": ("build_direct_jump_kyoti.py", "out/mainos_direct_jump_kyoti.bin", "BUG_DJC1",
-                          "hold [PTN], tap [YES] -> DIRECT JUMP on/off (V7.0.2 WIP: trig conditions locked)."),
+    # DIRECT JUMP V7.2 (V7.0.2 trig conditions, V7.1 landing a tick early, V7.1.1 cue race, V7.2 the Part
+    # per track at its first sounding trig; reference/handoffs/DJ_CLYPS_PORT.md), WIP until the user
+    # promotes it: then it returns to FEATURES' BUG_DJV7 entry and this one goes.
+    "DIRECT_JUMP_KYOTI": ("build_direct_jump_kyoti.py", "out/mainos_direct_jump_kyoti.bin", "BUG_DJC2",
+                          "hold [PTN], tap [YES] -> DIRECT JUMP on/off (V7.2 WIP: conditions locked, Part per track)."),
 }
 # Bytes a feature writes AT RUNTIME that are zero in its image: no bug-fix cave may cover
 # them, though free_runs() would otherwise count them free.

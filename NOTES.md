@@ -38029,3 +38029,54 @@ DJ then re-landed on its grid. V7.1 makes it likelier (the cue deadline is a tic
   PASS. All five scenarios (16<->7, A07<->A08, DJMAST2, INF, mixed) PASS. octabam REFERENCE 64968ef9… (2610 B).
 - **Open (by design):** for that one tick the PTN page's cued LED reads PEND == playing; the repaint post
   restores it on the next tick. A cue cancel pressed exactly in that tick is lost (the old cue comes back).
+
+## 2026-11-13 cont. (3) (`dj-clyps`) — DIRECT JUMP V7.2 (WIP, NOT flashed): each track's Part at its first sounding trig
+
+Item 3 (the user: a performer should never hear the incoming sequence's track settings on the sound being changed
+away from; Clyps' FULL rule). **First, what stock's light Part apply 0x40009e00 is** (read on our image + measured):
+its Part-wide items are the publish bytes 0x80001828/29 (the bank / Part every new trig's voice reads), the scene
+table 0x800010e4..e7, the UI block 0x46c7d6d4..d7d4 and its two UI posts (0x400d64b9 / bb); its ONLY per-track
+part is every audio and MIDI track's LFO setup (0x80000816.., 0x80000110 / 0x80000dbc state, designer waves
+0x80001388 / slopes 0x80001508; MIDI 0x46c76dc6.., 0x46c7738c, 0x46c7750c), and only with **LFO AUTO CHANGE**
+(0x80000050, project CONTROL > SEQUENCER) on. Every other track setting of the new Part reaches the voice through
+the publish bytes at its trigs (voice code 0x4000b4f6.. / 0x4000c9e8 records bank / Part per trig).
+- **Verified** (tools/check_dj_part.py on a snapshot of OT DEMO playing Part 0, applying Part 1, a bare Unicorn,
+  every byte): dj_pwide (= the light apply with its per-track part skipped) writes exactly the light apply's
+  Part-wide bytes (12 B); Part-wide + TRK_APPLY(t) for t 0..7 + dj_mapply(m) for m 0..7 reproduce every byte
+  the light apply writes, same values, for LFO AUTO CHANGE off (12 B) and on (111 B): PASS. TRK_APPLY / the
+  MIDI apply write ~540 B more (base words, machine setup, levels, MIDI page values, MBANK); a V7.1.1-vs-V7.2
+  run (same jumps, out/djc3/g1 vs h1) shows no lasting difference in static engine values after every track
+  published -- the trigs write the same values -- but TRK_APPLY re-initialises the LFOs.
+- **Change:** the jump's switch (unchanged hand-off, the boundary) applies the Part-wide items only: a new detour
+  at the light apply's `tst.b 0x80000050` (0x40009ebe, `dj_lfoq`, jsr) skips its per-track loops for the one
+  apply after a jump. dj_sparm arms every track at the landing; dj_spdo (each tick, end of dj_land) publishes a
+  track (TRK_APPLY / dj_mapply = Clyps' cl_mapply) on the tick a pending event of the new sequence with record
+  bit 2 (fire >= the landing clock + half a tick, dj_purge's line) fires within half a tick; no sample trig in
+  the sequence, or START SILENT (stock silences the track at the switch): the boundary tick. A new jump, STOP,
+  DJ off / chain / arranger: everything pending at once (dj_spflush). **With LFO AUTO CHANGE off nothing is
+  armed** (the light apply has no per-track part then; a TRK_APPLY would impose the new Part's LFOs, which stock
+  never does). No restart bit: the voice code restarts a machine whose voice Part differs when it triggers.
+  Standalone cave moved to 0x400d6800 (3716 B; caves.md §2b zone; the Bugbuild's fixes keep 0x400d6500..).
+- **Graded** (tools/diag_dj_partpub.py --trace + tools/check_dj_full.py, OT DEMO, patterns on Parts 0-3, LFO
+  AUTO CHANGE poked on): standalone 21 tracks published exactly on their first sounding trig's tick, 26 on the
+  boundary tick (no sample trig), 1 published by the next jump's flush (no trig in between): PASS; KYOTI default
+  and KYOTI-with-Clyps the same (21 / 26 / 1, PASS). AUTO CHANGE off: no arm, no publish (3 jumps). REF-LOCK
+  (all five DJTEST2 / DJMAST2 scenarios) PASS on standalone 140C_KDJC5, KYOTI default (16<->7, A07<->A08,
+  mixed) and KYOTI-with-Clyps (same three) PASS.
+- **KYOTI-with-Clyps interplay, the rule (by construction, no Clyps code change):** every publish -- DJ's and
+  Clyps' -- applies the Part as it is at that moment and only at a sounding trig of the sequence then playing
+  the track. A jump: Clyps' pending publish drops itself when the incoming pattern's Part differs (cl_sppub's
+  Part check) or applies the same Part at the same first trig as DJ's (identical apply). A Clyps load on a track
+  DJ still owes: Clyps purges the track's events at its landing, so DJ's publish fires at Clyps' new sequence's
+  first trig, with the Part that now holds Clyps' slice -- the same apply Clyps makes there. Runs (trkseq's
+  harness, KYOTI-with-Clyps, DJ on): FULL load then jump to another Part, jump then FULL load, FULL load then
+  jump on the same Part -- every TRK_APPLY names the Part playing at that moment, none early. The two overlap
+  cases themselves (both pending at once) did not occur in those runs: not exercised.
+- DJ-OFF and DJ-ON-idle identity vs stock (tools/diff_stock_vs_patch.py) on 140C_KDJC5: IDENTICAL (also on the
+  V7.1 and V7.1.1 images). Bugbuild BUG_DJC2: DISJOINT / ALL PRESERVED / NO STRAYS. octabam REFERENCE 5ba3ac14…
+  (3716 B, 5407 = 54455), manifest + README list the fourth detour.
+- **Builds (all WIP, NONE flashed):** standalone `out/OCTATRACK_OS1.40C_DIRECT_JUMP_KYOTI.syx` (140C_KDJC5, syx
+  b0cc35cf…, mainos 617af798…); Bugbuild BUG_DJC2 (syx 890cabeb…); KYOTI default "KYOTI DJC2" (out/djc3/
+  kyoti_default/, syx bf84e47a…, mainos e4ca6bb1…); KYOTI-with-Clyps "KY+CL DJC2" from trkseq c83ba6e in a scratch
+  detached tree + this DJ source merged onto trkseq's (DJ_SELFHOOK kept; out/djc3/kyoti_clyps/, syx bae3d5ad…,
+  mainos 428b495e…). Evidence: out/djc2/ (REF-LOCK v/w/x/y/k/c runs, identity), out/djc3/ (Part dumps, traces).

@@ -26,6 +26,9 @@
 | ahead with a half-tick margin.  V7.0.x landed ON the boundary tick, where the outgoing boundary
 | event tied the sample clock exactly (+0.0000 tick) and only `bmi` decided it.  The new step
 | fires exactly where the old boundary event would have (REF-LOCK unchanged).
+| V7.1.1 (2026-11-13): stock's wrap-change never takes a cue DIRECT JUMP has armed (dj_hide).
+| V7.2 (2026-11-13, WIP): each track's own Part reaches the engine with its first sounding trig of
+| the incoming pattern (dj_sparm .. dj_mapply); the jump keeps the Part-wide items.
 | =========================================================================================
 | SPDX-License-Identifier: MIT
 | SPDX-FileCopyrightText: 2026 Zac Kyoti
@@ -152,6 +155,16 @@
     .equ QUANT_TBL,   0x400d80dc        | long[]: CHAIN AFTER length in master steps (<= 0 = off)
     .equ END_STEP,    0x8000662c        | long: a pattern-end override step (-1 = none), stock 0x400a431a
     .equ STOP_END,    0x8000667e        | byte: stop at the next master step (stock 0x400a4006)
+|   V7.2 -- the incoming Part per track at its first sounding trig:
+    .equ TRK_APPLY,   0x40001f18        | (bank, part, t): one audio track's Part values -> the engine
+    .equ PART_OFF,    0x8ed80           | a bank's 4 Parts, after its 16 pattern blobs
+    .equ PARTSZ,      0x18b2
+    .equ MENG,        0x46c76dc0        | 8 x 68 B: a MIDI track's page values (32) + setup (36)
+    .equ MDES,        0x46c7738c        | 24 x 16 B: the MIDI LFOs' designer waves
+    .equ MSLP,        0x46c7750c        | 24 x u16: ... their slopes
+    .equ MBANK,       0x8000666e        | byte[8] bank / [8+m] Part the MIDI track's values came from
+    .equ MZERO,       0x8000664e        | long[8], cleared by stock's apply
+    .equ M_REC,       0x48d0            | pattern blob: MIDI track 0's record (+ m * M_STRIDE)
     .equ MSG_PAT,     0x400d816b        | message 0x11: {code, pattern, 1} -- stock's WRAP-CHANGE
     .equ MSG_PAT_ARG, 0x400d816c        |   post @0x400a4b9a.  NOT 0x400d8164 -- see dl_commit.
 
@@ -335,7 +348,10 @@ da_same:
     bra.w   dl_done
 
 dl_off:                                | DJ off / stopped / arranger / chain
-    move.b  dj_state,%d0
+    tst.b   dj_spn
+    beq.b   1f
+    bsr.w   dj_spflush                 | V7.2: STOP (or DJ off) publishes what still waits, at once
+1:  move.b  dj_state,%d0
     cmpi.b  #ST_ARMED,%d0              | (ColdFire cmpi takes only a Dn destination)
     bne.b   dl_clear
     clr.b   LAND_CNTDN                 | WE armed stock's countdown -> take it back
@@ -460,7 +476,10 @@ dl_arm2:
     moveq   #ST_ARMED,%d0
     move.b  %d0,dj_state
 dl_done:
-    move.b  dj_state,%d0
+    tst.b   dj_spn
+    beq.b   1f
+    bsr.w   dj_spdo                    | V7.2: the tracks whose first trig is due now get their Part
+1:  move.b  dj_state,%d0
     cmpi.b  #ST_ARMED,%d0
     bne.b   dl_out
     bsr.w   dj_hide                    | V7.1.1: stock's switch must not take an armed cue
@@ -584,6 +603,10 @@ du_out:
 
 | dl_commit: the landing tick.  Registers are free (saved by the caller).
 dl_commit:
+    tst.b   dj_spn
+    beq.b   1f
+    bsr.w   dj_spflush                 | V7.2: a new jump publishes the last one's pending tracks at once
+1:
     move.b  ACT_PAT,%d0
     move.b  %d0,PREV_PAT
     move.b  ACT_BANK,%d0
@@ -795,6 +818,7 @@ dj_handoff:
     move.l  #A_STRIDE,%d6
     bsr.w   ho_bits
     move.l  %d4,ENG_AFLAGS
+    move.l  %d4,dj_silA                | V7.2: START SILENT tracks publish on the boundary tick
     move.l  SCLK,%d0                   | stock: sclk + tps_M * TICK_A (a master step ahead)
     addi.l  #TICK_A,%d0                | V7.1: the boundary is the NEXT tick (V7.0.x: "now")
     move.l  %d0,ENG_ATIME
@@ -809,6 +833,7 @@ dj_handoff:
     move.l  #M_STRIDE,%d6
     bsr.w   ho_bits
     move.l  %d4,ENG_MFLAGS
+    move.l  %d4,dj_silM
 |   MIDI switch times, 0x400a470a-0x400a47b2 (stock's d5 = ticks ahead; V7.1: 1, the boundary is the
 |   next tick -- V7.0.x: 0): the offsets depend on the MIDI clock settings exactly as in stock
     moveq   #0,%d5                     | d5 = 1: the "fast" branch
@@ -848,6 +873,7 @@ ho_mt3:
 |   V7.0.2 (2026-11-13, the user's rule from Clyps, scope §1.29 C): the trig conditions stand where
 |   a never-switched incoming pattern would have them -- stock's switch (and V7.0.1) restarted them
 |   with COND_RESET(-1) 0x400a539c here.  dj_cond (below) sets every track's A:B pass counter.
+    bsr.w   dj_sparm                   | V7.2: every track's Part publish waits for its first trig
     bra.w   dj_cond
 
 | dj_cond: every track's trig-condition state at the landing tick t_L (dj_tland), as a reference run
@@ -1207,6 +1233,383 @@ fx_store:
     bne.b   fx_loop
     rts
 
+
+| ================= V7.2: the incoming Part per track, at its first SOUNDING trig =================
+| The user (2026-11-13, Clyps' FULL-load rule): a performer should never hear the incoming sequence's track
+| settings applied to the sound being changed away from.  Until V7.1 the engine's light Part apply
+| 0x40009e00 (from the hand-off's switch, 0x4000b1d8) applied the incoming Part on the boundary: the
+| Part-wide items (published bank / Part 0x80001828/29 -- what each new trig's voice reads --, the scene
+| table 0x800010e4..e7, the UI's 0x46c7d6d4 block and its two posts) and, with LFO AUTO CHANGE
+| (0x80000050), every track's LFO setup -- under a sample still ringing from the outgoing pattern.
+| V7.2: the switch keeps the Part-wide items (dj_lfoq skips the per-track part of that one apply) and each
+| track gets its own Part (TRK_APPLY / dj_mapply, as Clyps' cl_sppub and RELOAD's rl_pub1; only with LFO
+| AUTO CHANGE on, see dj_sparm) on the tick where
+| a pending event of the new sequence with record bit 2 (the builder's 29 / 61: a sample / note trig; 25 is
+| a trigless trig, 1 an empty step) fires within half a tick -- micro-timing and trig conditions honoured
+| (a trig whose condition fails is never built).  A sequence without any sample trig, and a START SILENT
+| track (stock silences it at the switch: nothing rings), publish on the boundary tick.  STOP, DJ off and a
+| new jump publish everything still pending at once.  The engine's own voice code restarts a machine
+| that differs from the voice's Part when it triggers (0x4000c9e8: it compares the voice's bank / Part
+| with the published one), so no restart bit is needed here.
+
+| dj_lfoq: the light Part apply's `tst.b 0x80000050` (LFO AUTO CHANGE, 0x40009ebe, jsr, 6 B; stock's
+| beq.w 0x4000a138 follows on its Z flag).  The one apply after a jump's hand-off sees Z = 1: its per-track
+| LFO loops are skipped (each track's publish brings them).  Keeps every register.
+    .global dj_lfoq
+dj_lfoq:
+    tst.b   dj_defer
+    beq.b   lq_stock
+    clr.b   dj_defer
+    cmp.l   %d0,%d0                    | Z = 1
+    rts
+lq_stock:
+    tst.b   0x80000050                 | displaced original
+    rts
+
+| dj_sparm (the landing tick, from dj_handoff; a2 = the incoming blob): every track's publish waits.
+| Measured (tools/check_dj_part.py, 2026-11-13): the light apply's ONLY per-track part is the LFO setup, and
+| only with LFO AUTO CHANGE on (0x80000050, the project's CONTROL > SEQUENCER setting); every other track
+| setting of the new Part reaches the voice through the published bank / Part at its trigs.  So with LFO
+| AUTO CHANGE off there is nothing per track to defer, and nothing is armed: a TRK_APPLY would impose the
+| new Part's LFOs, which stock never does then.  Uses d0-d7/a0-a1 (dj_land saved them).
+dj_sparm:
+    tst.b   0x80000050
+    bne.b   1f
+    rts                                | LFO AUTO CHANGE off: the switch's light apply is all there is
+1:
+    move.b  ACT_BANK,%d0
+    move.b  %d0,dj_spbk
+    move.l  #P_PART,%d1
+    move.b  (%a2,%d1.l),%d0
+    move.b  %d0,dj_sppt
+    move.l  SCLK,%d5
+    addi.l  #TICK_A/2,%d5              | d5 = audio: a new-sequence event fires at or after (dj_purge's line)
+    move.l  MCLK,%d4
+    addi.l  #TICK_M/2,%d4              | d4 = MIDI
+    moveq   #0,%d6                     | t
+sa_l:
+    moveq   #2,%d7                     | default: the boundary tick
+    move.l  dj_silA,%d0
+    cmpi.l  #8,%d6
+    bcs.b   1f
+    move.l  dj_silM,%d0
+1:  move.l  %d6,%d1
+    andi.l  #7,%d1
+    addq.l  #8,%d1
+    btst    %d1,%d0
+    bne.b   sa_set                     | START SILENT: stock silences it at the switch
+|   the record's trig mask (first 8 bytes, big-endian, bit s = step s) under its length
+    cmpi.l  #8,%d6
+    bcc.b   2f
+    move.l  #A_STRIDE,%d0
+    muls.l  %d6,%d0
+    bra.b   3f
+2:  move.l  %d6,%d0
+    subq.l  #8,%d0
+    move.l  #M_STRIDE,%d1
+    muls.l  %d1,%d0
+    addi.l  #M_REC,%d0
+3:  lea     (%a2,%d0.l),%a0
+    move.l  4(%a0),%d2                 | steps 0..31
+    move.l  (%a0),%d3                  | steps 32..63
+    lea     dj_len,%a1
+    moveq   #0,%d0
+    move.b  (%a1,%d6.l),%d0            | len
+    moveq   #32,%d1
+    cmp.l   %d1,%d0
+    bcc.b   4f
+    moveq   #0,%d3                     | len < 32: no high steps
+    moveq   #1,%d1
+    lsl.l   %d0,%d1
+    subq.l  #1,%d1
+    and.l   %d1,%d2                    | steps < len
+    bra.b   5f
+4:  subi.l  #32,%d0
+    cmpi.l  #32,%d0
+    bcc.b   5f
+    moveq   #1,%d1
+    lsl.l   %d0,%d1
+    subq.l  #1,%d1
+    and.l   %d1,%d3
+5:  or.l    %d3,%d2
+    beq.b   sa_set                     | no sample trig: the boundary tick
+    move.l  #0xfffe,%d7                | wait for the first sounding one
+sa_set:
+    move.l  %d6,%d0
+    add.l   %d0,%d0
+    lea     dj_spd,%a0
+    move.w  %d7,(%a0,%d0.l)
+    add.l   %d0,%d0
+    lea     dj_sptm,%a0
+    move.l  %d5,(%a0,%d0.l)
+    cmpi.l  #8,%d6
+    bcs.b   6f
+    move.l  %d4,(%a0,%d0.l)
+6:  addq.l  #1,%d6
+    moveq   #16,%d0
+    cmp.l   %d6,%d0
+    bne.w   sa_l
+    moveq   #1,%d0
+    move.b  %d0,dj_spn
+    move.b  %d0,dj_defer               | the switch's light apply: Part-wide only
+    rts
+
+| dj_spdo (every tick, dj_land's saved context): count down / look for the sounding trig; publish.
+dj_spdo:
+    moveq   #0,%d6
+    moveq   #0,%d3                     | d3 = one is still pending
+so_l:
+    move.l  %d6,%d1
+    add.l   %d1,%d1
+    lea     dj_spd,%a0
+    moveq   #0,%d0
+    move.w  (%a0,%d1.l),%d0
+    beq.b   so_n
+    cmpi.l  #0xfffe,%d0
+    bne.b   so_dec
+    bsr.w   dj_sptrig
+    tst.l   %d0
+    bne.b   so_go
+    moveq   #1,%d3
+    bra.b   so_n
+so_dec:
+    subq.l  #1,%d0
+    move.w  %d0,(%a0,%d1.l)
+    beq.b   so_go
+    moveq   #1,%d3
+    bra.b   so_n
+so_go:
+    bsr.w   dj_pub1
+so_n:
+    addq.l  #1,%d6
+    moveq   #16,%d0
+    cmp.l   %d6,%d0
+    bne.b   so_l
+    move.b  %d3,dj_spn
+    rts
+
+| dj_spflush: every pending publish now (a new jump, STOP, DJ off).  Uses d0-d1/d6/a0-a1.
+dj_spflush:
+    moveq   #0,%d6
+sf_l:
+    move.l  %d6,%d0
+    add.l   %d0,%d0
+    lea     dj_spd,%a0
+    tst.w   (%a0,%d0.l)
+    beq.b   sf_n
+    bsr.w   dj_pub1
+sf_n:
+    addq.l  #1,%d6
+    moveq   #16,%d0
+    cmp.l   %d6,%d0
+    bne.b   sf_l
+    clr.b   dj_spn
+    clr.b   dj_defer
+    rts
+
+| dj_pub1 (d6 = t): t's Part to the engine.  Keeps d2-d7/a2-a6.
+dj_pub1:
+    move.l  %d6,%d0
+    add.l   %d0,%d0
+    lea     dj_spd,%a0
+    clr.w   (%a0,%d0.l)
+    move.l  %d6,%d0
+    cmpi.l  #8,%d0
+    bcs.b   1f
+    subq.l  #8,%d0
+1:  move.l  %d0,-(%sp)                 | t (audio) / m (MIDI)
+    moveq   #0,%d0
+    move.b  dj_sppt,%d0
+    move.l  %d0,-(%sp)
+    move.b  dj_spbk,%d0
+    move.l  %d0,-(%sp)
+    cmpi.l  #8,%d6
+    bcc.b   2f
+    jsr     TRK_APPLY
+    bra.b   3f
+2:  bsr.w   dj_mapply
+3:  lea     12(%sp),%sp
+    rts
+
+| dj_tpub(bank, part, t): one track's publish as dj_pub1 makes it (C ABI; tools/check_dj_part.py calls it).
+    .global dj_tpub
+dj_tpub:
+    move.l  12(%sp),%d0
+    cmpi.l  #8,%d0
+    bcc.b   1f
+    jmp     TRK_APPLY
+1:  subq.l  #8,%d0
+    move.l  %d0,12(%sp)
+    bra.w   dj_mapply
+
+| dj_pwide(bank, part): the Part-wide items alone -- stock's light apply with its per-track part skipped,
+| exactly what the jump's switch now applies (C ABI; tools/check_dj_part.py calls it).
+    .global dj_pwide
+dj_pwide:
+    moveq   #1,%d0
+    move.b  %d0,dj_defer
+    move.l  8(%sp),-(%sp)
+    move.l  8(%sp),-(%sp)
+    jsr     0x40009e00
+    addq.l  #8,%sp
+    rts
+
+| dj_sptrig (d6 = t, waiting) -> d0 = 1 when one of t's pending events is a sounding trig (record bit 2) of
+| the new sequence (fire time >= dj_sptm[t]) firing within half a tick from now (or past: a negative
+| micro).  Audio: the primary table vs the sample clock; MIDI: its table vs the MIDI clock (Clyps'
+| cl_sptrig).  Keeps d1-d7/a2-a6.
+dj_sptrig:
+    lea     -28(%sp),%sp
+    movem.l %d1-%d5/%a2-%a3,(%sp)
+    move.l  %d6,%d0
+    lsl.l   #2,%d0
+    lea     dj_sptm,%a0
+    move.l  (%a0,%d0.l),%d4            | d4 = the new sequence's first possible fire time
+    move.l  %d6,%d3
+    cmpi.l  #8,%d6
+    bcc.b   st_m
+    move.l  SCLK,%d2
+    move.l  #TICK_A/2,%d5
+    movea.l #0x46c7fe44,%a2
+    movea.l #0x80001904,%a0
+    movea.l #0x46c7e998,%a1
+    bra.b   st_go
+st_m:
+    subq.l  #8,%d3
+    move.l  MCLK,%d2
+    move.l  #TICK_M/2,%d5
+    movea.l #0x46c77be2,%a2
+    movea.l #0x46c76a26,%a0
+    movea.l #0x46c769c0,%a1
+st_go:
+    moveq   #0,%d1                     | slot
+st_l:
+    moveq   #0,%d0
+    move.b  (%a2,%d3.l),%d0
+    btst    %d1,%d0
+    beq.b   st_n
+    move.l  %d1,%d0
+    lsl.l   #3,%d0
+    add.l   %d3,%d0
+    movea.l %d0,%a3                    | idx = track + slot * 8
+    move.l  (%a1,%d0.l*4),%d0
+    btst    #2,%d0
+    beq.b   st_n                       | not a sounding trig
+    move.l  %a3,%d0
+    move.l  (%a0,%d0.l*4),%d0          | its fire time
+    movea.l %d0,%a3
+    sub.l   %d4,%d0
+    bmi.b   st_n                       | the outgoing pattern's
+    move.l  %a3,%d0
+    sub.l   %d2,%d0
+    cmp.l   %d5,%d0
+    blt.b   st_yes
+st_n:
+    addq.l  #1,%d1
+    moveq   #3,%d0
+    cmp.l   %d1,%d0
+    bne.b   st_l
+    moveq   #0,%d0
+    bra.b   st_out
+st_yes:
+    moveq   #1,%d0
+st_out:
+    movem.l (%sp),%d1-%d5/%a2-%a3
+    lea     28(%sp),%sp
+    rts
+
+| dj_mapply(bank, part, m): one MIDI track's Part values -> the engine.  Clyps' cl_mapply (stock's whole-
+| Part apply 0x40009094 does this for every m, 0x400094b0..0x400095e0), RAM writes only.
+dj_mapply:
+    lea     -20(%sp),%sp
+    movem.l %d2-%d4/%a2-%a3,(%sp)
+    move.l  24(%sp),%d0                | bank
+    move.l  28(%sp),%d1                | part
+    move.l  32(%sp),%d2                | m
+    move.l  #BANK_STRIDE,%d3
+    muls.l  %d0,%d3
+    movea.l #PAT_BASE+PART_OFF,%a2
+    adda.l  %d3,%a2
+    move.l  #PARTSZ,%d3
+    muls.l  %d1,%d3
+    adda.l  %d3,%a2                    | a2 = the Part
+    moveq   #68,%d3
+    muls.l  %d2,%d3
+    movea.l #MENG,%a0
+    adda.l  %d3,%a0                    | a0 = the engine's record m
+    move.l  %d2,%d3
+    lsl.l   #5,%d3
+    movea.l %a2,%a1
+    adda.l  #0x3e2,%a1
+    adda.l  %d3,%a1                    | page values, 32 B
+    moveq   #32,%d4
+ma_p:
+    move.b  (%a1)+,(%a0)+
+    subq.l  #1,%d4
+    bne.b   ma_p
+    moveq   #36,%d3
+    muls.l  %d2,%d3
+    movea.l %a2,%a1
+    adda.l  #0x4e2,%a1
+    adda.l  %d3,%a1                    | setup, 36 B
+    movea.l %a1,%a3
+    adda.l  #9,%a3                     | a3 = its 3 LFO waves
+    moveq   #36,%d4
+ma_s:
+    move.b  (%a1)+,(%a0)+
+    subq.l  #1,%d4
+    bne.b   ma_s
+    moveq   #0,%d4                     | each LFO on a designer wave (> 10): its 16 B and slope
+ma_d:
+    move.b  (%a3,%d4.l),%d0
+    extb.l  %d0
+    moveq   #10,%d1
+    cmp.l   %d1,%d0
+    ble.b   ma_dn
+    subi.l  #11,%d0                    | d0 = the designer it uses
+    movea.l %a2,%a1
+    adda.l  #0x1792,%a1
+    move.l  %d0,%d1
+    lsl.l   #4,%d1
+    adda.l  %d1,%a1
+    move.l  %d2,%d1                    | d1 = 3m + i
+    add.l   %d1,%d1
+    add.l   %d2,%d1
+    add.l   %d4,%d1
+    movea.l #MDES,%a0
+    move.l  %d1,%d3
+    lsl.l   #4,%d3
+    adda.l  %d3,%a0
+    moveq   #16,%d3
+ma_w:
+    move.b  (%a1)+,(%a0)+
+    subq.l  #1,%d3
+    bne.b   ma_w
+    movea.l %a2,%a1
+    adda.l  #0x1812,%a1
+    add.l   %d0,%d0
+    adda.l  %d0,%a1
+    movea.l #MSLP,%a0
+    add.l   %d1,%d1
+    adda.l  %d1,%a0
+    move.w  (%a1),(%a0)
+ma_dn:
+    addq.l  #1,%d4
+    cmpi.l  #3,%d4
+    bne.b   ma_d
+    movea.l #MBANK,%a0
+    move.l  24(%sp),%d0
+    move.b  %d0,(%a0,%d2.l)
+    move.l  28(%sp),%d0
+    move.b  %d0,8(%a0,%d2.l)
+    move.l  %d2,%d0
+    lsl.l   #2,%d0
+    movea.l #MZERO,%a0
+    clr.l   (%a0,%d0.l)
+    movem.l (%sp),%d2-%d4/%a2-%a3
+    lea     20(%sp),%sp
+    rts
+
     .align 2
 dj_state:  .byte ST_IDLE               | 0 idle / 1 armed (we own LAND_CNTDN) / 2 landing / 3 fixup
 dj_pcpat:  .byte -1                    | cued pattern the PC was last sent for
@@ -1215,6 +1618,16 @@ dj_pcbank: .byte -1                    | V7.0.1: bank the last PC was sent for
 dj_armpat: .byte -1                    | V7.0.1: the cue this arm is for
 dj_armbank: .byte -1
 dj_hid:    .byte 0                     | V7.1.1: 1 = dj_hide held the armed cue back this tick
+dj_spn:    .byte 0                     | V7.2: a track's Part publish is pending
+dj_defer:  .byte 0                     | V7.2: the next light Part apply skips its per-track LFO part
+dj_spbk:   .byte 0                     | V7.2: the bank / Part the pending publishes apply
+dj_sppt:   .byte 0
+    .align 2
+dj_silA:   .long 0                     | V7.2: the hand-off's audio / MIDI flags (START SILENT bits 8..15)
+dj_silM:   .long 0
+dj_spd:    .space 32                   | V7.2: per track (word) 0 none, 0xfffe waiting for a sounding trig,
+                                       |       else ticks to go (2 = the boundary tick)
+dj_sptm:   .space 64                   | V7.2: per track (long) the clock a new-sequence event fires at or after
     .align 2
     .ifdef DJ_MODE_IN_CAVE
 | The combined image (tools/build_kyoti.py) carries MUTE MODE, whose ANDY restore
