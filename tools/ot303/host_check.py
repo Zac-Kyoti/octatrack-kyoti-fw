@@ -9,6 +9,7 @@
 # ColdFire's own record.c + params.c, compiled natively. Needs the private toolchain
 # (out/ot303/dsp56300_new).
 #   python3 tools/ot303/host_check.py [FRAMES]
+#   OT303_BASE=1 ...   the Modwerk-base form (tools/ot303/base_engine.py: no RELOC, RAWF at run time) at each org
 import os, pathlib, subprocess, sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
@@ -47,9 +48,16 @@ def main():
         sys.exit('probe build failed:\n' + r.stderr[-3000:])
     fails = 0
     for tag in ('A', 'B'):
-        b = H.build(tag, host=True)
+        if os.environ.get('OT303_BASE'):
+            import base_engine
+            b = base_engine.build(tag)
+        else:
+            b = H.build(tag, host=True)
         d = OUT / tag
         d.mkdir(exist_ok=True)
+        (d / 'base.txt').unlink(missing_ok=True)
+        if os.environ.get('OT303_BASE'):
+            (d / 'base.txt').write_text('1\n')
         (d / 'p1.bin').write_bytes(w24(b['words'])); (d / 'p1.org').write_text(f'{b["org"]:x}\n')
         (d / 'cont.txt').write_text(f'{b["cont"]:x}\n'); (d / 'rawp.txt').write_text(f'{b["rawp"]:x}\n')
         (d / 'kp.txt').write_text(''.join(f'{f!r} {m!r}\n' for f, m in (H.KP_PTS or [])))

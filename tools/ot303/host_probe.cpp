@@ -76,7 +76,8 @@ int main(int argc, char** argv) {
     dsp.memWriteP(STUB, 0x0bf080); dsp.memWriteP(STUB + 1, sym("sg_entry")); dsp.memWriteP(STUB + 2, 0);
     { std::ifstream f(dir + "/x.txt"); std::string a, w; while (f >> a >> w) mem.set(MemArea_X, hx(a), hx(w)); }
     for (uint32_t a = 0x795; a < 0x1000; a++) mem.set(MemArea_Y, a, (a * 2654435761u) & 0xffffff);
-    for (uint32_t a = sym("SIGA"); a < sym("PB") + 216; a++) mem.set(MemArea_X, a, (a * 2246822519u) & 0xffffff);
+    // RELOC's run-time block starts as junk; the Modwerk-base form (DIR/base.txt) has no RELOC: its claim holds it
+    if (!std::ifstream(dir + "/base.txt")) for (uint32_t a = sym("SIGA"); a < sym("PB") + 216; a++) mem.set(MemArea_X, a, (a * 2246822519u) & 0xffffff);
     auto& R = dsp.regs();
     const uint32_t MIN[8] = {0xff, 0x3ff, 0x1f, 0x3, 0x7f, 0x5fb, 0xffffff, 0x9};
     dsp.setHostStepped(true);
