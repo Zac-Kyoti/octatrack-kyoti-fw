@@ -1298,40 +1298,10 @@ sa_l:
     addq.l  #8,%d1
     btst    %d1,%d0
     bne.b   sa_set                     | START SILENT: stock silences it at the switch
-|   the record's trig mask (first 8 bytes, big-endian, bit s = step s) under its length
-    cmpi.l  #8,%d6
-    bcc.b   2f
-    move.l  #A_STRIDE,%d0
-    muls.l  %d6,%d0
-    bra.b   3f
-2:  move.l  %d6,%d0
-    subq.l  #8,%d0
-    move.l  #M_STRIDE,%d1
-    muls.l  %d1,%d0
-    addi.l  #M_REC,%d0
-3:  lea     (%a2,%d0.l),%a0
-    move.l  4(%a0),%d2                 | steps 0..31
-    move.l  (%a0),%d3                  | steps 32..63
-    lea     dj_len,%a1
-    moveq   #0,%d0
-    move.b  (%a1,%d6.l),%d0            | len
-    moveq   #32,%d1
-    cmp.l   %d1,%d0
-    bcc.b   4f
-    moveq   #0,%d3                     | len < 32: no high steps
-    moveq   #1,%d1
-    lsl.l   %d0,%d1
-    subq.l  #1,%d1
-    and.l   %d1,%d2                    | steps < len
-    bra.b   5f
-4:  subi.l  #32,%d0
-    cmpi.l  #32,%d0
-    bcc.b   5f
-    moveq   #1,%d1
-    lsl.l   %d0,%d1
-    subq.l  #1,%d1
-    and.l   %d1,%d3
-5:  or.l    %d3,%d2
+|   any sample trig in the incoming sequence (under its length)?
+    move.l  %d6,%d0
+    bsr.w   dj_tmask
+    tst.l   %d0
     beq.b   sa_set                     | no sample trig: the boundary tick
     move.l  #0xfffe,%d7                | wait for the first sounding one
 sa_set:
@@ -1354,6 +1324,69 @@ sa_set:
     move.b  %d0,dj_defer               | the switch's light apply: Part-wide only
     rts
 
+| dj_tmask (a2 = a pattern blob, d0 = t) -> d0 = t's trig mask (sample / note trigs, the record's first 8
+| bytes, big-endian, bit s = step s) under its length, the two halves OR-ed (0 = no sample trig).  The
+| length as stock's landing loads it: NORMAL the pattern's, PER-TRACK the record's.  Uses d0-d3/a0.
+dj_tmask:
+    move.l  %d0,%d3                    | t
+    cmpi.l  #8,%d0
+    bcc.b   1f
+    move.l  #A_STRIDE,%d1
+    muls.l  %d1,%d0
+    lea     (%a2,%d0.l),%a0            | audio record
+    moveq   #A_LEN,%d1
+    bra.b   2f
+1:  subq.l  #8,%d0
+    move.l  #M_STRIDE,%d1
+    muls.l  %d1,%d0
+    addi.l  #M_REC,%d0
+    lea     (%a2,%d0.l),%a0            | MIDI record
+    move.l  #M_LEN-M_REC,%d1
+2:  moveq   #0,%d0
+    move.b  (%a0,%d1.l),%d0            | PER-TRACK length
+    move.l  #P_SCALE_MODE,%d1
+    tst.b   (%a2,%d1.l)
+    bne.b   3f
+    move.l  #P_LEN_BYTE,%d1
+    moveq   #0,%d0
+    move.b  (%a2,%d1.l),%d0            | NORMAL: the pattern's
+3:  move.l  4(%a0),%d2                 | steps 0..31
+    move.l  (%a0),%d3                  | steps 32..63
+    moveq   #32,%d1
+    cmp.l   %d1,%d0
+    bcc.b   4f
+    moveq   #0,%d3                     | len < 32: no high steps
+    moveq   #1,%d1
+    lsl.l   %d0,%d1
+    subq.l  #1,%d1
+    and.l   %d1,%d2                    | steps < len
+    bra.b   5f
+4:  subi.l  #32,%d0
+    cmpi.l  #32,%d0
+    bcc.b   5f
+    moveq   #1,%d1
+    lsl.l   %d0,%d1
+    subq.l  #1,%d1
+    and.l   %d1,%d3
+5:  or.l    %d3,%d2
+    move.l  %d2,%d0
+    rts
+
+| dj_hastrig (d6 = t) -> d0 != 0 when the sequence now playing t has a sample trig.  Keeps all but d0.
+dj_hastrig:
+    lea     -24(%sp),%sp
+    movem.l %d1-%d3/%a0-%a2,(%sp)
+    moveq   #0,%d0
+    move.b  ACT_BANK,%d0
+    moveq   #0,%d1
+    move.b  ACT_PAT,%d1
+    bsr.w   dj_blob
+    move.l  %d6,%d0
+    bsr.w   dj_tmask
+    movem.l (%sp),%d1-%d3/%a0-%a2
+    lea     24(%sp),%sp
+    rts
+
 | dj_spdo (every tick, dj_land's saved context): count down / look for the sounding trig; publish.
 dj_spdo:
     moveq   #0,%d6
@@ -1370,6 +1403,12 @@ so_l:
     bsr.w   dj_sptrig
     tst.l   %d0
     bne.b   so_go
+|   2026-11-14 (the overlap test, KYOTI-with-Clyps): Clyps may have loaded a sequence without any sample trig
+|   onto the track since the jump -- then no trig will ever come: the boundary rule, now (it was left
+|   pending until the next jump / STOP).
+    bsr.w   dj_hastrig
+    tst.l   %d0
+    beq.b   so_go
     moveq   #1,%d3
     bra.b   so_n
 so_dec:

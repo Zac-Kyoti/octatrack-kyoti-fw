@@ -94,9 +94,9 @@ PTN_LAYER_YES_PRESS = PTN_LAYER_YES + 2                # the u32 press handler
 # flashed on 2026-09-30; V7.0.2 (2188 B, WIP 2026-11-13: dj_cond, the trig conditions of a
 # never-switched pattern instead of COND_RESET(-1)) and V7.1 (2262 B, WIP 2026-11-13: a jump lands one
 # tick before the boundary, ahead 2, like Clyps CL26) and V7.1.1 (2610 B: an armed cue is never taken by
-# stock's wrap-change) and V7.2 (3716 B: each track's Part at its first sounding trig, with LFO AUTO
-# CHANGE on) are not flashed yet.
-REFERENCE = (0x400d6d38, "5ba3ac14ca7fd2d2e9a07bf72e069535162799a4b5bb9100e5c08d88a8d94920")
+# stock's wrap-change) and V7.2 (3808 B: each track's Part at its first sounding trig, with LFO AUTO
+# CHANGE on; a waiting track whose sequence has no sample trig publishes at once) are not flashed yet.
+REFERENCE = (0x400d6d38, "482af14488c29bd1eb3fbbe721130b3617230048e2831da7e6cd8e09af0e5abc")
 
 MODULE = Module(
     name="direct-jump-kyoti",

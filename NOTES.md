@@ -38080,3 +38080,37 @@ the publish bytes at its trigs (voice code 0x4000b4f6.. / 0x4000c9e8 records ban
   kyoti_default/, syx bf84e47a…, mainos e4ca6bb1…); KYOTI-with-Clyps "KY+CL DJC2" from trkseq c83ba6e in a scratch
   detached tree + this DJ source merged onto trkseq's (DJ_SELFHOOK kept; out/djc3/kyoti_clyps/, syx bae3d5ad…,
   mainos 428b495e…). Evidence: out/djc2/ (REF-LOCK v/w/x/y/k/c runs, identity), out/djc3/ (Part dumps, traces).
+
+## 2026-11-14 (`dj-clyps`) — DIRECT JUMP V7.2 in KYOTI-with-Clyps: the publish overlaps tested; KY+CL DJC3 on Clyps CL34 (WIP, NOT flashed)
+
+The user (2026-11-14) accepted the four V7.2 answers (nothing deferred with LFO AUTO CHANGE off; the cue deadline
+a tick earlier; dj_hide's one-tick window) and asked for a dedicated test of the two Clyps overlaps.
+- **Tools:** `tools/diag_dj_clyps_overlap.py` (drives OT DEMO in the KYOTI-with-Clyps image the way trkseq's
+  diag_clyps_lock does -- Clyps open on T5, SEQ / FULL loads, DIRECT JUMP cues that return as soon as they land --
+  with LFO AUTO CHANGE poked on; records per tick the playing pattern / Part, trig masks, the audio event table,
+  cl_spd / cl_spn, dj_spd / dj_spn, and every apply / publish / landing call) and `tools/check_dj_clyps_overlap.py`
+  (OVERLAP happened; PART = every TRK_APPLY names the Part playing then; TRIG = every publish on a tick where the
+  sequence then playing the track has a sounding trig (fired after its latest landing) within half a tick, or has
+  no sample trig, or is a flush; no publish left DANGLING -- pending although its sequence has no sample trig).
+  Launcher: out/djc3/overlap.sh. Cases on T5 (sparse trigs): (a) FULL slot 0 then a jump to P5 (same Part 1) /
+  P8 (Part 2); (b) a jump P0 -> P4, then a Clyps SEQ slot 3 / FULL slot 3 / FULL slot 1 (no trig) on T5.
+- **Found and fixed:** case (b) with a trig-less Clyps load left DIRECT JUMP's T5 publish pending for ever (it
+  waited for a trig the new sequence never has; harmless -- no wrong apply -- but dangling until the next
+  jump / STOP). dj_spdo now re-checks a waiting track each tick: the sequence now playing it has no sample trig
+  -> publish now (the boundary rule). dj_tmask / dj_hastrig factor the mask test out of dj_sparm.
+- **Result** (KY+CL DJC3, below): all five overlaps happened; 42 applies, every one PASS on PART and TRIG
+  (same Part: DIRECT JUMP's and Clyps' publish of T5 fall on the same tick with the same Part; another Part:
+  Clyps' pending publish drops itself, DIRECT JUMP's applies Part 2 at T5's first trig; Clyps loads over a DJ
+  publish: both publish at Clyps' new sequence's first trig, or at once when it has no trig); no dangling (one
+  track still legitimately waiting at the run's end for a trig its sequence has, beyond the run). Before the
+  fix (c83ba6e image): the trig-less case FAIL (dangling).
+- **Other gates on KY+CL DJC3:** REF-LOCK 16<->7 and A07<->A08 PASS; check_dj_full PASS (21 on their first
+  trig, 26 boundary, 1 flushed by the next jump; standalone 140C_KDJC6 the same); Clyps' check_clyps_full with
+  DIRECT JUMP on PASS 4/4 (loads spaced; with loads closer than their first trig the superseded load has no
+  publish to grade -- a property of that grader, 2 of 4, same image).
+- **Builds (all WIP, none flashed):** KYOTI-with-Clyps "KY+CL DJC3" from trkseq **bc04617** (Clyps CL34) in a
+  scratch detached tree (out/scratch-kc34) + this DJ source 3-way merged onto trkseq's DJ_SELFHOOK copy
+  (out/djc3/patch_directjump_v7_kyoti_clyps34.s): out/djc3/kyoti_clyps34/OCTATRACK_OS1.40C_KYOTI_V1.7_WITH_CLYPS.syx
+  (syx 687c0e61…, mainos c0d25631…). Standalone 140C_KDJC6 (syx eed4024e…, mainos 1f0ea5cd…); Bugbuild
+  BUG_DJC3 (syx 851620a3…); KYOTI default "KYOTI DJC3" (out/djc3/kyoti_default3/, syx 46f0f637…, mainos
+  00d747fd…). octabam REFERENCE 482af144… (3808 B).
