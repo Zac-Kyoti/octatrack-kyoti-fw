@@ -270,6 +270,31 @@ quick check for each:
 
 ---
 
+- **DIRECT_JUMP_KYOTI `140C_KDJC6` walk-through** (WIP, 2026-11-14; V7.2; NOT yet run on hardware). `[PTN]` + `[YES]`
+  -> `ON`, transport running.
+  1. **Pops (the main reason for this build):** jump ([PTN] + trig) between patterns at many moments; compare with
+     stock's own change. If a pop remains, note: the crossfader at an end or in the middle? the two patterns on the same
+     Part or different Parts? a sample still ringing on the switch step?
+  2. **Never a step off:** jumps between patterns of different lengths (A01 64 steps <-> a 16-step one) and with tracks
+     at other scales: every track lands in time, clock-locked, no one-step slip.
+  3. **A cue in the last step:** a track at 1/4x, cue during the outgoing pattern's last step: the jump lands on its
+     grid point in time (V7.0.1 could land 11 ticks late). A cue in the very last tick before a landing point goes to
+     the next one (about 21 ms at 120 BPM): normal.
+  4. **Trig conditions:** `1:2` / `1:4` trigs on the incoming pattern carry on as if it had been playing since PLAY (they
+     do not restart at the jump); a held `[FILL]` survives the jump; a `PRE` trig right after the jump plays.
+  5. **LFO AUTO CHANGE on** (project settings), jump to a pattern on another Part with a sample ringing: the ringing
+     sample's LFO is not reset at the jump; each track's new LFO starts with its first trig. With it off: as stock.
+  6. **Unchanged:** Part change on a jump, program change on re-cue, MIDI tracks, DIRECT JUMP off = stock.
+
+- **KYOTI with Clyps "KY+CL DJC3" walk-through** (WIP, 2026-11-14; Clyps CL34 bc04617 + DIRECT JUMP V7.2; NOT yet run
+  on hardware). Clyps behaves exactly as the CL34 already on the unit (its list: trkseq FLASHING.md "KYOTI CL34"); RELOAD
+  is not in this image (Clyps' own card reloads are). Then:
+  1. The DIRECT JUMP list above, items 1-5, inside and outside Clyps.
+  2. **Clyps + DIRECT JUMP together** (LFO AUTO CHANGE on, a sample ringing): a Clyps FULL load, then a pattern jump
+     before its first trig -- to a pattern on the same Part and on another Part; and a jump, then a Clyps FULL / SEQ load
+     on a track before its first trig: settings only ever change with a trig that sounds, never on the ringing sample,
+     and nothing stays stuck (the next trigs sound with the right Part).
+
 ## 5. Reverting to the official firmware
 
 Reflash the official one with the **same steps in §3**, sending
