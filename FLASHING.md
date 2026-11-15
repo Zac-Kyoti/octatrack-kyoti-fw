@@ -270,6 +270,20 @@ quick check for each:
 
 ---
 
+- **RELOAD_FROM_PROJECT `140C_RLCP4` walk-through** (WIP, 2026-11-14; Clyps' CL26-CL33 rules ported; NOT yet run on
+  hardware). Start from a SAVE PROJECT, transport running. Gestures as before: `[PTN]` + `[TRACK n]` = the track's
+  sequence from the card; `[BANK]` + `[TRACK n]` = its sequence + its Part slice (FULL); the pattern reload as before.
+  1. **In phase, never a step late:** change T1's trigs, then `[PTN]` + `[TRACK 1]` at many different moments
+     (mid-step, the last step of the pattern, with T1 at a different length / scale than the master): the saved trigs
+     take over on the next step, in phase with the other tracks, never offset by a step.
+  2. **FULL settings only with the first trig that sounds:** give T1 a sample that rings, change its filter / pitch a
+     lot, then `[BANK]` + `[TRACK 1]` a couple of steps before a step without a trig: the ringing sample keeps the
+     changed settings until the saved sequence's first sounding trig; from that trig on, the saved settings.
+  3. **Trig conditions continue:** a `1:2` trig on T1 and the same `1:2` on T2; change T1, reload it: T1's `1:2` stays in
+     step with T2's (it does not restart). A `PRE` trig right after the reload plays. Holding `[FILL]` across a reload
+     keeps it. Also after STOP -> PLAY, a few bars in.
+  4. **Unchanged:** the pattern reload, MIDI tracks (`[MIDI]` side), the toasts, stopped reloads (at once).
+
 ## 5. Reverting to the official firmware
 
 Reflash the official one with the **same steps in §3**, sending
