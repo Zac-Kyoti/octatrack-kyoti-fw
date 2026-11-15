@@ -38142,3 +38142,29 @@ runs out/djpop/ (a/b/c: SILENCE TRACKS off; as/bs/cs: on via 0x8000004f = 1).
   (RELOAD's rt3_all pattern reload, Clyps' card pattern reload, track loads) do not apply SILENCE TRACKS at all
   (not affected; also not stock-parity). Clyps' ORIG PTN+PRT and every change to another pattern go through
   stock's switch or DIRECT JUMP's hand-off and inherit whatever they do.
+
+## 2026-11-14 cont. (2) (`dj-clyps`) — DIRECT JUMP V7.2.1 (WIP, NOT flashed): T8's master restart at the switch (the master-track pop)
+
+The user isolated the pop on 140C_KDJC6: DIRECT JUMP on + SILENCE TRACKS on + T8 as MASTER TRACK (0x80000034,
+"MASTER_TRACK=%d"; OT DEMO has it on) + T8's FX types differing between the Parts, a sample ringing, a landing step
+without a trig. Approved fix (with rollback): queue T8's master restart in the switch frame, as stock's step-0
+trigs do.
+- **Verified first** (diag_dj_switchpop --mrq, the request poked from Python at the switch's light-apply call): the
+  frame's track loop acts on it in that same frame -- T8's FX read from the incoming Part at 0x4000c40e in the kill
+  frame (f6547) instead of at the next trig (f6891). The request is a per-track voice-start message (0x46c7feb4 bit
+  t, record 0x46c7fe00 + 4t = {bank, Part, offset, code}); the light apply runs inside the switch block, before the
+  track loop and before the silence kill at 0x4000d446 -- stock's order.
+- **Change (one commit):** dj_handoff sets dj_mrq when MASTER TRACK is on, T8 is silenced by this switch (its START
+  SILENT / SILENCE TRACKS bit) and the bank or Part changes; dj_lfoq (the light apply's detour, the switch frame)
+  then queues 0x46c7feb4 bit 7 + 0x46c7fe1c..1f = (bank, Part, 0, 6) from the apply's own d6 / d5. Only then: with
+  T8 not silenced it keeps sounding and stock leaves it alone too. STOP / DJ off clears the request. No landing,
+  purge or sequencer state touched.
+- **Gates:** switchpop on the user's case (landing on a step without a trig): T8's restart with Part 1 now in the
+  kill frame (standalone f6547, KY+CL DJC4 f6547; before f6891), as stock's 2/16 (f6202); REF-LOCK all five
+  standalone scenarios + 16<->7 / A07<->A08 on KY+CL DJC4 PASS; check_dj_full PASS (21 / 26 / 1, both); overlap
+  test PASS (5 overlaps, 42 applies, none dangling); DJ-off and DJ-on-idle identity IDENTICAL; Bugbuild BUG_DJC4
+  DISJOINT / ALL PRESERVED / NO STRAYS. octabam REFERENCE 5ac91908… (3924 B).
+- **Builds (WIP, none flashed):** standalone 140C_KDJC7 (syx 882b8e57…, mainos fc9d8f5f…); Bugbuild BUG_DJC4 (syx
+  09414f43…); KYOTI default "KYOTI DJC4" (out/djc3/kyoti_default4/, syx 30604c50…); KY+CL DJC4 from trkseq bc04617
+  (out/djc3/kyoti_clyps4/, syx 178bb593…, mainos 38d5e737…). **Rollback:** out/rollback/KDJC6/ (140C_KDJC6 syx
+  eed4024e…) and out/rollback/DJC3/ (KY+CL DJC3 syx 687c0e61…), unchanged copies.

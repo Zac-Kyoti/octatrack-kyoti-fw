@@ -270,7 +270,8 @@ quick check for each:
 
 ---
 
-- **DIRECT_JUMP_KYOTI `140C_KDJC6` walk-through** (WIP, 2026-11-14; V7.2; NOT yet run on hardware). `[PTN]` + `[YES]`
+- **DIRECT_JUMP_KYOTI `140C_KDJC7` walk-through** (WIP, 2026-11-14; V7.2.1 = V7.2 + T8's master restart at the
+  switch; NOT yet run on hardware). `[PTN]` + `[YES]`
   -> `ON`, transport running.
   1. **Pops (the main reason for this build):** jump ([PTN] + trig) between patterns at many moments; compare with
      stock's own change. If a pop remains, note: the crossfader at an end or in the middle? the two patterns on the same
@@ -285,11 +286,19 @@ quick check for each:
   5. **LFO AUTO CHANGE on** (project settings), jump to a pattern on another Part with a sample ringing: the ringing
      sample's LFO is not reset at the jump; each track's new LFO starts with its first trig. With it off: as stock.
   6. **Unchanged:** Part change on a jump, program change on re-cue, MIDI tracks, DIRECT JUMP off = stock.
+  7. **T8 as MASTER TRACK** (the pop found on 140C_KDJC6): project MASTER TRACK on, CONTROL > SEQUENCER > SILENCE
+     TRACKS on, the two patterns' Parts giving T8 different FX1 / FX2 types, a sample ringing, a jump landing on a
+     step where the incoming pattern has no trig (e.g. OT DEMO A05 -> A03): **no pop** -- T8 takes the new Part's FX in
+     the silent switch frame, as on stock's 2/16 change. Also check the same jump with T8's FX equal in both Parts and
+     with SILENCE TRACKS off: still no pop, nothing else changed.
+  - **Rollback** if item 7 (or anything) is worse: the previous images, unchanged, are kept in `out/rollback/`:
+    `out/rollback/KDJC6/OCTATRACK_OS1.40C_DIRECT_JUMP_KYOTI.syx` (140C_KDJC6, syx eed4024e…, mainos 1f0ea5cd…) and
+    `out/rollback/DJC3/OCTATRACK_OS1.40C_KYOTI_V1.7_WITH_CLYPS.syx` (KY+CL DJC3, syx 687c0e61…, mainos c0d25631…).
 
-- **KYOTI with Clyps "KY+CL DJC3" walk-through** (WIP, 2026-11-14; Clyps CL34 bc04617 + DIRECT JUMP V7.2; NOT yet run
+- **KYOTI with Clyps "KY+CL DJC4" walk-through** (WIP, 2026-11-14; Clyps CL34 bc04617 + DIRECT JUMP V7.2.1; NOT yet run
   on hardware). Clyps behaves exactly as the CL34 already on the unit (its list: trkseq FLASHING.md "KYOTI CL34"); RELOAD
   is not in this image (Clyps' own card reloads are). Then:
-  1. The DIRECT JUMP list above, items 1-5, inside and outside Clyps.
+  1. The DIRECT JUMP list above, items 1-5 and 7, inside and outside Clyps.
   2. **Clyps + DIRECT JUMP together** (LFO AUTO CHANGE on, a sample ringing): a Clyps FULL load, then a pattern jump
      before its first trig -- to a pattern on the same Part and on another Part; and a jump, then a Clyps FULL / SEQ load
      on a track before its first trig: settings only ever change with a trig that sounds, never on the ringing sample,

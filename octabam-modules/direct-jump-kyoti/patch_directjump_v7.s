@@ -165,6 +165,11 @@
     .equ MBANK,       0x8000666e        | byte[8] bank / [8+m] Part the MIDI track's values came from
     .equ MZERO,       0x8000664e        | long[8], cleared by stock's apply
     .equ M_REC,       0x48d0            | pattern blob: MIDI track 0's record (+ m * M_STRIDE)
+|   V7.2.1 -- T8 as MASTER TRACK:
+    .equ MASTER_TRK,  0x80000034        | byte: project MASTER TRACK (T8 processes the mix), "MASTER_TRACK=%d"
+    .equ PUBLISHED,   0x80001828        | bytes: the bank / Part the engine plays (light apply 0x40009e10)
+    .equ MRQ_PEND,    0x46c7feb4        | byte, bit t: a voice-start request for track t is pending this frame
+    .equ MRQ_T8,      0x46c7fe1c        | T8's request {bank, Part, offset, 6}: the master's restart (0x4000b72c)
     .equ MSG_PAT,     0x400d816b        | message 0x11: {code, pattern, 1} -- stock's WRAP-CHANGE
     .equ MSG_PAT_ARG, 0x400d816c        |   post @0x400a4b9a.  NOT 0x400d8164 -- see dl_commit.
 
@@ -351,7 +356,8 @@ dl_off:                                | DJ off / stopped / arranger / chain
     tst.b   dj_spn
     beq.b   1f
     bsr.w   dj_spflush                 | V7.2: STOP (or DJ off) publishes what still waits, at once
-1:  move.b  dj_state,%d0
+1:  clr.b   dj_mrq                     | V7.2.1: no switch is coming
+    move.b  dj_state,%d0
     cmpi.b  #ST_ARMED,%d0              | (ColdFire cmpi takes only a Dn destination)
     bne.b   dl_clear
     clr.b   LAND_CNTDN                 | WE armed stock's countdown -> take it back
@@ -827,6 +833,25 @@ dj_handoff:
     move.l  #P_PART,%d1
     move.b  (%a2,%d1.l),%d0
     move.b  %d0,ENG_APART
+|   V7.2.1 (2026-11-14, the user's hardware report): with T8 as MASTER TRACK and SILENCE TRACKS silencing
+|   it, the switch kills T8's voice (0x40006820, frame 0x4000d446); stock's 2/16 change starts the new
+|   pattern at step 0, whose trigs queue the master's restart with the new Part in that same frame
+|   (0x4000b70e / 0x4000bbb2), so T8's FX change while the bus is silent. A jump landing on a step without
+|   a trig left T8 on the old Part's FX until the next trig: the FX swap came with a sounding signal -- a
+|   pop (when T8's FX differ). dj_mrq asks dj_lfoq (the switch frame) to queue that restart itself.
+    clr.b   dj_mrq
+    tst.b   MASTER_TRK
+    beq.b   1f                         | no master track
+    btst    #15,%d4                    | T8 silenced by this switch? (d4 = the audio flags, START SILENT bits)
+    beq.b   1f
+    move.b  ACT_BANK,%d1
+    cmp.b   PUBLISHED,%d1
+    bne.b   2f
+    cmp.b   PUBLISHED+1,%d0            | d0 = the incoming Part
+    beq.b   1f                         | the same bank / Part: T8's FX do not change
+2:  moveq   #1,%d1
+    move.b  %d1,dj_mrq
+1:
 |   MIDI engine: flags = 3 | START-SILENT tracks, 0x400a469e-0x400a4708
     moveq   #3,%d4
     move.l  #M_LEN+T_SILENT,%d3        | MIDI track 0 record +3 (= +0x48fb)
@@ -1257,6 +1282,24 @@ fx_store:
 | LFO loops are skipped (each track's publish brings them).  Keeps every register.
     .global dj_lfoq
 dj_lfoq:
+    tst.b   dj_mrq
+    beq.b   lq_nomrq
+|   V7.2.1: the apply is the jump's switch (light apply: d6 = bank, d5 = Part, both kept by it); queue
+|   T8's master restart with them, as a voice start does (0x4000b716-0x4000b756). The frame's track loop
+|   acts on it later in this same frame (measured: T8's FX read from the new Part at 0x4000c40e in the
+|   kill frame), before the silence kill at 0x4000d446 -- stock's order.
+    clr.b   dj_mrq
+    move.l  %d0,-(%sp)
+    move.b  MRQ_PEND,%d0
+    ori.l   #0x80,%d0
+    move.b  %d0,MRQ_PEND
+    move.b  %d6,MRQ_T8
+    move.b  %d5,MRQ_T8+1
+    clr.b   MRQ_T8+2
+    moveq   #6,%d0
+    move.b  %d0,MRQ_T8+3
+    move.l  (%sp)+,%d0
+lq_nomrq:
     tst.b   dj_defer
     beq.b   lq_stock
     clr.b   dj_defer
@@ -1659,6 +1702,7 @@ dj_armbank: .byte -1
 dj_hid:    .byte 0                     | V7.1.1: 1 = dj_hide held the armed cue back this tick
 dj_spn:    .byte 0                     | V7.2: a track's Part publish is pending
 dj_defer:  .byte 0                     | V7.2: the next light Part apply skips its per-track LFO part
+dj_mrq:    .byte 0                     | V7.2.1: the jump's switch queues T8's master restart
 dj_spbk:   .byte 0                     | V7.2: the bank / Part the pending publishes apply
 dj_sppt:   .byte 0
     .align 2
