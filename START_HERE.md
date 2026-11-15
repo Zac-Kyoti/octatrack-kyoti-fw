@@ -157,18 +157,21 @@ are lowercase-hyphen, because octabam requires a module's name to equal its fold
 
 > Check this against the tree before trusting it; it has gone stale before.
 
-- **RELOAD_FROM_PROJECT — FINAL 2026-11-09: card reloads as Clyps (Part slice, pattern reload, quantized landing).**
-  - `[BANK]` + `[TRACK n]` = the track's sequence + its Part slice from the card; `[PTN]` + `[BANK]` + trig = the
-    whole pattern. Running, reloads land on the track's next step (the pattern you are on: the next shared step),
-    length / scale changes re-phase, several chords all count; the Part settings reach the engine with the first
-    new step. Another pattern is a stock cue (CHAIN AFTER / DIRECT JUMP).
-  - Confirmed on the author's MKI with KYOTI V1.7 (syx `dd21ef01…`), 2026-11-09: everything in FLASHING §4's
-    walk-through, including the Part change on the new step, no click on `[PTN]` + `[BANK]` + trig, and the cue cancel.
-  - Pins: standalone mainos `22a6a9ff…` (syx `7a8b53d4…`, `140C_KYOTI`), `BUG_RL3` mainos `cd480be6…` (syx
-    `ebea05b5…`), KYOTI V1.7 mainos `ee151d9c…` (syx `dd21ef01…`). The unit is in DRAM, 50,044 B, 11 pages.
-  - Gates: `tools/diag_reload_full.py`, `_ptn.py`, `_quant.py`, `_wrap.py`, `_midi.py`, `_oracle.py`.
-  - octabam: pin PR sambanks/octabam#1079 (`27ab725`, octabam form emulator only; FREE LOOP declared a conflict, both detour `0x40056c28`); waiting on Sam. KITS not run together.
-  - Next: the same in Clyps (memory: ot-clyps-scope "CLYPS TO-DO"; the Clyps session in `trkseq`).
+- **RELOAD_FROM_PROJECT — FINAL 2026-11-14: Clyps' landing rules (CL25-CL34) ported.**
+  - `[PTN]` + `[TRACK n]` = the track's sequence from the card, `[BANK]` + `[TRACK n]` = + its Part slice, `[PTN]` +
+    `[BANK]` + trig = the whole pattern (all as 2026-11-09). Running: a track lands one tick before the boundary and
+    fires for it (ahead 2, a one-track purge a tick ahead, the next tick's reload fixup); the FULL slice reaches the
+    engine with the incoming sequence's first SOUNDING trig (`rl_sptrig`); trig conditions as if the saved sequence had
+    always played (`rl_cond`, PRE latch = 1, FILL kept); STOP's condition reset no longer leaves a stale tick.
+  - Confirmed on the author's MKI with the standalone `140C_RLCP4` (mainos `fc25a994…`), 2026-11-14: every item of
+    FLASHING §4's walk-through.
+  - Pins: standalone mainos `fc25a994…` (syx `a72242f2…`, `140C_KYOTI`), `BUG_RL3` mainos `188ec12c…` (syx `cde59614…`).
+    **KYOTI V1.7's pin (`ee151d9c…`) is stale** -- it contains RELOAD; re-pinned when the author promotes KYOTI with
+    the other features (DIRECT JUMP V7.2, Clyps). The unit is in DRAM, 51,620 B, 10 pages. octabam REFERENCE
+    `8035e2fa…`.
+  - Gates: `tools/diag_reload_quant.py`, `_oracle.py`, `_ptn.py`; tick-level `tools/diag_reload_lock.py` +
+    `check_reload_lock.py --rules` + `check_reload_full.py`.
+  - octabam: pin PR (this promotion) -- see NOTES.
 - **The stock DELAY's coefficient table (`0x400d24d0..0x400d2ce0`, midisc's "SAFE_CAVE") is not free** —
   **KYOTI V1.7 FINAL 2026-11-02** (flashed: all tests pass, DELAY repeats as stock). V1.1–V1.6 and BUG_VEM10 kept
   code there and darkened DELAY repeats. `seal()` refuses any image that changes the range (every builder);

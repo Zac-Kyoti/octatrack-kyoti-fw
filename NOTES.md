@@ -38032,3 +38032,13 @@ Now 936 / 932 (<= 945): the pair fits, SC's donor becomes PLATE REV.
 - **Builds (WIP, NOT flashed):** standalone mainos `fc25a994…` (syx `28ae269e…`, `140C_RLCP4`); BUG_RL3 mainos
   `188ec12c…` (syx `cde59614…`); KYOTI mainos `ecbdb4cc…` (syx `3e4f4816…`, OS VERSION `KYOTI RLC4`; files still
   named V1.7). octabam REFERENCE `8035e2fa…` (51,620 B; -mcpu=5407 and 54455 identical).
+
+## 2026-11-14 (`reload-clyps`) — RELOAD_FROM_PROJECT promoted FINAL: Clyps' landing rules
+
+- The author flashed the standalone `140C_RLCP4` (mainos `fc25a994…`, syx `28ae269e…`) and passed every item of the
+  FLASHING §4 walk-through (in phase / never a step late, FULL settings with the first sounding trig, trig conditions
+  incl. PRE / FILL / STOP -> PLAY, the pattern reload, MIDI tracks). Promoted on the author's instruction.
+- Pins: standalone mainos `fc25a994…` (the confirmed image; the default build's syx `a72242f2…` differs only in the
+  OS VERSION string, `140C_KYOTI`), `BUG_RL3` mainos `188ec12c…` (syx `cde59614…`). All 10 Bugbuilds match their pins
+  without opt-in. KYOTI V1.7's pin is stale until the author promotes KYOTI (it contains RELOAD).
+- octabam REFERENCE `8035e2fa…` (51,620 B; 12 hooks incl. the COND_RESET detour 0x400a539c).

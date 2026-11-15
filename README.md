@@ -233,7 +233,9 @@ While playing, a reload lands on the track's next step, in time with everything 
 pattern: on the next step its tracks share). A saved length or scale comes back the same way, with
 every track carried on where the saved pattern would be. Several reloads in a row all count; the
 latest one for a track wins. Stopped, a reload applies at once. A toast confirms each reload as it
-lands. `[CUE]` + `[TRACK n]` stays stock.
+lands. A track's reloaded sound settings take over with its first trig that actually plays, never on a
+sound still ringing, and trig conditions (`1:2`, `PRE`, `FILL`) carry on as if the saved sequence had
+played all along. `[CUE]` + `[TRACK n]` stays stock.
 
 **Hardware:** confirmed.\
 **Final build:** [`tools/build_reload_from_project.py`](tools/build_reload_from_project.py) →

@@ -270,8 +270,8 @@ quick check for each:
 
 ---
 
-- **RELOAD_FROM_PROJECT `140C_RLCP4` walk-through** (WIP, 2026-11-14; Clyps' CL26-CL33 rules ported; NOT yet run on
-  hardware). Start from a SAVE PROJECT, transport running. Gestures as before: `[PTN]` + `[TRACK n]` = the track's
+- **RELOAD_FROM_PROJECT walk-through, FINAL 2026-11-14** (Clyps' CL26-CL34 rules ported; passed on the author's MKI
+  with the standalone `140C_RLCP4`, mainos `fc25a994…`, 2026-11-14). Start from a SAVE PROJECT, transport running. Gestures as before: `[PTN]` + `[TRACK n]` = the track's
   sequence from the card; `[BANK]` + `[TRACK n]` = its sequence + its Part slice (FULL); the pattern reload as before.
   1. **In phase, never a step late:** change T1's trigs, then `[PTN]` + `[TRACK 1]` at many different moments
      (mid-step, the last step of the pattern, with T1 at a different length / scale than the master): the saved trigs
