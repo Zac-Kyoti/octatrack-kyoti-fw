@@ -38483,3 +38483,16 @@ Now 936 / 932 (<= 945): the pair fits, SC's donor becomes PLATE REV.
   `e855f6ca…`: verify_hooks + make check (32 FREE LOOP port scenarios) pass; octabam check + reach pass on `f7d72906`.
 - Trap: a FREE LOOP test remix must carry RLEN PLEN (the port fixture's recorder setups); without it undo / undoto /
   undostep / replace fail. Not flashed.
+
+## 2026-11-15 (`trkseq`) — KYOTI CL35: peek at a parameter page from Clyps
+
+- The user (2026-11-14): PLAYBACK / AMP / LFO / FX1 / FX2 held in Clyps = that page (regular or SETUP as stock left it),
+  knobs live while held; the release brings the Clyps view back; grid LEDs unchanged. `cl_k_peek` (scope §1.37): stock's
+  own press `0x4005578c` switches the page; the window is unlinked / relinked (`0x40011774` / `0x40011690`), never
+  destroyed; Clyps' layer lists no encoders while peeking (`cl_layer+8` = 0) and the rebuild `0x4003125c` hands them to
+  the page (measured: stock's `0x40055008` on encoders 0-5).
+- **Trap:** a `-1` encoder record does NOT pass down -- the rebuild copies encoder records as they are (0x40031406..48;
+  only key records honour -1); a layer whose encoder list is 0 is skipped (0x400313f0). The first CL35 build wrote -1
+  into the flattened table 0x46c7dede (a knob during a peek would have jumped to 0xffffffff); caught by the new gate check.
+- Gates on CL35 (syx 0a2fafee..., NOT flashed): diag_clyps_ui 9/9 sets PASS (incl. the new peek check), diag_clyps_quant
+  PASS (DJ off + on). Timing untouched.

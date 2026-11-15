@@ -267,6 +267,15 @@ quick check for each:
   responsive.
 - **PART_CHANGE_CARRYOVER_FIX** — a track that is PICKUP on one Part and FLEX on
   another: switching patterns across the Parts plays the FLEX sample, not the old loop.
+- **KYOTI CL35 walk-through** (WIP; `out/KYOTI_WIP/KYOTI_V1.7_WITH_CLYPS/OCTATRACK_OS1.40C_KYOTI_V1.7_WITH_CLYPS.syx`)
+  = CL34 + a peek at the parameter pages. Timing unchanged.
+  1. In Clyps, hold **PLAYBACK** (or AMP, LFO, FX1, FX2): the Clyps window goes and that page shows -- its regular
+     page or its SETUP, as you last left it outside Clyps. Turn knobs: the values change and sound as normal.
+  2. Release: the Clyps view is back as it was (arrows, box, header). The trig grid LEDs stay Clyps' throughout.
+  3. Holding AMP, press LFO too: the page follows; Clyps returns only when both are released.
+  4. While peeking, a cued load still lands (its blink resumes on return); [NO] during a peek closes Clyps cleanly.
+  5. Then CL34's items below.
+
 - **KYOTI CL34 walk-through** (WIP; `out/KYOTI_WIP/KYOTI_V1.7_WITH_CLYPS/OCTATRACK_OS1.40C_KYOTI_V1.7_WITH_CLYPS.syx`)
   = CL33 + two changes; timing unchanged from CL29.
   0. **The cursor is always on screen** (the box or the arrows): open Clyps on T1 (playing its own sequence, no box):

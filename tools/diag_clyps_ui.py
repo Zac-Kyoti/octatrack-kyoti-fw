@@ -338,6 +338,25 @@ def main(argv):
         key(FUNC, 0)
         u.hook_del(h_pr)
         check(not hits_pr and state()["open"] == 1, "[FUNC]+[CUE] in Clyps: no Part reload (0x4005e038 not run), Clyps stays")
+        # CL35 (the user, 2026-11-14): a page key held in Clyps = a peek at that page; the release brings Clyps back
+        if "cl_pk" in syms:
+            win_ = rd(syms["cl_win"], 4)
+            linked = lambda: (rd(win_ + 32, 4) >> 5) & 1
+            enc0 = lambda: [rd(0x46C7DEDE + 20 * e, 4) for e in range(6)]
+            e_before = enc0()
+            key(0x23, 1)                       # AMP held
+            pg_amp, l_peek, e_peek = rd(0x46C7D8D8, 1), linked(), enc0()
+            key(0x24, 1)                       # LFO too: the page follows, still peeking
+            pg_lfo = rd(0x46C7D8D8, 1)
+            key(0x24, 0)
+            l_mid = linked()
+            key(0x23, 0)
+            check(state()["open"] == 1 and l_peek == 0 and all(e_ not in (0, 0xFFFFFFFF) for e_ in e_peek[:6])
+                  and all(e_ == 0 for e_ in e_before) and pg_lfo != pg_amp and l_mid == 0,
+                  f"[AMP] held: the Clyps window off screen, the encoders reach the page ({[hex(x) for x in e_peek]}; "
+                  f"Clyps': {[hex(x) for x in e_before]}), [LFO] too: the page follows ({pg_amp} -> {pg_lfo})")
+            check(linked() == 1 and enc0() == e_before and rd(syms["cl_pk"], 1) == 0 and state()["open"] == 1,
+                  "... released: the Clyps window back, its encoders locked again")
         # [FUNC]+TRACK: stock's FUNC sub-map mute 0x40083dfc (it toggles through 0x4007d6a4 /
         # 0x4007d7b0); our FUNC sub-map no longer shadows it. (0x40033970 is NOT a readable mute
         # state -- it did not change with a real mute: measured.)

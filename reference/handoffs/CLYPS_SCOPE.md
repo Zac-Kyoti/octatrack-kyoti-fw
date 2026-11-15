@@ -1538,6 +1538,17 @@ the investigation (NOTES "CL24 timing investigation", harness `tools/diag_clyps_
   correct variant (write it at the first sounding trig's build) only matters when that trig is after the boundary and a
   PICKUP machine is involved. Skipped.
 
+### 1.37 Peek at a parameter page (the user, 2026-11-14; KYOTI CL35)
+
+- PLAYBACK `0x22` / AMP `0x23` / LFO `0x24` / FX1 `0x25` / FX2 `0x26` held in Clyps: that page shows (regular or SETUP as
+  stock last left it: stock's own press `0x4005578c` -> `0x40055720(page, 1)`; a quick double press flips to SETUP, as
+  stock), the encoders reach it; the release brings the Clyps view back. Grid LEDs stay Clyps'.
+- `cl_k_peek`: the window is only unlinked from the display list (`0x40011774`) and linked again (`0x40011690`), never
+  destroyed (WIN_DEL frees the slot; it calls no close callback either). while peeking Clyps' layer lists no encoders
+  (`cl_layer+8` = 0; the rebuild copies encoder records as they are -- no `-1` pass-down for encoders -- and skips a
+  layer whose list is 0); the layer rebuild `0x4003125c` makes it live (the flattened table `0x46c7dede`, 20 B per encoder). Key records keep T1's hold delay 30; holds are swallowed (stock's hold mode `0x460d1796` not entered).
+  Several page keys: back when the last is released (`cl_pk` bits). `cl_close` mid-peek restores the records.
+
 ### 1.27 Combinations that must never ship (the user, 2026-11-07)
 
 - Clyps + RELOAD_FROM_PROJECT never; Clyps + DIRECT_JUMP_KYOTI only as KYOTI's integrated pair (SUPERSEDE).

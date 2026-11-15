@@ -451,8 +451,14 @@ ce_fail:
 | user, 2026-10-27). Idempotent; stock never clears a slot's close_cb, so it may be called again.
 cl_close:
     tst.b   cl_open
-    beq.b   cc_out
+    beq.w   cc_out
     clr.b   cl_open
+    tst.b   cl_pk                       | CL35: closed mid-peek -- Clyps' encoder list back in its layer (popped below)
+    beq.b   cc_npk
+    clr.b   cl_pk
+    lea     cl_encs,%a0
+    move.l  %a0,cl_layer+8
+cc_npk:
     clr.w   cl_grp                      | the group ends with Clyps: the tab and the LED colours
     jsr     cl_gupd                     | go back to the active track
     jsr     cl_flstop
@@ -751,6 +757,80 @@ kcu_v:
 kcu_out:
 cl_k_nop:
     rts
+
+| CL35 (the user, 2026-11-14): PLAYBACK 0x22 / AMP 0x23 / LFO 0x24 / FX1 0x25 / FX2 0x26 held in Clyps = a peek at
+| that page (regular or SETUP, as stock left it: stock's own press 0x4005578c opens it, 0x40055720 page, 1), the
+| encoders reaching it while the key is held; the release brings the Clyps view back. The window is only
+| unlinked from the display list (0x40011774) and linked again (0x40011690) -- never destroyed (WIN_DEL would
+| free its slot); while peeking Clyps' layer lists no encoders (the layers below own them; the layer rebuild
+| 0x4003125c makes it live; a held key keeps its handlers across a rebuild). The grid LEDs stay Clyps'.
+| Several page keys: the view comes back when the last is released. Hold events: swallowed (stock's hold mode
+| is not entered). Uses d0-d1/a0-a1.
+cl_k_peek:
+    FWDCHK
+    move.l  4(%sp),%d0
+    subi.l  #0x22,%d0
+    moveq   #1,%d1
+    lsl.l   %d0,%d1                     | d1 = this key's bit
+    move.l  8(%sp),%d0
+    cmpi.l  #1,%d0
+    beq.b   kqpk_press
+    tst.l   %d0
+    bne.w   kqpk_out                      | a hold: nothing
+    not.l   %d1                         | a release
+    move.b  cl_pk,%d0
+    and.l   %d1,%d0
+    move.b  %d0,cl_pk
+    bne.w   kqpk_out                      | another page key still held
+    moveq   #0,%d0
+    bsr.w   kqpk_encs                     | the encoders Clyps' again
+    move.l  cl_win,%d0
+    beq.b   kqpk_r1
+    move.l  %d0,-(%sp)
+    jsr     0x40011690                  | the window back on top
+    addq.l  #4,%sp
+kqpk_r1:
+    jsr     cl_refresh
+    moveq   #1,%d0
+    move.l  %d0,RDRAW
+    rts
+kqpk_press:
+    tst.b   cl_pk
+    bne.b   kqpk_page                     | already peeking: just the page
+    move.l  %d1,-(%sp)
+    jsr     cl_flstop
+    move.l  cl_win,%d0
+    beq.b   kqpk_p1
+    move.l  %d0,-(%sp)
+    jsr     0x40011774                  | the window off the display (kept)
+    addq.l  #4,%sp
+kqpk_p1:
+    moveq   #-1,%d0
+    bsr.w   kqpk_encs                     | the encoders pass down to the page
+    move.l  (%sp)+,%d1
+kqpk_page:
+    move.b  cl_pk,%d0
+    or.l    %d1,%d0
+    move.b  %d0,cl_pk
+    pea     1
+    move.l  8(%sp),-(%sp)               | (code, 1): stock's press opens the page (4(%sp) + the pea)
+    jsr     0x4005578c
+    addq.l  #8,%sp
+    moveq   #1,%d0
+    move.l  %d0,RDRAW
+kqpk_out:
+    rts
+| kqpk_encs (d0 = 0: Clyps' encoder records in its layer; -1: none, the layers below own the encoders), then the
+| layer rebuild. The rebuild copies a layer's encoder records as they are (no -1 pass-down for encoders, measured:
+| 0x40031406..48) and skips a layer whose encoder list is 0 (0x400313f0).
+kqpk_encs:
+    lea     cl_encs,%a0
+    tst.l   %d0
+    beq.b   kqe_set
+    suba.l  %a0,%a0
+kqe_set:
+    move.l  %a0,cl_layer+8
+    jmp     0x4003125c
 
 | cl_gdrop: track d2 out of cl_gord. Keeps d2. Uses d0, d1, a0, a1.
 cl_gdrop:
@@ -8216,6 +8296,9 @@ cl_keys:
     KREC 0x21, cl_k_lr, 0, 0, 15, 6      | the add/remove rule above holds)
     KREC 0x31, cl_k_yes, 0, 0, 0, 0
     KREC 0x32, cl_k_no, 0, 0, 0, 0
+    .irp c, 0x22,0x23,0x24,0x25,0x26
+    KREC \c, cl_k_peek, cl_k_peek, cl_k_nop, 30, 0 | CL35: PLAYBACK / AMP / LFO / FX1 / FX2 held = a peek (T1's delay)
+    .endr
     KREC 0x2e, cl_k_chord, cl_k_chord, cl_k_chord, 30, 0    | holds: stock's tap-eligible re-arm
     KREC 0x2f, cl_k_chord, cl_k_chord, cl_k_chord, 30, 0
     KREC 0x2d, cl_k_func, cl_k_func, 0, 0, 0, cl_fsub
@@ -8353,6 +8436,7 @@ cl_fxv:     .space 16                   | ... the value
 cl_pmoved:  .byte 0                     | the pre-select box shows (an arrow since the last execution)
 cl_ysup:    .byte 0                     | ... their solid yellow off: the slot under them landed (CL32)
 cl_cph:     .byte 0                     | CL34: the cued slot's arrows in their on phase (cl_cblink)
+cl_pk:      .byte 0                     | CL35: the page keys held for a peek (bit k = 0x22 + k)
 cl_bt:      .byte 0                     | CL34: cl_cblink's tick within its 30-tick (0.5 s) period
             .align 2
 cl_pre:     .space 32                   | per track: its pre-select arrows (cl_psave / cl_pload; 0 = none)
