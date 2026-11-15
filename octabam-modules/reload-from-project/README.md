@@ -30,7 +30,7 @@ Deferred by the author's own scoping: whole-bank reload.
 
 | file | what it is |
 |---|---|
-| `manifest.py` | the octabam module declaration — one DRAM unit, eleven `jmp` detours |
+| `manifest.py` | the octabam module declaration — one DRAM unit, twelve `jmp` detours |
 | `patch_reload3.s` | the m68k source; the only truth for the unit's bytes |
 
 Standalone image: `tools/build_reload_from_project.py` → `RELOAD_FROM_PROJECT`.
@@ -164,9 +164,14 @@ confirmed from the ROM cave (the standalone image and KYOTI V1.0), and from DRAM
 octabam-built image with all six KYOTI modules (2026-10-01): both chords, the FINISHED
 toast, the transport kept running, and the knob repaint. Nothing tested on an MKII.
 
-50044 bytes (code + staging buffers), sha256 `62953b358f29a7f9…` linked at `0x400d6500` (`-mcpu=5407` or `54455`, identical); octabam re-links it there on every build and compares.
+51620 bytes (code + staging buffers), sha256 `8035e2fa97df78dd…` linked at `0x400d6500` (`-mcpu=5407` or `54455`, identical); octabam re-links it there on every build and compares.
 
 The `[BANK]` + `[TRACK n]` Part-slice reload, the `[PTN]` + `[BANK]` + trig pattern reload and the quantized landing (8–9 Nov 2026) are hardware-confirmed on the author's MKI from DRAM in the KYOTI V1.7 image (9 Nov 2026): reloads land on the next step in time, a reloaded track's Part settings change with its first new step, no click on `[PTN]` + `[BANK]` + trig, and reloading the playing pattern cancels a cued change. Not yet run in an octabam-built image or with Octakit.
+
+Clyps' landing rules (14 Nov 2026) are hardware-confirmed on the author's MKI with the standalone image (`140C_RLCP4`,
+mainos `fc25a994…`): a running reload is never a step late, a FULL reload's settings change with the first trig that
+actually sounds, and trig conditions (`1:2`, `PRE`, `FILL`, also after STOP -> PLAY) carry on as if the saved sequence
+had always played. Not yet run in an octabam-built image.
 
 ## Licence
 
