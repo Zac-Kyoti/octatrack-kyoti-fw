@@ -54,6 +54,10 @@ def main(argv):
     ap.add_argument("--window", required=True)
     ap.add_argument("--ticks", type=int, default=0)
     ap.add_argument("--poke", action="append", default=[], help="ADDR=VAL[:SIZE] after the load")
+    ap.add_argument("--mrq", action="store_true",
+                    help="experiment: at the first switch frame after the cue (0x4000b1d8), queue the master-track "
+                         "restart the way stock's voice-start path does (0x46c7feb4 bit 7, 0x46c7fe1c..1f = bank, "
+                         "Part, 0, 6) -- to see whether the engine acts on it in that same frame")
     ap.add_argument("--out", required=True)
     ap.add_argument("--tag", default="djpop")
     a = ap.parse_args(argv)
@@ -152,6 +156,18 @@ def main(argv):
 
     u.hook_add(er.eb.UC_HOOK_CODE, on_tick, begin=TICK_PC, end=TICK_PC)
     u.hook_add(er.eb.UC_HOOK_CODE, on_frame, begin=FRAME_PC, end=FRAME_PC)
+    mrq = {"done": False}
+
+    def on_mrq(uc, ad, sz, ud):
+        if mrq["done"] or st["tick"] < ct:
+            return
+        mrq["done"] = True
+        part = rd(0x46C7FF62, 1)
+        uc.mem_write(0x46C7FEB4, bytes([rd(0x46C7FEB4, 1) | 0x80]))
+        uc.mem_write(0x46C7FE1C, bytes([rd(0x46C7FF40, 1), part, 0, 6]))
+        ev.append([st["frame"], st["tick"], "MRQ queued", part])
+    if a.mrq:
+        u.hook_add(er.eb.UC_HOOK_CODE, on_mrq, begin=0x4000B1D8, end=0x4000B1D8)
     for ad in CALLS:
         u.hook_add(er.eb.UC_HOOK_CODE, on_call, begin=ad, end=ad)
     u.hook_add(er.eb.UC_HOOK_CODE, on_post, begin=0x40000C3C, end=0x40000C3C)
