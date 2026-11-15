@@ -286,7 +286,10 @@ quick check for each:
   1. **PRE after an instant load** (DJ on): a track whose outgoing sequence's last conditional trig FAILED (e.g. a 1:2
      on its off pass); load a slot whose first conditional trig is PRE: it plays (CL33 followed the outgoing failure
      and stayed silent). As after STOP or a stock pattern change. A held FILL still carries over.
-  2. Then CL33's item and CL32's four items below.
+  2. **Keys:** in a multi group, hold [CUE], move the arrows, press [YES] (still holding [CUE]): every member loads
+     (was: nothing). LEFT in the left column / RIGHT in the right column: nothing (no wrap); the other way: the other
+     column. [FUNC]+[CUE] inside Clyps: nothing (no stock Part reload).
+  3. Then CL33's item and CL32's four items below.
 
 - **KYOTI CL33 walk-through** (WIP; `out/KYOTI_WIP/KYOTI_V1.7_WITH_CLYPS/OCTATRACK_OS1.40C_KYOTI_V1.7_WITH_CLYPS.syx`)
   = CL32 + one fix; timing unchanged from CL29 (every landing, build and slice publish identical in the emulator).
