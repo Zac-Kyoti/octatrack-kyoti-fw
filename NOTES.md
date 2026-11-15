@@ -38114,3 +38114,31 @@ a tick earlier; dj_hide's one-tick window) and asked for a dedicated test of the
   (syx 687c0e61…, mainos c0d25631…). Standalone 140C_KDJC6 (syx eed4024e…, mainos 1f0ea5cd…); Bugbuild
   BUG_DJC3 (syx 851620a3…); KYOTI default "KYOTI DJC3" (out/djc3/kyoti_default3/, syx 46f0f637…, mainos
   00d747fd…). octabam REFERENCE 482af144… (3808 B).
+
+## 2026-11-14 cont. (`dj-clyps`) — the pop at a Part-changing jump with SILENCE TRACKS on: measured (no code)
+
+The user (HW, standalone 140C_KDJC6): OT DEMO A05 (Part 2) -> A03 (Part 1) with a sample ringing pops with DIRECT
+JUMP, not with stock's CHAIN AFTER 2 change, and only with CONTROL > SEQUENCER > SILENCE TRACKS on. Tool:
+`tools/diag_dj_switchpop.py` (per-frame calls, Part-byte reads, writes and engine-record diffs around the switch);
+runs out/djpop/ (a/b/c: SILENCE TRACKS off; as/bs/cs: on via 0x8000004f = 1).
+- **SILENCE TRACKS = 0x8000004f** (setter 0x40065a96 also writes the battery copy 0x100b14af; the per-track START
+  SILENT byte, track record +3, -1 = "use the project's"). Stock's wrap-change (0x400a45cc..) and DJ's dj_handoff
+  (ho_bits) both turn it into ENG_AFLAGS bits 8..15 (measured: 0xff03 in both, every audio track).
+- **The silencing, the same in both:** at the switch frame the engine (0x4000af52) folds the bits into its frame
+  mask; the per-track loop at 0x4000d446 calls **0x40006820(t) for each -- a hard voice kill** (voice record +0
+  cleared, 0x80004898 cleared, generation 0x80004a68+168t bumped, 0x4000672c bookkeeping). **No fade:** stock's
+  declicked release is the note-off 0x40008f84(t) (sets 0x8000184a bit t, 0x46c7dfba[t] = 45; the DSP's own
+  fade, MUTE_MODES OTFX-T / STOP), which this path does not use. Measured: stock and DJ kill all 8 tracks in the
+  SAME frame (f6202 in runs as / bs, the boundary + 0.017 tick; ENG_ATIME, TEMPO_APPLY, light apply, publish
+  bytes identical; the 0x8000182a reset and the 0x80006904 paths not taken in either).
+- **The difference:** what the incoming pattern triggers in that frame. Stock's 2/16 change starts A03 at step 0,
+  where T1 T2 T3 (and T6, T8) trigger: their killed voices are restarted in the same frame (records written at
+  f6203). A DIRECT JUMP lands A03 at its clock position (step 2 in run bs: only T3 triggers; step 3 in run cs:
+  none), so a ringing track without a trig on that step is just cut -- the pop. Prediction for the unit: the
+  ringing track has a trig on A03 step 0 but not on DJ's landing step; stock should pop the same way with a
+  ringing track that A03's step 0 does not trigger (T4, T5, T7). The emulator cannot play it (route A streams no
+  samples; idle voices are killed every frame by 0x40008110), so the cut itself is not measurable here.
+- **RELOAD / Clyps:** neither posts ENG_AFLAGS silent bits nor calls 0x40006820 -- their in-place landings
+  (RELOAD's rt3_all pattern reload, Clyps' card pattern reload, track loads) do not apply SILENCE TRACKS at all
+  (not affected; also not stock-parity). Clyps' ORIG PTN+PRT and every change to another pattern go through
+  stock's switch or DIRECT JUMP's hand-off and inherit whatever they do.
