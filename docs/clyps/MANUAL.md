@@ -95,7 +95,7 @@ Clyps uses a small set of conventions. Once you know them, most gestures explain
 | **trigs = slots** | A trig loads that slot of the shown bank. The active pattern's trig puts the original back. |
 | **arrows aim, [YES] fires** | The arrow keys move a pair of arrows over the slots; [YES] loads what they point at. |
 | **[FUNC] = full** | Adds the sound to whatever you do: [FUNC] + trig, [FUNC] + [YES], [FUNC] + the active pattern's trig. |
-| **[CUE] = Multi** | [CUE] + TRACK builds a Multi group; [CUE] + trig or arrows applies one slot to every member. |
+| **[CUE] = Multi** | [CUE] + TRACK builds a Multi group; [CUE] + trig or arrows applies one slot to every member. Slots can be chosen independently per group member, or all members can take the same slot number. |
 | **[PTN] + [BANK] = the whole pattern** | Opens Clyps. With [YES]: the whole pattern and Part back as originally loaded. With a trig: that pattern back from the card. |
 | **[PTN] or [BANK] + TRACK = the card** | [PTN] + TRACK: that track's sequence from the card. [BANK] + TRACK: its sequence and sound. |
 | **TRACK + [YES] / [NO] = keep / undo** | Temp save the held track(s), or put the temp save back. Works inside and outside Clyps. |
