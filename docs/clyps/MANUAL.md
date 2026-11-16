@@ -59,8 +59,9 @@ The analogy holds closely:
 
 **The active pattern and the library.** The pattern you're on is the **active pattern**, and you can improvise freely without ever
 needing to leave it.
-Every pattern in the bank, the active one included, is a library you load clips from, one track at a time. A load
-replaces that one track's sequence in the active pattern. The pattern number, its Part link and the other tracks stay as they were.
+Every pattern in every bank is a library you load clips from, one track at a time, or in a group as part of a
+Multi. A load replaces that one track's sequence in the active pattern. The pattern number, its Part link and the
+other tracks stay as they were.
 
 **The active track.** Everything happens to the active track (the one picked with the TRACK keys), or to every
 member of a Multi. The Clyps view shows one column of the library: the active track's sequence in each of the
