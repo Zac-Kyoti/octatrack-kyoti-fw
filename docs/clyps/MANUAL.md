@@ -98,7 +98,7 @@ Clyps uses a small set of conventions. Once you know them, most gestures explain
 | **[CUE] = Multi** | [CUE] + TRACK builds a Multi group; [CUE] + trig or arrows applies one slot to every member. Slots can be chosen independently per group member, or all members can take the same slot number. |
 | **[PTN] + [BANK] = the whole pattern** | Opens Clyps. With [YES]: the whole pattern and Part back as originally loaded. With a trig: that pattern back from the card. |
 | **[PTN] or [BANK] + TRACK = the card** | [PTN] + TRACK: that track's sequence from the card. [BANK] + TRACK: its sequence and sound. |
-| **TRACK + [YES] / [NO] = keep / undo** | Temp save the held track(s), or put the temp save back. Works inside and outside Clyps. |
+| **TRACK + [YES] / [NO] = temp save / temp reload** | Temp save the held track(s), or put the temp save back. Works inside and outside Clyps. |
 | **[PTN] + [YES] = legato on/off** | Turns Direct Jump Kyoti on or off: legato or cued clip launching. |
 | **[NO] = back out** | Dismisses a Multi, or closes Clyps. |
 | **page keys = peek** | Hold PLAYBACK, AMP, LFO, FX1 or FX2 to see and tweak that page. |
