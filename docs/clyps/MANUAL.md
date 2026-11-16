@@ -10,7 +10,7 @@ include Direct Jump Kyoti.*
 4. [Opening Clyps and reading the view](#4-opening-clyps-and-reading-the-view)
 5. [The loads, as one family](#5-the-loads-as-one-family)
 6. [Aiming: the arrows and the box](#6-aiming-the-arrows-and-the-box)
-7. [Groups (MULTI)](#7-groups-multi)
+7. [Multi: several tracks at once](#7-multi-several-tracks-at-once)
 8. [Banks, patterns and Direct Jump Kyoti](#8-banks-patterns-and-direct-jump-kyoti)
 9. [Peeking at a parameter page](#9-peeking-at-a-parameter-page)
 10. [Naming sequences](#10-naming-sequences)
@@ -51,7 +51,7 @@ The analogy holds closely:
 | a clip with its device chain | a **FULL** load: the sequence plus the track's sound |
 | launch quantization | CHAIN AFTER: Stock's own **cued** launch |
 | Legato launch mode | **Direct Jump Kyoti**: **legato** launch |
-| launching several tracks at once | a **group** |
+| launching several tracks at once | a **Multi** |
 | a Live scene (a whole row) | a whole pattern: ORIG PTN+PRT, or a pattern from the card |
 | — | putting things back: originals, temp saves, the card |
 
@@ -62,7 +62,7 @@ Every pattern in the bank, the active one included, is a library you load clips 
 replaces that one track's sequence in the active pattern. The pattern number, its Part link and the other tracks stay as they were.
 
 **The active track.** Everything happens to the active track (the one picked with the TRACK keys), or to every
-member of a group. The Clyps view shows one column of the library: the active track's sequence in each of the
+member of a Multi. The Clyps view shows one column of the library: the active track's sequence in each of the
 16 slots.
 
 **SEQ or FULL.** A load comes in two sizes:
@@ -93,12 +93,12 @@ Clyps uses a small set of conventions. Once you know them, most gestures explain
 | **trigs = slots** | A trig loads that slot of the shown bank. The active pattern's trig puts the original back. |
 | **arrows aim, [YES] fires** | The arrow keys move a pair of arrows over the slots; [YES] loads what they point at. |
 | **[FUNC] = full** | Adds the sound to whatever you do: [FUNC] + trig, [FUNC] + [YES], [FUNC] + the active pattern's trig. |
-| **[CUE] = the group** | [CUE] + TRACK builds a group; [CUE] + trig or arrows applies one slot to every member. |
+| **[CUE] = Multi** | [CUE] + TRACK builds a Multi group; [CUE] + trig or arrows applies one slot to every member. |
 | **[PTN] + [BANK] = the whole pattern** | Opens Clyps. With [YES]: the whole pattern and Part back as originally loaded. With a trig: that pattern back from the card. |
 | **[PTN] or [BANK] + TRACK = the card** | [PTN] + TRACK: that track's sequence from the card. [BANK] + TRACK: its sequence and sound. |
 | **TRACK + [YES] / [NO] = keep / undo** | Temp save the held track(s), or put the temp save back. Works inside and outside Clyps. |
 | **[PTN] + [YES] = legato on/off** | Turns Direct Jump Kyoti on or off: legato or cued clip launching. |
-| **[NO] = back out** | Dismisses a group, or closes Clyps. |
+| **[NO] = back out** | Dismisses a Multi, or closes Clyps. |
 | **page keys = peek** | Hold PLAYBACK, AMP, LFO, FX1 or FX2 to see and tweak that page. |
 | **everything else is stock** | Transport, [FUNC] + TRACK mutes, scenes and crossfader, [MIDI], [FUNC] + [MIDI] (Parts menu), [TEMPO]. |
 
@@ -113,7 +113,7 @@ knobs only work during a peek.
 **Open:** press [PTN] and [BANK] together, in either order. Clyps opens over whatever was on screen. Releasing
 the keys changes nothing. Clyps won't open while the arranger is running or a dialog is waiting for an answer.
 
-**Close:** [NO]. With a group, the first [NO] dismisses the group and the next one closes Clyps. Loading a
+**Close:** [NO]. With a Multi, the first [NO] dismisses the Multi and the next one closes Clyps. Loading a
 project also closes it. Pattern and bank changes don't: Clyps stays open and follows them.
 
 **Quick gestures without staying in.** Keep holding the [PTN] + [BANK] that opened Clyps and press:
@@ -134,7 +134,7 @@ highlighted, changed (x), its sequence loaded from A05. (4) Slot 3, named BASS1,
   - `T6 LOAD: TRK SEQ   BNK A`: an audio track (`M6` on the MIDI side).
   - Hold [FUNC] and the label becomes `TRK FULL`.
   - When the arrows are on the active pattern's slot it reads `ORIG TRK SEQ` / `ORIG TRK FULL`.
-  - With a group: `MULTI LOAD: TRK SEQS`, `TRKS FULL`, `ORIG SEQS`, `ORIGS FULL`.
+  - With a Multi: `MULTI LOAD: TRK SEQS`, `TRKS FULL`, `ORIG SEQS`, `ORIGS FULL`.
   - While [PTN] + [BANK] is held: `PTN LOAD: ORIG PTN+PRT`.
   - While [BANK] is held, the bank gets a box.
 - **The slots**: 1–8 on the left, 9–16 on the right. Each shows the active track's sequence in that pattern:
@@ -167,7 +167,7 @@ While Clyps is open, the trig LEDs show the active track's 16 slots in the shown
 
 While [PTN] + [BANK] is held, the grid switches to stock's pattern view of the playing bank, so you can pick the
 pattern to reload. While [BANK] alone is held you see stock's bank LEDs. The page LEDs are always stock's. With a
-group, every member's TRACK LED shows the active colours. The active member's tab is filled and the other
+Multi, every member's TRACK LED shows the active colours. The active member's tab is filled and the other
 members' tabs are outlined.
 
 ## 5. The loads, as one family
@@ -282,7 +282,7 @@ Notes:
 
 ### 5.6 Part reload is off in Clyps
 
-Inside Clyps, [FUNC] means FULL and [CUE] means the group, and you hold both a lot. Stock's Part reload
+Inside Clyps, [FUNC] means FULL and [CUE] means Multi, and you hold both a lot. Stock's Part reload
 ([FUNC] + [CUE]) would make one slip of the fingers throw away every sound you've FULL-loaded on that Part, so
 Clyps disables it. Outside Clyps it's stock, and it does exactly that: it puts the saved Part back over the
 working one, undoing FULL-loaded sounds on that Part's tracks while leaving sequences alone. To get a track's
@@ -311,20 +311,20 @@ So you can flip back and forth without re-aiming:
 - **Across banks:** when you page to another bank, the arrows show on the same slot number there. Come back and
   they're as you left them.
 
-## 7. Groups (MULTI)
+## 7. Multi: several tracks at once
 
-A group lets one gesture load several tracks, each with its own clip or all with the same slot.
+A Multi group lets one gesture load several tracks, each with its own clip or all with the same slot.
 
 - **Build it:** hold [CUE] and press TRACK keys to add or remove tracks, audio or MIDI (switch sides with [MIDI]
   to add MIDI tracks). The header reads `MULTI`. Members' TRACK LEDs light, the active member's tab is filled and
   the others are outlined.
 
-  ![The Clyps view with a group and [FUNC] held: the header reads MULTI LOAD: TRKS FULL](clyps-group.png)
+  ![The Clyps view with a Multi and [FUNC] held: the header reads MULTI LOAD: TRKS FULL](clyps-group.png)
 
-  *A group with [FUNC] held: [YES] would load every member FULL.*
+  *A Multi with [FUNC] held: [YES] would load every member FULL.*
 
 - **Aim each member on its own:** press a member's TRACK key to make it active, then move its arrows. Every member
-  keeps its own aim. A non-member's TRACK key does nothing while the group exists.
+  keeps its own aim. A non-member's TRACK key does nothing while the Multi exists.
 - **Aim them all at one slot:** hold [CUE] and move the arrows. Every member's arrows go to that slot.
 - **Fire:**
   - **[YES]:** every member loads its own aimed slot. With [FUNC], all FULL.
@@ -333,7 +333,7 @@ A group lets one gesture load several tracks, each with its own clip or all with
     puts every member back to its original.
 - **Timing:** each member lands by the usual rules (§5.1). When one press brings in new material on some members
   and puts back on others, they all land together, like a load.
-- **End it:** [NO] dismisses the group and Clyps stays open. Closing Clyps also ends it.
+- **End it:** [NO] dismisses the Multi and Clyps stays open. Closing Clyps also ends it.
 - **Note:** [CUE] held with no members loads nothing.
 
 ## 8. Banks, patterns and Direct Jump Kyoti
@@ -375,7 +375,7 @@ replaces the slot's summary in the view.
   includes the bank you're on).
 - **Power-off.** Like any unsaved edit, loads are still there after a power cycle, and because power-on retakes
   the originals, they become your originals. The card still holds your last save, so [PTN] / [BANK] + TRACK
-  reach it. Temp saves, arrows and groups are gone.
+  reach it. Temp saves, arrows and Multis are gone.
 - **Memory.** Clyps keeps the originals and its working copies in sample memory, so about 10 MB less is free for
   samples.
 - **Outside Clyps** these things differ from stock:
@@ -401,7 +401,7 @@ replaces the slot's summary in the view.
 - **Aim ahead, fire on time.** Set the arrows while the music plays and press [YES] when you're ready. Flip
   between a clip and the original with [YES] and the active pattern's trig, with no re-aiming.
 - **Play legato.** With Direct Jump Kyoti on, every trig is a clip launch that lands on the next step without
-  breaking the groove. Tap through slots on a track, or fire a group, to build variations in real time; the active
+  breaking the groove. Tap through slots on a track, or fire a Multi, to build variations in real time; the active
   pattern's trig or [YES] takes you straight back.
 - **Or launch cued.** With Direct Jump Kyoti off, launches wait for CHAIN AFTER: pick ahead and let the change land
   with the phrase.
@@ -413,7 +413,7 @@ replaces the slot's summary in the view.
 | Gesture | In Clyps |
 |---|---|
 | [PTN] + [BANK] | open Clyps |
-| [NO] | dismiss the group / close Clyps |
+| [NO] | dismiss the Multi / close Clyps |
 | trig | load that slot (SEQ); the active pattern's trig = ORIG |
 | [FUNC] + trig | load FULL; the active pattern's trig = ORIG FULL |
 | arrows | aim (UP/DOWN through 1–16, LEFT/RIGHT between columns) |
@@ -423,7 +423,7 @@ replaces the slot's summary in the view.
 | [BANK] + TRACK | reload the track's sequence and sound from the card |
 | [PTN] + [BANK] + trig | reload that pattern from the card |
 | [PTN] + [BANK] + [YES] | ORIG PTN+PRT: the whole pattern and Part as originally loaded |
-| [CUE] + TRACK | add/remove a group member |
+| [CUE] + TRACK | add/remove a Multi member |
 | [CUE] + arrows | aim every member at one slot |
 | [CUE] + trig | every member loads that slot |
 | [BANK] + arrows | browse banks |
