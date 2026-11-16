@@ -138,7 +138,7 @@ still uses it loads it as NONE.
 ### BLACKPYRAMIDS_303
 
 A TB-303 voice as a track machine, shown as **BLKPYRAMD**, running on the Octatrack's DSP in 24-bit fixed
-point with its filter 4× oversampled at 176.4 kHz. Built on Open303 and recalibrated on the TB-303's own
+point with its filter 4× oversampled at 176.4 kHz. Adapted from Open303 and recalibrated on the TB-303's own
 circuit against recordings of a real 303. It is the sixth row of a track's machine list (double-tap the
 track, or `[FUNC]` + `[SRC]` → MACHINE). One per DSP core: one on T1–T4, one on T5–T8.
 
@@ -169,7 +169,7 @@ track, or `[FUNC]` + `[SRC]` → MACHINE). One per DSP core: one on T1–T4, one
 - SPRING REVERB is removed: its DSP space holds the voice.
 - On a stock OS, the track opens as a FLEX track.
 
-**Credits:** built on [Open303](https://github.com/RobinSchmidt/Open303) (MIT) by Robin Schmidt: its
+**Credits:** adapted from [Open303](https://github.com/RobinSchmidt/Open303) (MIT) by Robin Schmidt: its
 filter, oscillator and envelope algorithms. The recalibration takes its values from the TB-303's circuit
 (Roland's service notes, the x0xb0x schematics, Robin Whittle's notes) and Din Sync's recordings of a real
 TB-303. The machine registration follows repeat98's ANALOG BD for octabam. The Octatrack port, design,

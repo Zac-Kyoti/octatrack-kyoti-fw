@@ -1,7 +1,7 @@
 # blackpyramids-303 — BLACKPYRAMIDS_303
 
 A TB-303 voice as a track machine, shown as **BLKPYRAMD**, on the DSP56300 in 24-bit fixed point with its
-filter 4× oversampled at 176.4 kHz: built on Robin Schmidt's Open303 and recalibrated on the TB-303's own
+filter 4× oversampled at 176.4 kHz: adapted from Robin Schmidt's Open303 and recalibrated on the TB-303's own
 circuit against recordings of a real 303. One voice per DSP core (one on T1–T4, one on T5–T8), upstream of the
 track's stock AMP, FX1 and FX2. It is the sixth row of a track's machine list (double-tap the track, or
 `[FUNC]` + `[SRC]` → MACHINE).
@@ -86,7 +86,7 @@ instead.
 
 ## Credits
 
-Built on [Open303](https://github.com/RobinSchmidt/Open303) by Robin Schmidt (MIT): its filter, oscillator and
+Adapted from [Open303](https://github.com/RobinSchmidt/Open303) by Robin Schmidt (MIT): its filter, oscillator and
 envelope algorithms. The recalibration's values come from the TB-303's circuit (Roland's service notes, the
 x0xb0x schematics, Robin Whittle's notes) and Din Sync's recordings of a real TB-303 (measurement only). The
 machine registration follows repeat98's ANALOG BD for octabam (MIT). The design, the calibration and the
