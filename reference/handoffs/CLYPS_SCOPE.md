@@ -2,6 +2,11 @@
 
 ## §0 Start here (handoff, 2026-10-25) — read this first, then §1–§4
 
+> **User manual (2026-11-15, the author):** a concise, conversational Clyps manual is being written —
+> handoff `reference/handoffs/CLYPS_MANUAL_HANDOFF.md`. **Whenever a Clyps change affects the manual's
+> (approved) content, update the manual in the same piece of work** and say so in the NOTES entry.
+
+
 **Where it stands.**
 - **Worktree / branch:** `../octatrack-kyoti-fw-trkseq`, branch `trkseq`. Commits are local, not
   pushed. Clyps is WIP, nothing is promoted, and there is no README entry.
