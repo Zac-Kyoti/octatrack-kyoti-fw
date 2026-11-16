@@ -38229,3 +38229,11 @@ line / the syx hash against a fresh named build before reporting.
   "ELEK0178<name>"): `out/ab/KDJC8/OCTATRACK_OS1.40C_DIRECT_JUMP_KYOTI.syx` = V7.2 (ffff346), 140C_KDJC8, syx
   5a906055…, mainos 1f0ea5cd…; `out/ab/KDJC9/OCTATRACK_OS1.40C_DIRECT_JUMP_KYOTI.syx` = V7.2.2 (ec2f708), 140C_KDJC9,
   syx eb2436c0…, mainos 7c6131e7…. The card .bin is ELUP-obfuscated, so the name is not readable there directly.
+
+## 2026-11-15 cont. (4) (`dj-clyps`) — V7.2.2 hardware result: the SILENCE TRACKS pop is fixed
+
+The user flashed `out/OCTATRACK_OS1.40C_DIRECT_JUMP_KYOTI.syx` syx 81014221… (mainos 7c6131e7… = DIRECT JUMP
+V7.2.2, ec2f708; OS VERSION reads "140C_KDJ7" through the Bugbuild rename): "The DJ on, silence tracks ON, pattern
+change pop seems to be fixed." Hardware-confirmed: the pop at a DIRECT JUMP switch with SILENCE TRACKS on is no longer
+heard (the user's OT DEMO A05 -> A03 case). Not separately reported: the first new trig's level, SILENCE TRACKS off
+unchanged. Still WIP (not promoted).

@@ -295,6 +295,10 @@ quick check for each:
      at 120 BPM) instead of being cut on it. Listen also that the new pattern's first trigs still sound at full level.
   3. **KDJC9, SILENCE TRACKS off:** exactly as KDJC8 (nothing is released when no track is silenced).
   4. Items 2-4 and 6 of the KDJC6 list above: unchanged.
+  - **Result (the user, 2026-11-15):** V7.2.2 flashed (the KDJ7-named syx 81014221…, mainos 7c6131e7… = KDJC9's
+    code): "The DJ on, silence tracks ON, pattern change pop seems to be fixed." Items 2 (first trig level), 3 and 4
+    not reported separately. Correctly named pair for further tests: out/ab/KDJC8/ (syx 5a906055…) and out/ab/KDJC9/
+    (syx eb2436c0…).
 
 - **KYOTI with Clyps "KY+CL DJC6"** (WIP, 2026-11-15; Clyps CL35 c72b4bc + DIRECT JUMP V7.2.2): the KDJC9 A/B above,
   inside and outside Clyps, then the DJC3 list below. NOT yet run on hardware.
