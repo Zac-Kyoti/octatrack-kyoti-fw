@@ -14,9 +14,11 @@ it behaves exactly as stock.
 - START SILENT and the Part's pattern-wide settings (the Part itself, scenes) change as on a
   stock pattern change. Each track's own Part settings reach the engine with that track's
   first sounding trig of the new pattern, so a sound still ringing from the old pattern
-  never takes the new pattern's settings (V7.2, WIP; a stock change applies them at once).
+  never takes the new pattern's settings (V7.2; a stock change applies them at once).
 - Trig conditions do not start again: every A:B counter stands where the new pattern's
-  would, had it played since START (V7.0.2, WIP; a stock change restarts them).
+  would, had it played since START (V7.0.2; a stock change restarts them).
+- With SILENCE TRACKS on, a track the jump silences is released just before the step instead of
+  being cut on it, so it does not pop (V7.2.2).
 - The last MIDI Program Change sent always names the pattern that plays.
 - The arranger and pattern chains are untouched.
 

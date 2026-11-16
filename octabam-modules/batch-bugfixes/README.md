@@ -19,9 +19,8 @@ instrument do what it already meant to do.
 | `patch_pattern_led.s` | bug 2 |
 | `patch_partreapply.s` | bug 3 |
 
-Standalone images: `tools/build_midi_plays_free_fix.py`, `tools/build_empty_pattern_led_fix.py`,
-`tools/build_part_change_carryover_fix.py`. `tools/build_bugbuilds.py` composes all three onto each
-finished feature image, asserting on every run that the composite's changes are the
+In this repo the three ship together: `tools/build_batch_bugfixes.py` builds them alone, and
+`tools/feature_image.py` composes all three onto every feature image, asserting on every run that the composite's changes are the
 disjoint union of the feature's and the fixes' own.
 
 ## The three fixes

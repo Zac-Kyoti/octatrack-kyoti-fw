@@ -2,13 +2,31 @@
 # SPDX-License-Identifier: MIT
 # SPDX-FileCopyrightText: 2026 Zac Kyoti
 """
-KYOTI V1.7 -- every FINAL feature in one image except BLACKPYRAMIDS_303 and VARISPEED_EMUS.
+KYOTI V1.8 / V1.8C -- every FINAL feature in one image except BLACKPYRAMIDS_303 and VARISPEED_EMUS.
+Two images (the author, 2026-11-15):
+
+  KYOTI V1.8   (default)  RELOAD_FROM_PROJECT + DIRECT JUMP V7.2.2, no Clyps     OS VERSION "KYOTI V1.8"
+  KYOTI V1.8C  (--clyps)  CLYPS with DIRECT JUMP V7.2.2 built in, no RELOAD       OS VERSION "KYOTI 1.8C"
 
     MUTE MODE (OT / OTFX / OTFX-T / DT-T)      QUANTIZE LIVE REC toggle
     SIDE-CHAIN COMPRESSOR (cross-core)         TRIGLESS-LOCK AUTO-REMOVE
-    RELOAD FROM PROJECT (RELOAD_FROM_PROJECT chords)       DIRECT JUMP V7.0.1
+    RELOAD FROM PROJECT | CLYPS                DIRECT JUMP V7.2.2
     REC TRIG MUTE ([TRACK]+[REC], CC 80)       VARISPEED (TSTR VARI + QUAN)
     the bug fixes: MIDI_PLAYS_FREE_FIX, PATTERN LED, PART_CHANGE_CARRYOVER_FIX
+
+V1.8 vs V1.7 (FINAL 2026-11-15; V1.7 builds from tag ref/kyoti-v1.7-2026-11-09): RELOAD_FROM_PROJECT with
+Clyps' landing rules (FINAL 2026-11-14) and DIRECT JUMP V7.2.2 (FINAL 2026-11-15). Not flashed as this
+image; each feature is confirmed on its own.
+V1.8C: CLYPS joins and RELOAD_FROM_PROJECT leaves (they share hook sites; Clyps' card reloads replace
+it). Clyps owns the phase-D site 0x400a1f72 and chains dj_land (SUPERSEDE). Both live in DRAM; Clyps'
+buffers follow its unit (about 10 MB of the sample/recorder pool). Flashed and checked by the author as
+"KY+CL DJC9" (the same mainos, 32108f95...).
+
+--clyps-standalone: the standalone CLYPS image (out/CLYPS/, OS VERSION "CLYPS V1.0"), what
+`python3 tools/build_clyps.py` builds. Clyps never ships without DIRECT JUMP (the author, 2026-11-15),
+so it is V1.8C's composition cut down to CLYPS + DIRECT_JUMP_KYOTI + the three BATCH_BUGFIXES; its DRAM
+payload is byte-identical to V1.8C's. build_clyps.py's own bare image (KYOTI_UNIT=1) is a test image
+for the emulator harnesses, never promoted.
 
 V1.7 vs V1.6 (WIP 2026-11-01; V1.6 builds from the commit before this one): the DELAY sounds as in stock
 again. V1.1-V1.6 kept ~2 KB of code in midisc's "SAFE_CAVE" 0x400d24d0..0x400d2cdc, which is entries
@@ -117,9 +135,11 @@ feature's delta, outside its caves, equals its standalone delta (a relocation
 may move caves and the pointers into them, nothing else); no branch lands
 inside any displaced span; B1, B2 and the reclaim invariants.
 
-Usage:  python3 tools/build_kyoti.py
-Outputs (out/KYOTI/): OCTATRACK_OS1.40C_KYOTI_V1.0.syx (MIDI), OCTATRACK_KYOTI_V1.0.bin
-(CF card), mainos_kyoti_v1.0.bin, kyoti_v1.0_map.json (every placement + symbol).
+Usage:  python3 tools/build_kyoti.py                       KYOTI V1.8
+        python3 tools/build_kyoti.py --clyps               KYOTI V1.8C
+        python3 tools/build_kyoti.py --clyps-standalone    the standalone CLYPS image
+Outputs (out/KYOTI/, or out/CLYPS/): OCTATRACK_OS1.40C_<TAG>.syx (MIDI), OCTATRACK_<TAG>.bin
+(CF card), mainos_<tag>.bin, <tag>_map.json (every placement + symbol).
 """
 import hashlib, json, os, pathlib, shutil, struct, subprocess, sys
 
@@ -130,13 +150,13 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "dram"))
 import dram                                    # noqa: E402  (tools/dram/dram.py)
 
 gate(__file__, note="""
-KYOTI V1.7: every FINAL feature except BLACKPYRAMIDS_303 and VARISPEED_EMUS in one image,
-nothing placed in the parameter-page descriptor table (V1.0, withdrawn 2026-10-06, crashed
-because it did). RELOAD_FROM_PROJECT in DRAM.
+KYOTI V1.8 (V1.8C with --clyps): every FINAL feature except BLACKPYRAMIDS_303 and VARISPEED_EMUS in
+one image, nothing placed in the parameter-page descriptor table (V1.0, withdrawn 2026-10-06, crashed
+because it did). RELOAD_FROM_PROJECT (or CLYPS) and DIRECT JUMP in DRAM.
 """)
 
-VERSTR = os.environ.get("KYOTI_VERSTR") or "KYOTI V1.7"   # a WIP image names itself (KYOTI_ALLOW_WIP builds)
-TAG = "KYOTI_V1.7"
+VERSTR = os.environ.get("KYOTI_VERSTR") or "KYOTI V1.8"   # a WIP image names itself (KYOTI_ALLOW_WIP builds)
+TAG = "KYOTI_V1.8"
 BASE = 0x40000400
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 STOCK_SECT = ROOT / "out/raw/section_3_MAIN_OS.bin"
@@ -186,9 +206,9 @@ RECLAIM_WHOLE = {"SPRING": (0x400d575e, 0x400d58f0), "PERS1": (0x400b2a34, 0x400
 #   DRAM on the unit in OBKYOTI6-12 (reference/kb/caves.md §5) -- so that the classic cave takes what sat
 #   on DELAY's table (SAFE, above).
 PLAN = {
-    "DRAM":  ["patch_reload3",                     # key-handler + sys-task code; DRAM-proven in V1.2-V1.3
+    "DRAM":  ["patch_reload3",                     # RELOAD_FROM_PROJECT (V1.2-V1.3, V1.5-V1.8; not in V1.8C)
               "patch_directjump_v7",               # V1.7: out of CAVE (2,026 B), into the same arena page
-              "patch_clyps_dram"],                 # --with CLYPS: LAST (its CL_BSS_SIZE buffers follow it)
+              "patch_clyps_dram"],                 # V1.8C: LAST (its CL_BSS_SIZE buffers follow it)
     "CAVE":  ["patch_varispeed",                   # first: 0x400d6500, VARISPEED's own address (frame ISR)
               "patch_softmute", "patch_partreapply",
               # V1.7: everything that sat in SAFE (DELAY's table) until V1.6
@@ -236,14 +256,23 @@ FEATURES = {
     "VARISPEED": ("build_varispeed.py", "mainos_varispeed.bin", "prep",
                   {"patch_varispeed": "vari_build/vem_5407.bin"}),
 }
+# --clyps (V1.8C, reference/handoffs/CLYPS_SCOPE.md §1.10): CLYPS replaces RELOAD_FROM_PROJECT (it carries
+# the card reloads); one all-DRAM unit, tick hooks included (the loader runs from the boot site before any
+# task or ISR; DIRECT JUMP's phase-D hook ran from DRAM on the unit, OBKYOTI6-12). It owns the phase-D
+# site 0x400a1f72 and calls DIRECT JUMP's dj_land from there (SUPERSEDE below). Added LAST: the
+# composition order V1.8C was flashed with.
+CLYPS_FEATURE = {"CLYPS": ("build_clyps.py", "mainos_clyps.bin", "prep",
+                           {"patch_clyps_dram": "patch_clyps_dram.bin"})}
+# Builders whose own standalone image is a test image, never promoted (build_clyps.py's bare Clyps: Clyps
+# ships only with DIRECT JUMP). They run with the WIP opt-in inside this composition, whose own seal()
+# pins the result.
+UNIT_ONLY = {"CLYPS"}
+# --clyps-standalone: the standalone CLYPS image -- V1.8C cut down to these (the author, 2026-11-15)
+CLYPS_IMAGE = ["MIDI_PLAYS_FREE_FIX", "EMPTY_PATTERN_LED_FIX", "PART_CHANGE_CARRYOVER_FIX",
+               "DIRECT_JUMP_KYOTI", "CLYPS"]
 VARISPEED_AT = 0x400d6500           # tools/varispeed_buildlib.py CAVE
-# Features that are WIP (not promoted, or demoted): only with --with NAME.
-#   CLYPS (reference/handoffs/CLYPS_SCOPE.md §1.10): replaces RELOAD_FROM_PROJECT (it carries the card
-#   reloads); one all-DRAM unit, tick hooks included (the loader runs from the boot site before any
-#   task or ISR; DIRECT JUMP's phase-D hook ran from DRAM on the unit, OBKYOTI6-12). It owns the
-#   phase-D site 0x400a1f72 and calls DIRECT JUMP's dj_land from there (SUPERSEDE below).
-WIP_FEATURES = {"CLYPS": ("build_clyps.py", "mainos_clyps.bin", "prep",
-                          {"patch_clyps_dram": "patch_clyps_dram.bin"})}
+# Features that are WIP (not promoted, or demoted): only with --with NAME. None at present.
+WIP_FEATURES = {}
 # Detour sites one feature takes over from another that it calls itself: (owner, other, site, n).
 # The other's bytes there must be exactly `jsr <its entry>`, and the owner must have been built
 # with that entry (asserted before the composition; never a silent overwrite).
@@ -324,7 +353,7 @@ def run_builder(sb, feat, place):
     # A WIP builder runs only when asked for by name (--with), or when this composite is itself a WIP
     # build the user allowed (KYOTI_ALLOW_WIP=1, e.g. a feature under test). The
     # composite's own seal() keeps such an image off the FINAL pin either way.
-    if feat in WIP_FEATURES or os.environ.get("KYOTI_ALLOW_WIP") == "1":
+    if feat in WIP_FEATURES or feat in UNIT_ONLY or os.environ.get("KYOTI_ALLOW_WIP") == "1":
         env["KYOTI_ALLOW_WIP"] = "1"
     r = subprocess.run([sys.executable, f"tools/{builder}"], cwd=sb, env=env,
                        capture_output=True, text=True)
@@ -430,7 +459,7 @@ def wip_variant(flag):
     """--with / --without images are never the promoted one: refuse them up front without the
     opt-in, instead of after a full build at seal()."""
     if os.environ.get("KYOTI_ALLOW_WIP") != "1":
-        sys.exit(f"\n  Refusing to build: {flag} makes a WIP image, not KYOTI V1.7.\n"
+        sys.exit(f"\n  Refusing to build: {flag} makes a WIP image, not a promoted one.\n"
                  f"  If you meant it, set KYOTI_ALLOW_WIP=1:\n\n"
                  f"      KYOTI_ALLOW_WIP=1 python3 tools/build_kyoti.py {flag} ...\n")
 
@@ -449,50 +478,78 @@ def apply_with(argv):
         sys.exit(f"--with: unknown or non-WIP feature(s) {bad}; choose from {sorted(WIP_FEATURES)}")
     for a in add:
         FEATURES[a] = WIP_FEATURES[a]
-    if "CLYPS" in add:                       # Clyps replaces RELOAD_FROM_PROJECT (scope §1.10)
-        FEATURES.pop("RELOAD_FROM_PROJECT", None)
-    VERSTR = os.environ.get("KYOTI_VERSTR") or ("KV17+" + "".join(a[:3] for a in add))[:10]
-    TAG = "KYOTI_V1.7_WITH_" + "_".join(add)
+    VERSTR = os.environ.get("KYOTI_VERSTR") or ("KV18+" + "".join(a[:3] for a in add))[:10]
+    TAG = "KYOTI_V1.8_WITH_" + "_".join(add)
     OUTDIR = ROOT / "out/KYOTI_WIP" / TAG
     SANDBOX = OUTDIR / "_sandbox"
     print(f"  WIP IMAGE: with {', '.join(add)}  ->  OS VERSION {VERSTR!r}, {OUTDIR.relative_to(ROOT)}\n")
 
 
-def apply_without(argv):
-    """--without NAME[,NAME]: a BISECTION image -- KYOTI V1.6 minus those features, built
-    by the same method.  It gets its own OS VERSION ("KV15-NO-" + a short code per removed
-    feature, e.g. KV15-NO-SC) and its own directory out/KYOTI_BISECT/<tag>/, so it can never be
-    mistaken for, or overwrite, the real image."""
-    global VERSTR, TAG, OUTDIR, SANDBOX
-    if "--without" not in argv:
-        return
-    wip_variant("--without")
-    drop = argv[argv.index("--without") + 1].upper().split(",")
+def drop_features(drop):
+    """Take `drop` out of FEATURES, and un-reclaim what nothing removes any more."""
     bad = [d for d in drop if d not in FEATURES]
     if bad:
-        sys.exit(f"--without: unknown feature(s) {bad}; choose from {sorted(FEATURES)}")
+        sys.exit(f"unknown feature(s) {bad}; choose from {sorted(FEATURES)}")
     for d in drop:
         del FEATURES[d]
     if "SIDECHAIN_COMPRESSOR" not in FEATURES:
         del RECLAIM_WHOLE["SPRING"]          # nothing removes SPRING any more: not dead
     if "MUTE_MODES" not in FEATURES:
         del RECLAIM_WHOLE["PERS1"], RECLAIM_WHOLE["PERS2"]
+
+
+def apply_without(argv):
+    """--without NAME[,NAME]: a BISECTION image -- KYOTI V1.8 minus those features, built
+    by the same method.  It gets its own OS VERSION ("KV18-NO-" + a short code per removed
+    feature, e.g. KV18-NO-SC) and its own directory out/KYOTI_BISECT/<tag>/, so it can never be
+    mistaken for, or overwrite, the real image."""
+    global VERSTR, TAG, OUTDIR, SANDBOX
+    if "--without" not in argv:
+        return
+    wip_variant("--without")
+    drop = argv[argv.index("--without") + 1].upper().split(",")
+    drop_features(drop)
     short = {"MUTE_MODES": "MM", "QUANTIZE_LIVE_REC_TOGGLE": "QL", "SIDECHAIN_COMPRESSOR": "SC", "ERASE_EMPTY_TRIGLESS_LOCKS": "TL",
-             "RELOAD_FROM_PROJECT": "RL", "DIRECT_JUMP_KYOTI": "DJ",
+             "DIRECT_JUMP_KYOTI": "DJ",
              "MIDI_PLAYS_FREE_FIX": "PF", "EMPTY_PATTERN_LED_FIX": "PL", "PART_CHANGE_CARRYOVER_FIX": "PR",
              "REC_TRIG_MUTE": "RTM", "VARISPEED": "VS", "CLYPS": "CL"}
-    VERSTR = ("KV17-NO-" + "".join(short[d] for d in drop))[:10]
-    TAG = "KYOTI_V1.7_WITHOUT_" + "_".join(drop)
+    VERSTR = ("KV18-NO-" + "".join(short[d] for d in drop))[:10]
+    TAG = "KYOTI_V1.8_WITHOUT_" + "_".join(drop)
     OUTDIR = ROOT / "out/KYOTI_BISECT" / TAG
     SANDBOX = OUTDIR / "_sandbox"
     print(f"  BISECTION IMAGE: without {', '.join(drop)}  ->  OS VERSION {VERSTR!r}, "
           f"{OUTDIR.relative_to(ROOT)}\n")
 
 
+def apply_clyps(argv):
+    """--clyps: KYOTI V1.8C (CLYPS in RELOAD_FROM_PROJECT's place). --clyps-standalone: the standalone CLYPS
+    image (CLYPS_IMAGE), out/CLYPS/, OS VERSION "CLYPS V1.0". Each is pinned on its own in
+    kyoti_status.FINAL (mainos_kyoti_v1.8c.bin, mainos_clyps.bin)."""
+    global VERSTR, TAG, OUTDIR, SANDBOX
+    alone = "--clyps-standalone" in argv
+    if not alone and "--clyps" not in argv:
+        return
+    FEATURES.pop("RELOAD_FROM_PROJECT")
+    FEATURES.update(CLYPS_FEATURE)
+    if alone:
+        drop_features([f for f in FEATURES if f not in CLYPS_IMAGE])
+        VERSTR, TAG, OUTDIR = "CLYPS V1.0", "CLYPS", ROOT / "out/CLYPS"
+    else:
+        VERSTR, TAG = "KYOTI 1.8C", "KYOTI_V1.8C"
+    from kyoti_status import FINAL
+    if f"mainos_{TAG.lower()}.bin" not in FINAL.get("build_kyoti.py", {}):
+        wip_variant("--clyps-standalone" if alone else "--clyps")
+    SANDBOX = OUTDIR / "_sandbox"
+    print(f"  {TAG}: {', '.join(FEATURES)}  ->  OS VERSION {VERSTR!r}, {OUTDIR.relative_to(ROOT)}\n")
+
+
 def main():
     global VERSTR
+    if sum(f in sys.argv for f in ("--with", "--without", "--clyps", "--clyps-standalone")) > 1:
+        sys.exit("--with, --without, --clyps and --clyps-standalone make different images: one at a time")
     apply_with(sys.argv)
     apply_without(sys.argv)
+    apply_clyps(sys.argv)
     VERSTR = os.environ.get("KYOTI_VERSTR") or VERSTR   # a WIP test image's own OS VERSION (2026-11-13)
     # pairs that must never share an image (tools/feature_exclusions.py, the user 2026-11-07): Clyps
     # with RELOAD_FROM_PROJECT never; Clyps with DIRECT_JUMP_KYOTI only as the integrated pair, i.e.

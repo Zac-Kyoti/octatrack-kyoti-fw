@@ -9,9 +9,9 @@ track lengths, scales or master settings -- never shifted by a step, never a
 fraction of a step off, and its first trig always wins. START SILENT and the Part's
 pattern-wide settings (scenes, the Part itself) change as on a stock pattern change; each
 track's own Part settings reach the engine with that track's first sounding trig of the new
-pattern (V7.2, WIP), so a sound still ringing from the old pattern never takes the new
+pattern (V7.2), so a sound still ringing from the old pattern never takes the new
 settings; trig conditions stand where the new pattern's would, had it played since START
-(V7.0.2, WIP), and the last MIDI
+(V7.0.2), and the last MIDI
 Program Change sent always names the pattern that plays. The arranger and
 pattern chains are untouched. (The Analog Rytm's own DIRECT JUMP, by contrast,
 lands shifted or fractional whenever lengths or scales differ; that difference

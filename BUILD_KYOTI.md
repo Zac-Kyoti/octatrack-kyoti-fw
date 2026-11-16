@@ -32,62 +32,67 @@ into `downloads/` yourself and re-run `./analyze.sh`.
 
 ## Build
 
-One command per final feature. Each writes its image to `out/`:
+One command per final feature. **Every feature image carries the three BATCH_BUGFIXES**; there is no
+image of a feature without them. Each writes its image to `out/<FEATURE>/`:
 
 | feature | build command | OS VERSION reads |
 |---|---|---|
-| MUTE_MODES | `python3 tools/build_mute_modes.py` | `140C_KYOTI` |
+| MUTE_MODES | `python3 tools/build_mute_modes.py` | `140C_MM` |
 | DIRECT_JUMP_KYOTI | `python3 tools/build_direct_jump_kyoti.py` | `140C_KDJ7` |
-| SIDECHAIN_COMPRESSOR | `python3 tools/build_sidechain_compressor.py` | `140C_KYOTI` |
-| SIDECHAIN_COMPRESSOR light (the earlier version; WIP, not recommended) | `KYOTI_ALLOW_WIP=1 python3 tools/build_sidechain_compressor_light.py` | `140C_SCLT` |
-| RELOAD_FROM_PROJECT | `python3 tools/build_reload_from_project.py` | `140C_KYOTI` |
-| QUANTIZE_LIVE_REC_TOGGLE | `python3 tools/build_quantize_live_rec_toggle.py` | `140C_KYOTI` |
-| ERASE_EMPTY_TRIGLESS_LOCKS | `python3 tools/build_erase_empty_trigless_locks.py` | `1.40C` |
+| SIDECHAIN_COMPRESSOR | `python3 tools/build_sidechain_compressor.py` | `140C_SC` |
+| CLYPS (with DIRECT_JUMP_KYOTI built in) | `python3 tools/build_clyps.py` | `CLYPS V1.0` |
+| RELOAD_FROM_PROJECT | `python3 tools/build_reload_from_project.py` | `140C_RL` |
+| QUANTIZE_LIVE_REC_TOGGLE | `python3 tools/build_quantize_live_rec_toggle.py` | `140C_QLR` |
+| ERASE_EMPTY_TRIGLESS_LOCKS | `python3 tools/build_erase_empty_trigless_locks.py` | `140C_TL` |
 | REC_TRIG_MUTE | `python3 tools/build_rec_trig_mute.py` | `140C_RTM` |
 | BLACKPYRAMIDS_303 | `python3 tools/build_blackpyramids_303.py` | `140C_BP303` |
 | VARISPEED | `python3 tools/build_varispeed.py` | `140C_VARI1` |
 | VARISPEED_EMUS | `python3 tools/build_varispeed_emus.py` | `140C_VEM10` |
-| BATCH_BUGFIXES: MIDI_PLAYS_FREE_FIX | `python3 tools/build_midi_plays_free_fix.py` | `1.40C` |
-| BATCH_BUGFIXES: EMPTY_PATTERN_LED_FIX | `python3 tools/build_empty_pattern_led_fix.py` | `1.40C` |
-| BATCH_BUGFIXES: PART_CHANGE_CARRYOVER_FIX | `python3 tools/build_part_change_carryover_fix.py` | `1.40C` |
-| each feature + BATCH_BUGFIXES (ten images) | `python3 tools/build_bugbuilds.py` | `BUG_MUTEDT`, `BUG_DJV7`, `BUG_SC3X`, `BUG_RL3`, `BUG_QLREC`, `BUG_TRIGLK`, `BUG_RTM`, `BUG_BP303`, `BUG_VARI`, `BUG_VEM10` |
+| BATCH_BUGFIXES (the three fixes alone) | `python3 tools/build_batch_bugfixes.py` | `140C_FIXES` |
+| SIDECHAIN_COMPRESSOR light (the earlier version; WIP, not recommended; no bug fixes) | `KYOTI_ALLOW_WIP=1 python3 tools/build_sidechain_compressor_light.py` | `140C_SCLT` |
 
-Each build writes four files to `out/`, named after the feature:
+Each build writes, in `out/<FEATURE>/`:
 
 ```
 mainos_<feature>.bin                  the patched MAIN OS section
-elek_<feature>.bin                    the rebuilt container
 OCTATRACK_OS1.40C_<FEATURE>.syx       flash over MIDI DIN
 OCTATRACK_<FEATURE>.bin               flash from the CF card (faster)
 ```
 
-`build_bugbuilds.py` writes its ten images to `out/Bugbuilds/` (`--only NAME,...` builds just
-those), as
-`OCTATRACK_OS1.40C_<FEATURE>_BATCH_BUGFIXES.syx` and `.bin`, and leaves the images above
-alone. MIDI_PLAYS_FREE_FIX writes only its `mainos_` image; to flash it on its own, use the
-no-assembler patch below or wrap it as its builder's header shows.
+How: a feature builder run on its own hands off to [`tools/feature_image.py`](tools/feature_image.py),
+which builds the feature alone as a *unit* (`out/mainos_<feature>.bin`, never wrapped for flashing;
+`KYOTI_UNIT=1 python3 tools/build_<feature>.py` builds only that, for the emulator harnesses) and
+composes the three fixes onto it, proving that every changed byte has exactly one owner.
+`python3 tools/feature_image.py` builds every feature image in one run (`--only NAME,...`). The
+three fix builders (`build_midi_plays_free_fix.py`, `build_empty_pattern_led_fix.py`,
+`build_part_change_carryover_fix.py`) give the BATCH_BUGFIXES image too.
 
-### The combined image: KYOTI V1.7
+### The combined images: KYOTI V1.8 and KYOTI V1.8C
 
-Every FINAL feature except BLACKPYRAMIDS_303 and VARISPEED_EMUS in one image:
+Every FINAL feature except BLACKPYRAMIDS_303 and VARISPEED_EMUS in one image, in two versions:
 
 ```sh
-python3 tools/build_kyoti.py
+python3 tools/build_kyoti.py            # KYOTI V1.8:  RELOAD_FROM_PROJECT + DIRECT_JUMP_KYOTI
+python3 tools/build_kyoti.py --clyps    # KYOTI V1.8C: CLYPS (Direct Jump Kyoti built in), no RELOAD
 ```
 
-It writes `out/KYOTI/OCTATRACK_OS1.40C_KYOTI_V1.7.syx` and `.bin` (OS VERSION `KYOTI V1.7`).
+They write `out/KYOTI/OCTATRACK_OS1.40C_KYOTI_V1.8.syx` (OS VERSION `KYOTI V1.8`) and
+`out/KYOTI/OCTATRACK_OS1.40C_KYOTI_V1.8C.syx` (OS VERSION `KYOTI 1.8C`), each with its `.bin`.
+`build_clyps.py` runs `build_kyoti.py --clyps-standalone` (CLYPS + DIRECT_JUMP_KYOTI + BATCH_BUGFIXES,
+`out/CLYPS/`). No builder puts CLYPS beside the standalone DIRECT_JUMP_KYOTI or RELOAD_FROM_PROJECT
+(`tools/feature_exclusions.py`).
 
-> **Sample memory.** RELOAD_FROM_PROJECT runs from DRAM in V1.5–V1.7, as in V1.2–V1.3, and DIRECT JUMP
-> joins it in V1.7: since 2026-11-09 eleven 6 KB pages (66 KB) of the 85.5 MB pool -- RELOAD holds a reloaded
-> pattern and its Part until the step it lands on (it was two pages, 12 KB). The standalone RELOAD image
-> runs from DRAM too (11 pages). An octabam-built image (octabam's own remixer) reserves a fixed
-> **10 MiB** whenever any module runs from DRAM.
+> **Sample memory.** RELOAD_FROM_PROJECT and DIRECT JUMP run from DRAM in V1.8: eleven 6 KB pages (66 KB)
+> of the 85.5 MB pool. In V1.8C and the CLYPS image, CLYPS and DIRECT JUMP take 1,709 pages (about 10 MB),
+> almost all of it Clyps' originals and working copies. The MEMORY page still reads 85.5 MB. An
+> octabam-built image (octabam's own remixer) reserves a fixed **10 MiB** whenever any module runs from DRAM.
 
 KYOTI V1.0 was withdrawn on 2026-10-06; V1.1 replaced it, V1.2 (with an earlier varispeed module) replaced V1.1,
 V1.3 replaced V1.2, whose SPRING reclaim overwrote PLATE REVERB's page (`reference/kb/caves.md` §0),
 V1.4 replaced V1.3 without that module, V1.5 replaced V1.4, adding VARISPEED, V1.6 replaced V1.5, and
-V1.7 replaces V1.6: V1.1–V1.6 kept code on the stock DELAY's coefficient table (`reference/kb/caves.md`,
-the cave table), which darkened DELAY repeats. V1.6 builds from tag `ref/kyoti-v1.6-2026-10-29`. V1.4 still
+V1.7 replaced V1.6: V1.1–V1.6 kept code on the stock DELAY's coefficient table (`reference/kb/caves.md`,
+the cave table), which darkened DELAY repeats. V1.8 and V1.8C replace V1.7.
+V1.7 builds from tag `ref/kyoti-v1.7-2026-11-09`, V1.6 from tag `ref/kyoti-v1.6-2026-10-29`. V1.4 still
 builds from the commit it was promoted at (`git worktree add ../octatrack-kyoti-fw-v14 19348d9`,
 with `vendor/`, `out/raw/`, `downloads/` and `refs/octabam` linked in by absolute path).
 

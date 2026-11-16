@@ -2,7 +2,7 @@
 
 The source of Zac Kyoti's modules as [Modwerk](https://github.com/repeat98/modwerk) ships them, one folder per module. Modwerk imports these files into `sdk/octabam/modules/<id>/`.
 
-They are their own copies. Nothing in this repository builds from them: the standalone builders, the Bugbuilds and KYOTI use `tools/`, and octabam uses `octabam-modules/`. A change made for Modwerk lands here and nowhere else.
+They are their own copies. Nothing in this repository builds from them: the feature builders and KYOTI use `tools/`, and octabam uses `octabam-modules/`. A change made for Modwerk lands here and nowhere else.
 
 | Folder | On Modwerk | Status (23 October 2026) |
 |---|---|---|

@@ -2,49 +2,39 @@
 # SPDX-License-Identifier: MIT
 # SPDX-FileCopyrightText: 2026 Zac Kyoti
 """
-Bugbuilds -- each finished FEATURE build, with all three BUG FIXES folded in.
+Every feature build is the feature WITH the three BATCH_BUGFIXES (the author, 2026-11-15): there is no
+standalone image without them any more, and no separate "Bugbuild". This module composes them.
 
-Ten composite images, written ONLY to out/Bugbuilds/ (they do not replace, and are
-not written alongside, the standalone per-feature images in out/):
+    python3 tools/build_<feature>.py     ->  out/<FEATURE>/OCTATRACK_OS1.40C_<FEATURE>.syx (+ .bin)
 
-    MUTE_MODES        + PART_CHANGE_CARRYOVER_FIX + EMPTY_PATTERN_LED_FIX + MIDI_PLAYS_FREE_FIX
-    QUANTIZE_LIVE_REC_TOGGLE              + PART_CHANGE_CARRYOVER_FIX + EMPTY_PATTERN_LED_FIX + MIDI_PLAYS_FREE_FIX
-    SIDECHAIN_COMPRESSOR   + PART_CHANGE_CARRYOVER_FIX + EMPTY_PATTERN_LED_FIX + MIDI_PLAYS_FREE_FIX
-    ERASE_EMPTY_TRIGLESS_LOCKS           + PART_CHANGE_CARRYOVER_FIX + EMPTY_PATTERN_LED_FIX + MIDI_PLAYS_FREE_FIX
-    RELOAD_FROM_PROJECT            + PART_CHANGE_CARRYOVER_FIX + EMPTY_PATTERN_LED_FIX + MIDI_PLAYS_FREE_FIX
-    DIRECT_JUMP_KYOTI      + PART_CHANGE_CARRYOVER_FIX + EMPTY_PATTERN_LED_FIX + MIDI_PLAYS_FREE_FIX
-    REC_TRIG_MUTE          + PART_CHANGE_CARRYOVER_FIX + EMPTY_PATTERN_LED_FIX + MIDI_PLAYS_FREE_FIX
-    BLACKPYRAMIDS_303      + PART_CHANGE_CARRYOVER_FIX + EMPTY_PATTERN_LED_FIX + MIDI_PLAYS_FREE_FIX
-    VARISPEED              + PART_CHANGE_CARRYOVER_FIX + EMPTY_PATTERN_LED_FIX + MIDI_PLAYS_FREE_FIX
-    VARISPEED_EMUS         + PART_CHANGE_CARRYOVER_FIX + EMPTY_PATTERN_LED_FIX + MIDI_PLAYS_FREE_FIX
+kyoti_status.gate() sends a feature builder run on its own here (standalone()). The composer runs
+that builder again as a UNIT (KYOTI_UNIT=1: the feature alone, out/mainos_<feature>.bin, which the
+emulator harnesses and build_kyoti.py use; the flashable files a unit run wraps are deleted), then
+links the bug-fix caves into free space in that image and applies their detours. The three fix
+builders (and build_batch_bugfixes.py) give BATCH_BUGFIXES: the three fixes on stock. build_clyps.py
+gives the standalone CLYPS image, which build_kyoti.py composes (CLYPS needs DIRECT JUMP).
 
-Method -- compose onto the finished feature image, do not re-implement it.
-Each feature builder is run first (so the base is current), then the bug-fix caves are
-linked into free space in that image and their detours applied.  SIDE-CHAIN in particular
-is never re-derived: its DSP payloads, COMPRESSOR descriptor and FX2 chooser edits come
-through untouched, and its cave stays at its own address so the descriptor's formatter
-pointers stay valid. VARISPEED_EMUS's DSP payload edits (the S950 / SP12 kernel in SPRING
-REVERB's modules) come through the same way.
+    MUTE_MODES  QUANTIZE_LIVE_REC_TOGGLE  SIDECHAIN_COMPRESSOR  ERASE_EMPTY_TRIGLESS_LOCKS
+    RELOAD_FROM_PROJECT  DIRECT_JUMP_KYOTI  REC_TRIG_MUTE  BLACKPYRAMIDS_303  VARISPEED  VARISPEED_EMUS
+    BATCH_BUGFIXES (MIDI_PLAYS_FREE_FIX + EMPTY_PATTERN_LED_FIX + PART_CHANGE_CARRYOVER_FIX)
 
-MIDI_PLAYS_FREE_FIX (patch_trigscale) is added to ALL TEN images: no feature builder carries a copy
-any more.  Each of them used to (RELOAD_FROM_PROJECT's sat at 0x400d7bfc, the rest at 0x400d7b00), and
-every copy wrote the same site 0x4009b6f2 -- which octabam's remix ledger refuses, so no two
-of those features could ever be selected into one remix.  The fix is its own contribution
-now (the batch-bugfixes module upstream) and this composer is where a combined image gets it.
-Nothing here needed changing for that: `already`/`need` are computed per image by scanning
-for each fix's detour, so the bases simply all report "already present: none".
+Promotion: kyoti_status.FINAL pins each unit under its builder (as before) and each composed image
+under "feature_image.py" (mainos_<feature>.bin in out/<FEATURE>/). Both seal; a WIP unit or image
+refuses without KYOTI_ALLOW_WIP=1, which a run passes through to the unit.
+
+Method -- compose onto the finished feature image, do not re-implement it. SIDE-CHAIN in particular
+is never re-derived: its DSP payloads, COMPRESSOR descriptor and FX2 chooser edits come through
+untouched, and its cave stays at its own address so the descriptor's formatter pointers stay valid.
+VARISPEED_EMUS's DSP payload edits come through the same way.
 
 Cave layout, where each fix is placed if that space is free in the base (it is in all but
 RELOAD_FROM_PROJECT, whose own cave starts at 0x400d6500, so the allocator moves the two fixes up):
-
-    patch_partreapply   0x400d6500   402 B   (RELOAD_FROM_PROJECT: relocated above its own cave)
-    patch_pattern_led   0x400d6694   158 B   (RELOAD_FROM_PROJECT: likewise)
+    patch_partreapply   0x400d6500   402 B
+    patch_pattern_led   0x400d6694   158 B
     (never below 0x400d6500 -- 0x400d64ca.. is a runtime record table, kb/caves.md 2b)
-    patch_trigscale     0x400d7b00    62 B   (added to all ten)
+    patch_trigscale     0x400d7b00    62 B
 
 Verification (every image, every run):
-  * the feature's builder is promoted (on kyoti_status.FINAL), its rebuilt image still matches, and it is re-run
-    first so the base is built from the current source (--no-rebuild skips that);
   * each cave region is all-zero in the base before it is written, and never covers a byte a
     feature writes at runtime (RESERVED: REC_TRIG_MUTE's RTM_MASK + RTM_TOAST are zero in the image);
   * each detour site still holds the exact stock bytes (proves no feature took it first);
@@ -54,34 +44,21 @@ Verification (every image, every run):
     delta -- and those two deltas are disjoint.  That is the interlock proof: every
     changed byte has exactly one owner and no owner's bytes were altered.
 
-Usage:  python3 tools/build_bugbuilds.py [--no-rebuild] [--only NAME[,NAME...]]
-
---only builds just those Bugbuilds (FEATURES names, e.g. --only VARISPEED,VARISPEED_EMUS).
-
-WIP OPT-IN, for one base at a time:
-
-    KYOTI_ALLOW_WIP=1 python3 tools/build_bugbuilds.py --wip NAME
-
-builds ONLY that base's Bugbuild (WIP_FEATURES below, empty while no WIP base is wired in),
-with every check above except the promotion ones: its builder is WIP and is run with the
-opt-in, the result is announced as WIP, and it is NEVER sealed (kyoti_status.seal is not
-called, so it can never pass for a promoted image). Without KYOTI_ALLOW_WIP=1 it refuses. A
-run without --wip is unchanged: the final Bugbuilds, and any base not on FINAL is skipped.
+Usage:  python3 tools/build_<feature>.py              one image (the normal way)
+        python3 tools/feature_image.py [--only NAME,...]   every image (a sweep)
+Until 2026-11-15 this was tools/build_bugbuilds.py (out/Bugbuilds/, OS VERSIONs BUG_*).
 """
 import os, pathlib, subprocess, sys
 import hashlib
-from kyoti_status import gate, seal, FINAL
+from kyoti_status import seal
 import feature_exclusions                      # pairs that never share an image (the user, 2026-11-07)
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "dram"))
 import dram                                    # noqa: E402  (tools/dram/dram.py)
 
-gate(__file__)
-
 BASE = 0x40000400
 ROOT = pathlib.Path(__file__).parent.parent
 STOCK_SECT = ROOT / "out/raw/section_3_MAIN_OS.bin"
-OUTDIR = ROOT / "out/Bugbuilds"
-WORK = OUTDIR / "_work"
+WORK = ROOT / "out/_feature_work"
 EFT = ROOT / "vendor/elektron-firmware-tool/elektron-firmware-tool"
 STOCK_SYX = ROOT / "downloads/extracted/OCTATRACK_OS1.40C.syx"
 # From 0x400d6500, not the zero run's start 0x400d64da: 0x400d64ca is a runtime table of
@@ -118,44 +95,43 @@ BUGFIX = {
     ]),
 }
 
-# --- the feature bases: name -> (builder, base image, VERSTR, blurb) -------------------
-#   A base is used only while its builder is on kyoti_status.FINAL, and a rebuilt base that
-#   no longer matches its promoted image is flagged (it carries unpromoted changes).
+# --- the feature bases: name -> (builder, unit image, VERSTR, blurb) -------------------
+#   BATCH_BUGFIXES has no unit: its base is stock.
 FEATURES = {
-    "MUTE_MODES": ("build_mute_modes.py", "out/mainos_mute_modes.bin", "BUG_MUTEDT",
+    "MUTE_MODES": ("build_mute_modes.py", "out/mainos_mute_modes.bin", "140C_MM",
                     "PERSONALIZE -> MUTE MODE: OT | OTFX | OTFX-T | DT-T (default OT)."),
-    "QUANTIZE_LIVE_REC_TOGGLE": ("build_quantize_live_rec_toggle.py", "out/mainos_quantize_live_rec_toggle.bin", "BUG_QLREC",
+    "QUANTIZE_LIVE_REC_TOGGLE": ("build_quantize_live_rec_toggle.py", "out/mainos_quantize_live_rec_toggle.bin", "140C_QLR",
               "Hold [REC] + [PLAY] -> toast shows QUANTIZE LIVE REC; tap [PLAY] "
               "again while it is up to invert it.  (Stateless rewrite after the "
               "0x400522ca tick hook crashed hardware; hardware-confirmed 2026-09-25.)"),
-    "SIDECHAIN_COMPRESSOR": ("build_sidechain_compressor.py", "out/mainos_sidechain_compressor.bin", "BUG_SC3X",
+    "SIDECHAIN_COMPRESSOR": ("build_sidechain_compressor.py", "out/mainos_sidechain_compressor.bin", "140C_SC",
                              "COMPRESSOR FX page 2: MON / KEY / KGN / KBAS / KWID (base-width key filter), cross-core."),
-    "ERASE_EMPTY_TRIGLESS_LOCKS": ("build_erase_empty_trigless_locks.py", "out/mainos_erase_empty_trigless_locks.bin", "BUG_TRIGLK",
+    "ERASE_EMPTY_TRIGLESS_LOCKS": ("build_erase_empty_trigless_locks.py", "out/mainos_erase_empty_trigless_locks.bin", "140C_TL",
                  "A trigless lock whose last param is LIVE-erased clears from the trig row."),
-    "RELOAD_FROM_PROJECT": ("build_reload_from_project.py", "out/mainos_reload_from_project.bin", "BUG_RL3",
+    "RELOAD_FROM_PROJECT": ("build_reload_from_project.py", "out/mainos_reload_from_project.bin", "140C_RL",
                 "[PTN]+[TRACK n] reload track n's saved sequence; [BANK]+[TRACK n] also reloads that track's Part slice."),
-    "DIRECT_JUMP_KYOTI": ("build_direct_jump_kyoti.py", "out/mainos_direct_jump_kyoti.bin", "BUG_DJV7", "hold [PTN], tap [YES] -> DIRECT JUMP on/off (V7.0.1, clock-locked jumps)."),
-    "REC_TRIG_MUTE": ("build_rec_trig_mute.py", "out/mainos_rec_trig_mute.bin", "BUG_RTM",
+    "DIRECT_JUMP_KYOTI": ("build_direct_jump_kyoti.py", "out/mainos_direct_jump_kyoti.bin", "140C_KDJ7",
+                          "hold [PTN], tap [YES] -> DIRECT JUMP on/off (V7.2.2: clock-locked jumps, conditions carry on, Part per track at its first sounding trig)."),
+    "REC_TRIG_MUTE": ("build_rec_trig_mute.py", "out/mainos_rec_trig_mute.bin", "140C_RTM",
                       "[TRACK]+[REC] toggles a track's recorder trigs muted; MIDI CC 80; ':' beside the tab letter."),
-    "BLACKPYRAMIDS_303": ("build_blackpyramids_303.py", "out/mainos_blackpyramids_303.bin", "BUG_BP303",
+    "BLACKPYRAMIDS_303": ("build_blackpyramids_303.py", "out/mainos_blackpyramids_303.bin", "140C_BP303",
                           "BLKPYRAMD: a TB-303 voice as a track machine (one per DSP core)."),
-    "VARISPEED": ("build_varispeed.py", "out/mainos_varispeed.bin", "BUG_VARI",
+    "VARISPEED": ("build_varispeed.py", "out/mainos_varispeed.bin", "140C_VARI1",
                   "STATIC/FLEX TSTR VARI: tempo-locked varispeed, QUAN ratios on PTCH."),
     # carries DSP payload changes (the S950 / SP12 kernel in SPRING REVERB's modules, SPRING off
     # both FX choosers), composed as the SIDECHAIN base is: the image as built, the fixes only
     # in the ColdFire cave zone, every feature byte preserved (the interlock proof)
-    "VARISPEED_EMUS": ("build_varispeed_emus.py", "out/mainos_varispeed_emus.bin", "BUG_VEM10",
+    "VARISPEED_EMUS": ("build_varispeed_emus.py", "out/mainos_varispeed_emus.bin", "140C_VEM10",
                        "STATIC/FLEX TSTR VARI + EMUS (OT / S950 / SP12), DSP load guard."),
+    "BATCH_BUGFIXES": (None, None, "140C_FIXES",
+                       "MIDI_PLAYS_FREE_FIX + EMPTY_PATTERN_LED_FIX + PART_CHANGE_CARRYOVER_FIX on stock."),
 }
-# WIP bases, composed ONLY with the explicit opt-in `--wip NAME` (and KYOTI_ALLOW_WIP=1): one
-# per run, never sealed, never part of the default run above.
-WIP_FEATURES = {
-    # DIRECT JUMP V7.2 (V7.0.2 trig conditions, V7.1 landing a tick early, V7.1.1 cue race, V7.2 the Part
-    # per track at its first sounding trig; reference/handoffs/DJ_CLYPS_PORT.md), WIP until the user
-    # promotes it: then it returns to FEATURES' BUG_DJV7 entry and this one goes.
-    "DIRECT_JUMP_KYOTI": ("build_direct_jump_kyoti.py", "out/mainos_direct_jump_kyoti.bin", "BUG_DJC5",
-                          "hold [PTN], tap [YES] -> DIRECT JUMP on/off (V7.2.2 WIP: conditions locked, Part per track, silenced tracks released first)."),
-}
+# builder -> the image it gives when run on its own
+BUILDERS = {b: n for n, (b, *_r) in FEATURES.items() if b}
+BUILDERS.update({"build_midi_plays_free_fix.py": "BATCH_BUGFIXES", "build_empty_pattern_led_fix.py": "BATCH_BUGFIXES",
+                 "build_part_change_carryover_fix.py": "BATCH_BUGFIXES", "build_batch_bugfixes.py": "BATCH_BUGFIXES"})
+# built by another composer: builder -> its command
+ELSEWHERE = {"build_clyps.py": ["tools/build_kyoti.py", "--clyps-standalone"]}
 # Bytes a feature writes AT RUNTIME that are zero in its image: no bug-fix cave may cover
 # them, though free_runs() would otherwise count them free.
 RESERVED = {"REC_TRIG_MUTE": [(0x400d7c3a, 2)]}       # RTM_MASK, RTM_TOAST (build_rec_trig_mute.py)
@@ -331,15 +307,15 @@ def delta(a, b):
     return d
 
 
-def wrap(mainos, name, verstr, blurb):
+def wrap(mainos, name, verstr, blurb, outdir):
     if not EFT.exists() or not STOCK_SYX.exists():
         flag(f"{name}: EFT tool or stock .syx missing -- no .syx/.bin wrap produced")
         return
     if len(verstr) > 10:
         sys.exit(f"{name}: VERSTR {verstr!r} is {len(verstr)} chars, ELEK field caps at 10")
     elek = WORK / f"elek_{name.lower()}.bin"
-    syx = OUTDIR / f"OCTATRACK_OS1.40C_{name}_BATCH_BUGFIXES.syx"
-    binf = OUTDIR / f"OCTATRACK_{name}_BATCH_BUGFIXES.bin"
+    syx = outdir / f"OCTATRACK_OS1.40C_{name}.syx"
+    binf = outdir / f"OCTATRACK_{name}.bin"
     env = dict(os.environ, EFT_EMIT_CONTAINER=str(elek))
     r = subprocess.run([str(EFT), "-i", str(STOCK_SYX), "-c", "3", str(mainos),
                         "-V", verstr, "-o", str(syx)],
@@ -356,27 +332,42 @@ def wrap(mainos, name, verstr, blurb):
     print(f"           {blurb}")
 
 
-def compose(name, builder, basepath, verstr, blurb, stock, rebuild, wip=False):
-    """One Bugbuild: the feature's image + the bug-fix caves, checked and wrapped."""
-    feature_exclusions.check(name.split("+"), who=f"build_bugbuilds {name}: ")   # a combined base, never
-    if not wip and builder not in FINAL:
-        print(f"---- {name}: {builder} is not promoted to FINAL -- skipped\n")
-        return
-    print(f"════════════ {name} + BATCH_BUGFIXES ════════════" + ("   (WIP)" if wip else ""))
-    if rebuild:
-        r = subprocess.run(["python3", f"tools/{builder}"], capture_output=True,
-                           text=True, cwd=ROOT)
-        if r.returncode != 0:
-            sys.exit(f"{name}: feature builder {builder} failed:\n{r.stdout}\n{r.stderr}")
-    base = ROOT / basepath
-    if not base.exists():
-        sys.exit(f"{name}: missing base image {base} -- run tools/{builder}")
-    img = bytearray(base.read_bytes())
-    if wip:
-        print(f"  WIP base: {builder} is not promoted; this Bugbuild is WIP and is not sealed")
-    elif hashlib.sha256(bytes(img)).hexdigest() != FINAL[builder]:
-        flag(f"{name}: the base image is not {builder}'s promoted build -- it carries "
-             "unpromoted changes")
+def flashables():
+    """The flashable files at the top of out/, with their mtimes."""
+    out = ROOT / "out"
+    return {f: f.stat().st_mtime for f in list(out.glob("OCTATRACK_*.syx")) + list(out.glob("OCTATRACK_*.bin"))}
+
+
+def run_unit(name, builder):
+    """The feature alone (KYOTI_UNIT=1): out/mainos_<feature>.bin. Whatever flashable file the unit run
+    wrapped is deleted -- no image without the bug fixes is left to flash."""
+    before = flashables()
+    env = dict(os.environ, KYOTI_UNIT="1")
+    r = subprocess.run([sys.executable, f"tools/{builder}"], capture_output=True, text=True, cwd=ROOT, env=env)
+    for f, t in flashables().items():
+        if before.get(f) != t:
+            f.unlink()
+    if r.returncode != 0:
+        sys.exit(f"{name}: unit build {builder} failed:\n{r.stdout}\n{r.stderr}")
+    print("\n".join("  | " + l for l in r.stdout.rstrip().splitlines()[-4:]))
+
+
+def compose(name, builder, basepath, verstr, blurb, stock, rebuild=True):
+    """One feature image: the feature's unit + the bug-fix caves, checked, sealed and wrapped."""
+    if name != "BATCH_BUGFIXES":
+        feature_exclusions.check(name.split("+"), who=f"feature_image {name}: ")
+    print(f"════════════ {name} (with the three bug fixes) ════════════")
+    if builder is None:
+        img = bytearray(stock)
+    else:
+        if rebuild:
+            run_unit(name, builder)
+        base = ROOT / basepath
+        if not base.exists():
+            sys.exit(f"{name}: missing unit image {base} -- run KYOTI_UNIT=1 tools/{builder}")
+        img = bytearray(base.read_bytes())
+    outdir = ROOT / "out" / name
+    outdir.mkdir(parents=True, exist_ok=True)
     feat_d = delta(stock, img)
 
     # --- who is already here, and where does each cave go? -----------------------
@@ -413,7 +404,7 @@ def compose(name, builder, basepath, verstr, blurb, stock, rebuild, wip=False):
              for s in need if addrs[s] != BUGFIX[s][0]]
     for m in moved:
         print(f"  relocated: {m}")
-    print(f"  base {base.name}: {len(feat_d)} B vs stock; "
+    print(f"  base {basepath or 'stock'}: {len(feat_d)} B vs stock; "
           f"already present: {', '.join(already) or 'none'}; "
           f"adding: {', '.join(need) or 'none'}")
 
@@ -467,62 +458,55 @@ def compose(name, builder, basepath, verstr, blurb, stock, rebuild, wip=False):
         for stem in dram_pieces:
             off = addrs[stem] - dram.ARENA_BASE
             raw += bytes(off - len(raw)) + link(stem, addrs[stem])[0]
-        append, r = dram.build(bytes(raw), OUTDIR / "_dram" / name.lower(), img)
+        append, r = dram.build(bytes(raw), WORK / "_dram" / name.lower(), img)
         img.extend(append)
         print(f"  DRAM: {', '.join(dram_pieces)} -- {r['raw']:,} B linked at 0x{r['base']:08x}; "
               f"{r['pages']} arena page(s) = {r['reserve_bytes']:,} B of the sample pool; "
               f"loader + payload {r['append']:,} B at 0x{dram.LOADER_AT:08x}")
-    mainos = OUTDIR / f"mainos_{name.lower()}_batch_bugfixes.bin"
+    mainos = outdir / f"mainos_{name.lower()}.bin"
     mainos.write_bytes(bytes(img))
-    if not wip:                         # a WIP Bugbuild is never sealed
-        seal(__file__, mainos)
-    print(f"  wrote    {mainos.relative_to(ROOT)}  "
+    if PROBLEMS:
+        sys.exit(f"{name}: {len(PROBLEMS)} problem(s), not sealed or wrapped:\n  - " + "\n  - ".join(PROBLEMS))
+    seal(__file__, mainos)              # FINAL["feature_image.py"][mainos_<feature>.bin]
+    print(f"  wrote    {mainos.relative_to(ROOT)}  sha256 {hashlib.sha256(bytes(img)).hexdigest()}  "
           f"({len(img):,} B, {len(comp_d)} changed vs stock)")
-    wrap(mainos, name, verstr, blurb)
+    wrap(mainos, name, verstr, blurb, outdir)
+    for f in (outdir / f"OCTATRACK_OS1.40C_{name}.syx", outdir / f"OCTATRACK_{name}.bin"):
+        if f.exists():
+            print(f"  {f.relative_to(ROOT)}  sha256 {hashlib.sha256(f.read_bytes()).hexdigest()}")
     print()
+
+
+def standalone(builder):
+    """kyoti_status.gate()'s hand-off: `builder` was run on its own -> its feature image."""
+    if builder in ELSEWHERE:
+        r = subprocess.run([sys.executable, *ELSEWHERE[builder]], cwd=ROOT)
+        sys.exit(r.returncode)
+    name = BUILDERS[builder]
+    if not STOCK_SECT.exists():
+        sys.exit(f"missing {STOCK_SECT} -- run ./fetch-os.sh and ./analyze.sh first")
+    WORK.mkdir(parents=True, exist_ok=True)
+    compose(name, *FEATURES[name], STOCK_SECT.read_bytes())
+    sys.exit(0)
 
 
 
 def main():
+    """Every feature image (or --only NAME,...): a sweep."""
     rebuild = "--no-rebuild" not in sys.argv
     if not STOCK_SECT.exists():
         sys.exit(f"missing {STOCK_SECT} -- run ./fetch-os.sh and ./analyze.sh first")
     stock = STOCK_SECT.read_bytes()
-    OUTDIR.mkdir(parents=True, exist_ok=True)
     WORK.mkdir(parents=True, exist_ok=True)
-
-    wip = None
-    if "--wip" in sys.argv:
-        k = sys.argv.index("--wip")
-        wip = sys.argv[k + 1] if k + 1 < len(sys.argv) else ""
-        if wip not in WIP_FEATURES:
-            sys.exit(f"--wip {wip!r}: not a WIP base this composer knows ({', '.join(WIP_FEATURES)})")
-        if os.environ.get("KYOTI_ALLOW_WIP") != "1":
-            print(f"\n  Refusing to build: --wip {wip} composes a work-in-progress base, and an image\n"
-                  f"  built from it is not something to flash. If you meant it, set KYOTI_ALLOW_WIP=1:\n\n"
-                  f"      KYOTI_ALLOW_WIP=1 python3 tools/build_bugbuilds.py --wip {wip}\n", file=sys.stderr)
-            sys.exit(2)
-        print("  " + "-" * 72)
-        print(f"  WIP Bugbuild: {wip} only -- not promoted, not sealed, not one of the final seven")
-        print("  " + "-" * 72 + "\n")
-        compose(wip, *WIP_FEATURES[wip], stock, rebuild, wip=True)
-    else:
-        only = None
-        if "--only" in sys.argv:
-            k = sys.argv.index("--only")
-            only = (sys.argv[k + 1] if k + 1 < len(sys.argv) else "").split(",")
-            if not only or set(only) - set(FEATURES):
-                sys.exit(f"--only {','.join(only)}: names must be among {', '.join(FEATURES)}")
-        for name, (builder, basepath, verstr, blurb) in FEATURES.items():
-            if only is None or name in only:
-                compose(name, builder, basepath, verstr, blurb, stock, rebuild)
-
-    print("════════════════════ summary ════════════════════")
-    if PROBLEMS:
-        print(f"  {len(PROBLEMS)} problem(s) flagged:")
-        for q in PROBLEMS:
-            print(f"    - {q}")
-        sys.exit(1)
+    only = None
+    if "--only" in sys.argv:
+        k = sys.argv.index("--only")
+        only = (sys.argv[k + 1] if k + 1 < len(sys.argv) else "").split(",")
+        if not only or set(only) - set(FEATURES):
+            sys.exit(f"--only {','.join(only)}: names must be among {', '.join(FEATURES)}")
+    for name, (builder, basepath, verstr, blurb) in FEATURES.items():
+        if only is None or name in only:
+            compose(name, builder, basepath, verstr, blurb, stock, rebuild)
     print("  no problems flagged")
 
 

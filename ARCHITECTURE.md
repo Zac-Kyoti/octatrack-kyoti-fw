@@ -193,7 +193,7 @@ resolve with that base). Image data/BSS ~`0x400bxxxx`.
 | `string_func_map.py` | function→UI-strings map (619 functions) |
 | `disasm.sh` | radare2 with correct arch/base (m68k BE @ 0x40000400) |
 | `Ghidra*.java` | headless decompilation scripts (Ghidra 12, Coldfire language) |
-| `build_*.py` | the guarded binary-patch builders, one per feature, plus `build_bugbuilds.py` for the composites — see [`BUILD_KYOTI.md`](BUILD_KYOTI.md) |
+| `build_*.py` | the guarded binary-patch builders, one per feature; each feature image is the unit + the three bug fixes, composed by `feature_image.py` — see [`BUILD_KYOTI.md`](BUILD_KYOTI.md) |
 | `patch_*.s` / `patch_sc_dsp3.asm` | the ColdFire and DSP56300 patch sources each builder assembles into a code cave |
 | `emu_*.py` | Unicorn emulators running the real image bytes, one per feature; `emu_rtos.py` wraps a full-firmware run (real scheduler, tasks, CF card) |
 | `diag_*.py` | targeted measurement harnesses — the tools that settle "what does stock actually do here", usually against real hardware-exported projects |

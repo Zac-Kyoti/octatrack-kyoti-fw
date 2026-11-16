@@ -23,6 +23,12 @@ that seal() prints into FINAL, and give the feature its entry in README.md.  Whe
 promoted build is a new builder rather than an update in place, it takes the old one's
 FINAL entry and the old builder is deleted.
 
+FEATURE IMAGES (the author, 2026-11-15): every feature ships WITH the three bug fixes. A feature
+builder run on its own hands off from gate() to tools/feature_image.py, which builds the feature
+as a UNIT (KYOTI_UNIT=1: the feature alone, pinned under its builder, never wrapped for flashing)
+and composes the fixes onto it (pinned under "feature_image.py"). build_kyoti.py runs units with
+KYOTI_PLACE set, which also means unit.
+
 The gate is a courtesy, not a lock -- this is a public repo.  Read FLASHING.md before you
 flash anything, whatever the gate says.
 """
@@ -36,7 +42,7 @@ ALLOW_ENV = "KYOTI_ALLOW_WIP"
 # writes several images maps to {image file name: sha256}, one per promoted image.
 FINAL = {
     "build_mute_modes.py":                 "7d48737df97465df74bebad88e2b92592b96beed1c1e066b597c840c03cbb137",
-    "build_direct_jump_kyoti.py":          "3fa14332d95eda55f56de5935afbd988a7179666ae9d8bc2614c1cc7c9f8a896",
+    "build_direct_jump_kyoti.py":          "7c6131e7bfea8fb416a0f84a13b15ad594789b4bee04164fdbde5fc6d2348930",
     "build_sidechain_compressor.py":       "44465569a6118a9a7936c83d0f728a5f8c81122c42433a7cdaf267206e99f2fc",
     "build_reload_from_project.py":        "fc25a9943a7aa1c5e1a6d2e08733ce3a67d366d49b8f4dcc5da1d9a27051880b",
     "build_quantize_live_rec_toggle.py":   "2012abd83f75336ddc73925f0a3ebb8de16ed3ea24b4c28d226e35ef99c2a6f4",
@@ -44,20 +50,23 @@ FINAL = {
     "build_midi_plays_free_fix.py":        "672158c18630703cc1aadc635d45aeb68549a3237830d5c4a0aeb2d113afad35",
     "build_empty_pattern_led_fix.py":      "0e50306d8c242cf0365f2df3e09998be5db3b92a4cc95d5d17e590d9cc36b266",
     "build_rec_trig_mute.py":              "60e97fb35e255f2a1f19eac84dd463058788b7fcdb481110459aa8b9f8f1cffc",
-    "build_bugbuilds.py": {
-        "mainos_mute_modes_batch_bugfixes.bin":              "857d80d3d84f0eecb9bbc23944f83d03f5cf2d6f5934247c183710bb440196b4",
-        "mainos_quantize_live_rec_toggle_batch_bugfixes.bin":"df4a24981ace4a163723ab394bf564c9ccd8b4593ba40c9d5461da36fbd226a4",
-        "mainos_sidechain_compressor_batch_bugfixes.bin":    "4febe2e60f3ca36df8bac50e291c99f54450adbce188d0f08c5a954b9f48f917",
-        "mainos_erase_empty_trigless_locks_batch_bugfixes.bin":"db348f68a32adcc195208e46f6c964d0a5714ba41c1d8c4f2fad6beb2d122922",
-        "mainos_reload_from_project_batch_bugfixes.bin":     "188ec12cb47b1725fa7860b6a0f3dc816a5b5753cdce688710cc72cff8afee95",
-        "mainos_direct_jump_kyoti_batch_bugfixes.bin":       "2cc151e7f9fa7568eca7d1e50d06ed179ff36ffa28f85fe59ce27295917ca21a",
-        "mainos_rec_trig_mute_batch_bugfixes.bin":           "dac87abd3d70f6074438f450b492cd4a004f2aeca66fe9969743ebc8ab9dc556",
-        "mainos_blackpyramids_303_batch_bugfixes.bin":       "ca3089ca53aabba09f065d67eab9e21078bf9ea6d2a41ead89df05ece9b1212e",
-        "mainos_varispeed_batch_bugfixes.bin":               "c3af514f52feb1c46747736d7a6151b5109f664b2561278f37d01e99d8f10663",
-        "mainos_varispeed_emus_batch_bugfixes.bin":          "52823ea6714036808037757ff49e2e6bcf4cc3d2ebe1ced1f2f0810ac9781943",
+    "feature_image.py": {                         # each feature + the three bug fixes (out/<FEATURE>/)
+        "mainos_mute_modes.bin":                             "857d80d3d84f0eecb9bbc23944f83d03f5cf2d6f5934247c183710bb440196b4",
+        "mainos_quantize_live_rec_toggle.bin":               "df4a24981ace4a163723ab394bf564c9ccd8b4593ba40c9d5461da36fbd226a4",
+        "mainos_sidechain_compressor.bin":                   "4febe2e60f3ca36df8bac50e291c99f54450adbce188d0f08c5a954b9f48f917",
+        "mainos_erase_empty_trigless_locks.bin":               "db348f68a32adcc195208e46f6c964d0a5714ba41c1d8c4f2fad6beb2d122922",
+        "mainos_reload_from_project.bin":                    "188ec12cb47b1725fa7860b6a0f3dc816a5b5753cdce688710cc72cff8afee95",
+        "mainos_direct_jump_kyoti.bin":                      "167b088291b503f23e7145c525163bb39cee551c26c83b43e6aa1eed9f189a07",
+        "mainos_rec_trig_mute.bin":                          "dac87abd3d70f6074438f450b492cd4a004f2aeca66fe9969743ebc8ab9dc556",
+        "mainos_blackpyramids_303.bin":                      "ca3089ca53aabba09f065d67eab9e21078bf9ea6d2a41ead89df05ece9b1212e",
+        "mainos_varispeed.bin":                              "c3af514f52feb1c46747736d7a6151b5109f664b2561278f37d01e99d8f10663",
+        "mainos_varispeed_emus.bin":                         "52823ea6714036808037757ff49e2e6bcf4cc3d2ebe1ced1f2f0810ac9781943",
+        "mainos_batch_bugfixes.bin":                         "0cf328357bf8c7c222de2c6e6a284e29b6f8572019b1485373a39e3f604cbef6",
     },
     "build_kyoti.py": {
-        "mainos_kyoti_v1.7.bin":                             "ee151d9c5802a8087ccf074749007536f0430102bd1650ea4cfd85060157afd4",
+        "mainos_kyoti_v1.8.bin":                             "aa81ddfb5acf63b522985a5670719d837268be666865fee5c95709c522ecfebd",
+        "mainos_kyoti_v1.8c.bin":                            "32108f95840db5e105e242f5b14c0dfe0d3f4baa18cbb9f95c710d59895cfbb8",
+        "mainos_clyps.bin":                                  "b88bd4bd339f6e6132be4c11080789270b804e728e37a318ea2a5fb142e7361b",
     },
     "build_blackpyramids_303.py":          "5b7dfb2f8359e0490c44cb92372e481e6750345ff4db72982ac8cc556893810a",
     "build_part_change_carryover_fix.py":  "dd2a7e2ba3328364caa560e431195fd248cbb5d83dce1759de1e7e3effc5febd",
@@ -88,13 +97,24 @@ def _refuse(why, builder):
     sys.exit(2)
 
 
+def unit_mode():
+    """True when a composer (feature_image.py, build_kyoti.py) drives this builder."""
+    return os.environ.get("KYOTI_UNIT") == "1" or "KYOTI_PLACE" in os.environ
+
+
 def gate(builder, note=""):
     """Say whether `builder` is FINAL or WIP; refuse a WIP build without the opt-in.
 
     `note` is free text shown with a WIP banner -- what is unfinished, specifically.
     Call it at the top of a builder, before it reads the stock image or writes anything.
+    A feature builder run on its own hands off here to its feature image (feature_image.py).
     """
     name = os.path.basename(builder)
+    if not unit_mode():
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import feature_image
+        if name in feature_image.BUILDERS or name in feature_image.ELSEWHERE:
+            feature_image.standalone(name)          # exits
     if name in FINAL:
         _banner([f"{name}  --  FINAL"], sys.stdout)
         print()

@@ -56,9 +56,9 @@ carryover bugs occur on her Kit change is untested.
 
 MEASURED: bugs 1 and 3 hardware-confirmed on the author's MKI; bug 2's original fix
 too, and its current version confirmed on hardware to end the [BANK]-held stall (its
-[PTN] answers emulator-verified identical to the original). Standalone images:
-tools/build_midi_plays_free_fix.py, tools/build_empty_pattern_led_fix.py, tools/build_part_change_carryover_fix.py.
-tools/build_bugbuilds.py composes all three onto each finished feature image and
+[PTN] answers emulator-verified identical to the original). In this repo the
+three ship together (tools/build_batch_bugfixes.py), and
+tools/feature_image.py composes all three onto every feature image and
 asserts on every run that the composite's changes are the disjoint union of the
 feature's and the fixes' own.
 """

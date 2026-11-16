@@ -45,6 +45,8 @@ reference/handoffs/REPITCH_*
 [kyoti-v1]
 tools/build_kyoti.py
 tools/dram/*
+tools/feature_image.py
+tools/build_batch_bugfixes.py
 
 [rec-trig-mute]
 tools/*rec_trig_mute*

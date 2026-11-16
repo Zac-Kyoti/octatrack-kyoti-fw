@@ -72,7 +72,7 @@ if DIAG:
     if len(sys.argv) <= 2:
         TOAST_DUR = 0x88
 
-CAVE_DJ = kyoti_place.at("patch_directjump_v7", 0x400d6800)     # V7.2: down from 0x400d7000 (the per-track publish needs room; V7.0.1 came from 0x400d7400; zero in stock, vetted zone, caves.md §2b; the Bugbuild keeps 0x400d6500.. for its fixes)
+CAVE_DJ = kyoti_place.at("patch_directjump_v7", 0x400d6800)     # V7.2: down from 0x400d7000 (the per-track publish needs room; V7.0.1 came from 0x400d7400; zero in stock, vetted zone, caves.md §2b; the feature image keeps 0x400d6500.. for its fixes)
 FREE_END = 0x400d7c3c
 # build_kyoti.py may carry this unit in DRAM (tools/dram/, as RELOAD_FROM_PROJECT's): linked at the DRAM
 # address it is given and NOT written into this image -- only its detours and the [PTN]-layer record are;

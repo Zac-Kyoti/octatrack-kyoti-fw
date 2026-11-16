@@ -38952,3 +38952,37 @@ unchanged. Still WIP (not promoted).
   power-on (cued) and toggled with [PTN] + [YES]; manual header now marks it a living document; §11 rewritten.
 - Manual committed on trkseq as a DRAFT (the author, 2026-11-15: commit on trkseq only, no push; the kyoti-v18 merge
   carries it to main). "Draft for review" stays until the author approves the full draft.
+
+## 2026-11-15 (`kyoti-v18`) — KYOTI V1.8 + V1.8C, DIRECT JUMP V7.2.2, CLYPS FINAL; every feature image carries the bug fixes
+
+- **Merged:** trkseq (Clyps CL38 + the manual draft, c87c291) and dj-clyps (DIRECT JUMP V7.2.2) onto origin/main.
+  Conflicts: build_kyoti.py (kept both: the KYOTI_VERSTR line + feature_exclusions.check), FLASHING.md (both
+  lists), patch_directjump_v7.s (dl_commit: dj-clyps' spflush first, then Clyps' DJ_SELFHOOK -- the order DJC9 was
+  built with; the merged file == out/scratch-kc38's byte for byte). The merged tree rebuilt DJC9 exactly (mainos
+  32108f95…, syx 09825a2c…). OS VERSION is applied at wrap only, so a renamed image keeps its mainos.
+- **The author's decisions:** (1) DJC9 = KYOTI V1.8C ("KYOTI 1.8C"); (2) a second KYOTI V1.8 without Clyps (RELOAD +
+  DIRECT JUMP V7.2.2); (3) DIRECT JUMP V7.2.2 FINAL; (4) Clyps never ships without DIRECT JUMP: its standalone =
+  CLYPS + DIRECT_JUMP_KYOTI + BATCH_BUGFIXES; (5) no standalone without the three bug fixes: the Bugbuilds become the
+  feature builds (no "Bugbuild" name); (6) everything promoted now, README hardware lines say what was flashed;
+  (7) BLACKPYRAMIDS_303: "adapted from Open303", not "built on" (c16ce2c, text only).
+- **Mechanism:** `kyoti_status.gate()` hands a feature builder run on its own to `tools/feature_image.py` (git mv of
+  build_bugbuilds.py): it runs the builder as a UNIT (KYOTI_UNIT=1; KYOTI_PLACE also means unit), deletes whatever
+  flashable file that run wrapped, composes the three fixes (the same interlock proof) and writes out/<FEATURE>/.
+  Pins: units under their builders (unchanged), images under "feature_image.py" (the old Bugbuild shas, re-keyed
+  mainos_<feature>.bin). New OS VERSIONs 140C_MM / _SC / _RL / _QLR / _TL / _KDJ7 / _RTM / _BP303 / _VARI1 / _VEM10.
+  `build_batch_bugfixes.py` (and each fix builder) = BATCH_BUGFIXES, the three on stock, 140C_FIXES. `build_clyps.py`
+  -> `build_kyoti.py --clyps-standalone`. The harnesses' bare images (out/mainos_<feature>.bin) are still written.
+- **build_kyoti.py:** default KYOTI V1.8 (FEATURES as V1.7, RELOAD in DRAM, 11 pages); `--clyps` V1.8C (RELOAD out,
+  CLYPS last, the DJC9 composition); `--clyps-standalone` CLYPS (V1.8C cut to CLYPS_IMAGE; its DRAM payload, DJ +
+  Clyps 32,496 B at the same addresses, is byte-identical to V1.8C's; SPRING/PERSONALIZE/DELAY stock). UNIT_ONLY lets
+  build_clyps.py (never promoted itself) run inside a composition. V1.7 tag: ref/kyoti-v1.7-2026-11-09 (27ab725,
+  rebuilt there: ee151d9c…).
+- **FINAL (all re-run without the opt-in):** KYOTI V1.8 mainos aa81ddfb… (syx 2ca938da…), V1.8C 32108f95… (syx
+  7531b658…), CLYPS b88bd4bd… (syx 585e5a21…); DIRECT JUMP unit 7c6131e7… (as flashed as 140C_KDJ7, syx 81014221…),
+  its image 167b0882…; BATCH_BUGFIXES 0cf32835…; MM 857d80d3, QLR df4a2498, SC 4febe2e6, TL db348f68, RL 188ec12c,
+  RTM dac87abd, VARI c3af514f, VEM 52823ea6 (unchanged). BLACKPYRAMIDS_303 not rebuilt (another session's; its pins
+  only re-keyed).
+- **Flashed as such:** KYOTI V1.8C (as DJC9), MUTE_MODES' image (as BUG_MUTEDT). Not: KYOTI V1.8, CLYPS, BATCH_BUGFIXES
+  and the other feature images.
+- **Left without the fixes, by earlier request:** DIRECT JUMP V6.4, SIDECHAIN_COMPRESSOR light, sysex/'s
+  MIDI_PLAYS_FREE_FIX hunks -- asked the author.

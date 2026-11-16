@@ -35,7 +35,11 @@ by Maxolydian and other Octatrack RE projects — full credits in [`CREDITS.md`]
 You bring your own copy of the official **OS 1.40C**; the tools here turn it into a
 modified image, byte-for-byte reproducibly from *your* copy. No Elektron binary is
 included or distributed. Every feature is **off by default** — a freshly flashed unit
-behaves like stock until you opt in. The bug fixes are always on.
+behaves like stock until you opt in.
+
+**Every image carries the three [BATCH_BUGFIXES](#batch_bugfixes)**, always on: each feature's
+own build, the BATCH_BUGFIXES build and both KYOTI images. There is no build of a feature
+without them.
 
 How to build: [`BUILD_KYOTI.md`](BUILD_KYOTI.md). How to flash, and how to get back to
 stock: [`FLASHING.md`](FLASHING.md).
@@ -73,9 +77,9 @@ Choose how an audio track's mute behaves, in **PERSONALIZE → MUTE MODE**:
 SOLO follows the same rule as a manual mute; `CUE MUTES TRK` stays a hard cut. The
 setting survives a power cycle.
 
-**Hardware:** confirmed.\
+**Hardware:** confirmed (this image).\
 **Final build:** [`tools/build_mute_modes.py`](tools/build_mute_modes.py) →
-`OCTATRACK_OS1.40C_MUTE_MODES`
+`out/MUTE_MODES/OCTATRACK_OS1.40C_MUTE_MODES`
 
 ### DIRECT_JUMP_KYOTI
 
@@ -83,17 +87,21 @@ An optional immediate pattern change, toggled with **`[PTN]` + `[YES]`** (a toas
 confirms; it is OFF at every power-on). A cued pattern takes over on the next step
 instead of waiting for the current one to finish, **locked to the master clock**: it
 plays exactly where it would be had it been running since START, whatever its track
-lengths, scales or master settings. The Part, START SILENT and trig conditions change as
-on a stock pattern change, and the last MIDI Program Change sent always names the
-pattern that plays. The arranger and chains are untouched; with DIRECT JUMP off, pattern
-changes are stock. The image also carries BATCH_BUGFIXES' MIDI Plays-Free fix, which
-keeps a stock bug from feeding DIRECT JUMP a bad scale.
+lengths, scales or master settings. The Part and START SILENT change as on a stock pattern
+change, but each track's new sound settings take over with its first trig that actually
+plays, never on a sound still ringing from the old pattern. Trig conditions (`1:2`, `PRE`,
+`FILL`) carry on as if the new pattern had been playing since START instead of starting
+again. With SILENCE TRACKS on, a track the jump silences fades out just before the step
+instead of popping. The last MIDI Program Change sent always names the pattern that plays.
+The arranger and chains are untouched; with DIRECT JUMP off, pattern changes are stock. It
+does not combine with CLYPS, which has it built in.
 
-**Hardware:** confirmed: the clock-locked timing and the Part change. Not yet tested on
-hardware: MIDI tracks, Program Change on fast re-cues, START SILENT, and the trig-condition
-reset.\
+**Hardware:** confirmed: the clock-locked timing, the Part change, trig conditions and the
+SILENCE TRACKS fade (on its own, and in KYOTI V1.8C). Not specifically tested: MIDI tracks,
+Program Change on fast re-cues, START SILENT. This image, with the three bug fixes, not
+flashed as such.\
 **Final build:** [`tools/build_direct_jump_kyoti.py`](tools/build_direct_jump_kyoti.py) →
-`OCTATRACK_OS1.40C_DIRECT_JUMP_KYOTI`
+`out/DIRECT_JUMP_KYOTI/OCTATRACK_OS1.40C_DIRECT_JUMP_KYOTI`
 
 ### SIDECHAIN_COMPRESSOR
 
@@ -131,9 +139,9 @@ still uses it loads it as NONE.
 > [`tools/build_sidechain_compressor_light.py`](tools/build_sidechain_compressor_light.py)
 > builds it behind the WIP gate (`KYOTI_ALLOW_WIP=1`, see above); OS VERSION reads `140C_SCLT`.
 
-**Hardware:** confirmed.\
+**Hardware:** the feature confirmed; this image, with the three bug fixes, not flashed as such.\
 **Final build:** [`tools/build_sidechain_compressor.py`](tools/build_sidechain_compressor.py) →
-`OCTATRACK_OS1.40C_SIDECHAIN_COMPRESSOR`
+`out/SIDECHAIN_COMPRESSOR/OCTATRACK_OS1.40C_SIDECHAIN_COMPRESSOR`
 
 ### BLACKPYRAMIDS_303
 
@@ -177,9 +185,9 @@ calibration and voicing are by Zac Kyoti, every choice made by ear, as is the ha
 Open303's and what is new, every voicing decision and full attribution:
 [`reference/BLACKPYRAMIDS_303.md`](reference/BLACKPYRAMIDS_303.md) and [`CREDITS.md`](CREDITS.md).
 
-**Hardware:** confirmed.\
+**Hardware:** the feature confirmed; this image, with the three bug fixes, not flashed as such.\
 **Final build:** [`tools/build_blackpyramids_303.py`](tools/build_blackpyramids_303.py) →
-`OCTATRACK_OS1.40C_BLACKPYRAMIDS_303`
+`out/BLACKPYRAMIDS_303/OCTATRACK_OS1.40C_BLACKPYRAMIDS_303`
 
 ### VARISPEED
 
@@ -193,9 +201,9 @@ editor → ATTR) is VARI plays the same way.
 - Above twice the sample's own speed, it folds down an octave.
 - A sample or project tempo outside 30–300 BPM plays as `TSTR` OFF.
 
-**Hardware:** confirmed.\
+**Hardware:** the feature confirmed; this image, with the three bug fixes, not flashed as such.\
 **Final build:** [`tools/build_varispeed.py`](tools/build_varispeed.py) →
-`OCTATRACK_OS1.40C_VARISPEED`
+`out/VARISPEED/OCTATRACK_OS1.40C_VARISPEED`
 
 ### VARISPEED_EMUS
 
@@ -214,9 +222,9 @@ onto VARI plays `OT`.
 The DSP space comes from **SPRING REVERB**, which leaves both FX lists; a project that still
 uses it loads it as NONE.
 
-**Hardware:** confirmed.\
+**Hardware:** the feature confirmed; this image, with the three bug fixes, not flashed as such.\
 **Final build:** [`tools/build_varispeed_emus.py`](tools/build_varispeed_emus.py) →
-`OCTATRACK_OS1.40C_VARISPEED_EMUS`
+`out/VARISPEED_EMUS/OCTATRACK_OS1.40C_VARISPEED_EMUS`
 
 ### RELOAD_FROM_PROJECT
 
@@ -235,11 +243,42 @@ every track carried on where the saved pattern would be. Several reloads in a ro
 latest one for a track wins. Stopped, a reload applies at once. A toast confirms each reload as it
 lands. A track's reloaded sound settings take over with its first trig that actually plays, never on a
 sound still ringing, and trig conditions (`1:2`, `PRE`, `FILL`) carry on as if the saved sequence had
-played all along. `[CUE]` + `[TRACK n]` stays stock.
+played all along. `[CUE]` + `[TRACK n]` stays stock. It does not combine with CLYPS, which carries
+its own card reloads.
 
-**Hardware:** confirmed.\
+**Hardware:** the feature confirmed; this image, with the three bug fixes, not flashed as such.\
 **Final build:** [`tools/build_reload_from_project.py`](tools/build_reload_from_project.py) →
-`OCTATRACK_OS1.40C_RELOAD_FROM_PROJECT`
+`out/RELOAD_FROM_PROJECT/OCTATRACK_OS1.40C_RELOAD_FROM_PROJECT`
+
+### CLYPS
+
+A clip launcher and reload suite for the Octatrack, in the spirit of Ableton Live's Session
+view. Every pattern in a bank holds a sequence for each track; Clyps treats each of those as
+a clip. While the pattern plays, load any other pattern's sequence onto one track, alone or
+with its sound (machine, sample, FX and settings from that pattern's Part), and the other
+tracks carry on untouched. Whatever you load, you can put back: the track as originally
+loaded, a temp save you took with a key press, or the project as saved on the card.
+
+Press **`[PTN]` + `[BANK]`** together to open Clyps (`[NO]` closes it): the screen and the trig keys
+show the active track's sequence in all 16 patterns of the bank. A trig loads that slot; **`[FUNC]`** +
+trig loads it with its sound; your own pattern's trig puts the original back. Inside and outside Clyps, **`[TRACK]` + `[YES]`**
+temp-saves a track and **`[TRACK]` + `[NO]`** puts the temp save back; **`[PTN]`** / **`[BANK]`** +
+`[TRACK]` reload a track's sequence (and sound) from the card.
+
+**Direct Jump Kyoti is built in.** With it off (as at power-on), Clyps keeps stock timing: a new
+load is cued and lands where a pattern change would. Turn it on with **`[PTN]` + `[YES]`** and loads
+are legato: they take over on the track's next step, in time, as fast as you can press trigs.
+Putting something back is always legato. There is nothing to add: Clyps cannot be combined with
+DIRECT_JUMP_KYOTI or RELOAD_FROM_PROJECT (the builders refuse), because it carries both jobs itself.
+
+Clyps keeps its originals and working copies in sample memory, about 10 MB of the 85.5 MB.
+Everything else, from groups to peeking at a parameter page, is in the
+**[Clyps user manual](docs/clyps/MANUAL.md)**, a living document that will keep changing.
+
+**Hardware:** confirmed in KYOTI V1.8C. This image (Clyps, Direct Jump Kyoti and the three bug
+fixes) not flashed as such.\
+**Final build:** [`tools/build_clyps.py`](tools/build_clyps.py) →
+`out/CLYPS/OCTATRACK_OS1.40C_CLYPS`, and in [KYOTI V1.8C](#kyoti-v18c), below.
 
 ### QUANTIZE_LIVE_REC_TOGGLE
 
@@ -249,9 +288,9 @@ Tap `[PLAY]` again **while the toast is up** to invert it; if PERSONALIZE is ope
 mark follows. Once the toast has gone (1 s), a tap just shows the setting again. The first
 `[REC]` + `[PLAY]` still starts live recording as on stock.
 
-**Hardware:** confirmed.\
+**Hardware:** the feature confirmed; this image, with the three bug fixes, not flashed as such.\
 **Final build:** [`tools/build_quantize_live_rec_toggle.py`](tools/build_quantize_live_rec_toggle.py) →
-`OCTATRACK_OS1.40C_QUANTIZE_LIVE_REC_TOGGLE`
+`out/QUANTIZE_LIVE_REC_TOGGLE/OCTATRACK_OS1.40C_QUANTIZE_LIVE_REC_TOGGLE`
 
 ### ERASE_EMPTY_TRIGLESS_LOCKS
 
@@ -259,9 +298,9 @@ A trigless lock — a step with parameter locks but no audible trig — now disa
 the trig row once you erase its last lock, instead of staying lit. One placed
 deliberately with `FUNC` + `TRIG` is left alone.
 
-**Hardware:** confirmed.\
+**Hardware:** the feature confirmed; this image, with the three bug fixes, not flashed as such.\
 **Final build:** [`tools/build_erase_empty_trigless_locks.py`](tools/build_erase_empty_trigless_locks.py) →
-`OCTATRACK_OS1.40C_ERASE_EMPTY_TRIGLESS_LOCKS`
+`out/ERASE_EMPTY_TRIGLESS_LOCKS/OCTATRACK_OS1.40C_ERASE_EMPTY_TRIGLESS_LOCKS`
 
 ### REC_TRIG_MUTE
 
@@ -282,52 +321,47 @@ track's channel. Both need AUDIO CC IN / OUT on, as for every audio-track CC. `[
 `[YES]` / `[NO]` arm and disarm recorder one-shot trigs as on stock.
 
 **Hardware:** confirmed in KYOTI V1.6 (`[TRACK]` + `[REC]`, the per-track toggle, the toast).
-MIDI CC 80 not specifically tested.\
+MIDI CC 80 not specifically tested. This image, with the three bug fixes, not flashed as such.\
 **Final build:** [`tools/build_rec_trig_mute.py`](tools/build_rec_trig_mute.py) →
-`OCTATRACK_OS1.40C_REC_TRIG_MUTE`
+`out/REC_TRIG_MUTE/OCTATRACK_OS1.40C_REC_TRIG_MUTE`
 
 ### BATCH_BUGFIXES
 
-Three fixes to stock bugs. Each has its own build.
+Three fixes to stock bugs. Every image here carries all three; this build is the three alone.
 
 - **MIDI_PLAYS_FREE_FIX** — a Plays-Free MIDI track with trig quantize *Direct* and
-  pattern scale *Per Track* no longer stalls after its first step on a manual trig.\
-  **Hardware:** confirmed. **Final build:**
-  [`tools/build_midi_plays_free_fix.py`](tools/build_midi_plays_free_fix.py)
+  pattern scale *Per Track* no longer stalls after its first step on a manual trig.
 - **EMPTY_PATTERN_LED_FIX** — a pattern whose only content is parameter locks now lights
-  its grid LED under `[PTN]`, instead of showing as an unused slot.\
-  **Hardware:** confirmed. **Final build:**
-  [`tools/build_empty_pattern_led_fix.py`](tools/build_empty_pattern_led_fix.py) →
-  `OCTATRACK_OS1.40C_EMPTY_PATTERN_LED_FIX`
+  its grid LED under `[PTN]`, instead of showing as an unused slot.
 - **PART_CHANGE_CARRYOVER_FIX** — after a pattern-triggered Part change, a track leaving
   PICKUP for FLEX no longer keeps playing the old Part's pickup loop, and a switch into a
-  PICKUP track no longer marks the Part edited when nothing changed.\
-  **Hardware:** confirmed. **Final build:**
-  [`tools/build_part_change_carryover_fix.py`](tools/build_part_change_carryover_fix.py) →
-  `OCTATRACK_OS1.40C_PART_CHANGE_CARRYOVER_FIX`
+  PICKUP track no longer marks the Part edited when nothing changed.
 
-### Each feature + BATCH_BUGFIXES
+**Hardware:** each fix confirmed; this image of the three together not flashed as such.\
+**Final build:** [`tools/build_batch_bugfixes.py`](tools/build_batch_bugfixes.py) →
+`out/BATCH_BUGFIXES/OCTATRACK_OS1.40C_BATCH_BUGFIXES`
 
-One image per feature above, with all three BATCH_BUGFIXES folded in — ten images, for
-flashing a single feature without giving up the bug fixes. The features are not combined
-with each other.
+### KYOTI V1.8
 
-**Hardware:** every ingredient is confirmed on its own; these combined images have not been
-flashed as such.\
-**Final build:** [`tools/build_bugbuilds.py`](tools/build_bugbuilds.py) →
-`out/Bugbuilds/OCTATRACK_OS1.40C_<FEATURE>_BATCH_BUGFIXES`
+Every feature above except BLACKPYRAMIDS_303, VARISPEED_EMUS and CLYPS in **one image**:
+RELOAD_FROM_PROJECT and DIRECT_JUMP_KYOTI side by side. The boot splash and SYSTEM STATUS →
+OS VERSION read `KYOTI V1.8`. It replaces KYOTI V1.7 and earlier, and the withdrawn V1.0
+(see below). A COMPRESSOR saved with V1.5 or earlier keeps its `KEY`; set its `KGN`, `KBAS`,
+`KWID` and `MON` again.
 
-### KYOTI V1.7
+**Hardware:** each feature confirmed; this combined image not flashed as such.\
+**Final build:** [`tools/build_kyoti.py`](tools/build_kyoti.py) →
+`out/KYOTI/OCTATRACK_OS1.40C_KYOTI_V1.8`
 
-Every feature above except BLACKPYRAMIDS_303 and VARISPEED_EMUS, and all three
-BATCH_BUGFIXES, in **one image**. The boot splash and SYSTEM STATUS → OS VERSION read
-`KYOTI V1.7`. It replaces KYOTI V1.6 and earlier, and the withdrawn V1.0 (see below). A
-COMPRESSOR saved with V1.5 or earlier keeps its `KEY`; set its `KGN`, `KBAS`, `KWID` and `MON`
-again.
+### KYOTI V1.8C
+
+KYOTI V1.8 with CLYPS in RELOAD_FROM_PROJECT's place: Clyps, with Direct Jump Kyoti built in,
+carries its own card reloads. OS VERSION reads `KYOTI 1.8C`. Clyps keeps about 10 MB of
+sample memory.
 
 **Hardware:** confirmed (this combined image).\
-**Final build:** [`tools/build_kyoti.py`](tools/build_kyoti.py) →
-`out/KYOTI/OCTATRACK_OS1.40C_KYOTI_V1.7`
+**Final build:** [`tools/build_kyoti.py`](tools/build_kyoti.py) `--clyps` →
+`out/KYOTI/OCTATRACK_OS1.40C_KYOTI_V1.8C`
 
 ---
 
@@ -335,14 +369,14 @@ again.
 
 **KYOTI V1.0 (the earlier all-in-one image) is withdrawn as of 2026-10-06.** It can crash
 the unit when an encoder is turned on an FX page set to NONE, and when T8's PLAYBACK or LFO
-page is shown with T8 as MASTER. If you flashed it, flash KYOTI V1.7 above, one of the
+page is shown with T8 as MASTER. If you flashed it, flash KYOTI V1.8 or V1.8C above, one of the
 single-feature builds, or stock OS 1.40C. None of those has this problem.
 
-**KYOTI V1.2 breaks PLATE REVERB** (a damaged page, and its knobs do nothing). Flash KYOTI V1.7.
+**KYOTI V1.2 breaks PLATE REVERB** (a damaged page, and its knobs do nothing). Flash KYOTI V1.8 or V1.8C.
 
 **KYOTI V1.1–V1.6 change the stock DELAY's tone**, and so does the VARISPEED_EMUS + BATCH_BUGFIXES
-image (`BUG_VEM10`) built before 2026-11-02: at most BASE / WDTH settings, the defaults included, the
-repeats are filtered darker than on stock. Flash KYOTI V1.7, or rebuild `BUG_VEM10`.
+image (OS VERSION `BUG_VEM10`) built before 2026-11-02: at most BASE / WDTH settings, the defaults included, the
+repeats are filtered darker than on stock. Flash KYOTI V1.8 or V1.8C, or rebuild VARISPEED_EMUS.
 
 **This is for personal study.** Updating an Elektron unit with anything other than
 official firmware is risky: it puts the warranty in question and can leave the unit

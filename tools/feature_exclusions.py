@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: 2026 Zac Kyoti
 """
 Feature pairs that must never share an image (the user, 2026-11-07), checked by every builder that
-combines named features (build_kyoti.py, build_bugbuilds.py).
+combines named features (build_kyoti.py, feature_image.py).
 
   CLYPS + RELOAD_FROM_PROJECT   never: Clyps carries its own card reloads (scope §1.8) on the same
                                 [PTN] / [BANK] handler sites (0x4005a044, 0x4007af80, 0x4007b3e0) and
