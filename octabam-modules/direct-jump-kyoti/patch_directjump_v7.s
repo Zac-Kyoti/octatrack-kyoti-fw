@@ -26,6 +26,8 @@
 | ahead with a half-tick margin.  V7.0.x landed ON the boundary tick, where the outgoing boundary
 | event tied the sample clock exactly (+0.0000 tick) and only `bmi` decided it.  The new step
 | fires exactly where the old boundary event would have (REF-LOCK unchanged).
+| V7.2.2 (2026-11-15, WIP, hardware A/B): the tracks the switch will silence are released with stock's
+| note-off on the tick after the landing (dj_relsil), so SILENCE TRACKS' hard kill lands on faded voices.
 | V7.1.1 (2026-11-13): stock's wrap-change never takes a cue DIRECT JUMP has armed (dj_hide).
 | V7.2 (2026-11-13, WIP): each track's own Part reaches the engine with its first sounding trig of
 | the incoming pattern (dj_sparm .. dj_mapply); the jump keeps the Part-wide items.
@@ -165,6 +167,7 @@
     .equ MBANK,       0x8000666e        | byte[8] bank / [8+m] Part the MIDI track's values came from
     .equ MZERO,       0x8000664e        | long[8], cleared by stock's apply
     .equ M_REC,       0x48d0            | pattern blob: MIDI track 0's record (+ m * M_STRIDE)
+    .equ NOTE_OFF,    0x40008f84        | (t): stock's note-off -- the release with the DSP's declick (STOP)
     .equ MSG_PAT,     0x400d816b        | message 0x11: {code, pattern, 1} -- stock's WRAP-CHANGE
     .equ MSG_PAT_ARG, 0x400d816c        |   post @0x400a4b9a.  NOT 0x400d8164 -- see dl_commit.
 
@@ -321,6 +324,7 @@ dt_done:
     cmpi.b  #ST_FIXUP,%d0
     bne.b   dl_notfix
     bsr.w   dl_fixup                   | the tick after a landing: reload := reference value
+    bsr.w   dj_relsil                  | V7.2.2: release the tracks the switch will silence
     clr.b   dj_state
     bra.w   dl_done
 dl_notfix:
@@ -1184,6 +1188,34 @@ pg_next:
     moveq   #8,%d0
     cmp.l   %d6,%d0
     bne.b   pg_trk
+    rts
+
+| dj_relsil (V7.2.2, 2026-11-15, hardware A/B; the user's SILENCE TRACKS pop): the switch silences every
+| audio track whose START SILENT / SILENCE TRACKS bit the hand-off set (dj_silA bits 8..15) with a HARD kill
+| (0x40006820 from 0x4000d45a, measured: no fade). Stock's change masks it with the new pattern's step-0
+| trigs; a jump landing on a step without a trig left the cut bare (ot_emu render, OT DEMO A05 -> A03: 2nd
+| difference 0.169 at the switch vs 0.028 without one). Release those tracks first with stock's note-off --
+| the release STOP and MUTE_MODES OTFX-T use, the DSP's own declick fade -- so the kill lands on faded voices.
+| Called on the tick after the landing (the boundary tick's phase D): the sequencer runs about a tick ahead
+| of the audio, so this is about one tick before the audible boundary (the landing tick itself would be two:
+| measured, the outgoing sound then went quiet ~2 ticks early). Render: switch transient 0.018, the outgoing
+| sound kept until then. Nothing when no track is silenced. Registers: dj_land saved them all; 0x40008f84
+| keeps d2-d7/a2-a6.
+dj_relsil:
+    move.l  dj_silA,%d4
+    moveq   #0,%d5
+rs_l:
+    move.l  %d5,%d0
+    addq.l  #8,%d0
+    btst    %d0,%d4
+    beq.b   1f
+    move.l  %d5,-(%sp)
+    jsr     NOTE_OFF
+    addq.l  #4,%sp
+1:  addq.l  #1,%d5
+    moveq   #8,%d0
+    cmp.l   %d5,%d0
+    bne.b   rs_l
     rts
 
 | dl_fixup: the tick after a landing.  Stock's landing leaves reload = tps_t - 1 (it drives

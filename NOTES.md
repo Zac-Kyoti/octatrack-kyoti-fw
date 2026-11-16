@@ -38190,3 +38190,26 @@ route-A emulator streams no samples; the cause was inferred, not heard). cec74de
   FX change shows only at the next trig (frame 6894). So the render cannot confirm the cut is the user's pop.
 - **Fix 1 emulated** (stock's note-off 0x40008f84(all) called ~107 or ~47 frames before the switch, ot_emu --step
   call, no firmware change): the switch transient disappears (0.015 / 0.018), no new transient at the note-off.
+
+## 2026-11-15 cont. (2) (`dj-clyps`) — DIRECT JUMP V7.2.2 (WIP, NOT flashed; hardware A/B vs KDJC8): release the silenced tracks before the switch
+
+The user approved fix 1 as an A/B. **Change (one commit):** dj_relsil, on the tick after the landing (ST_FIXUP), calls
+stock's note-off 0x40008f84(t) for every audio track whose START SILENT / SILENCE TRACKS bit the hand-off set
+(dj_silA bits 8..15): the DSP's declick release, so the switch's hard kill (0x40006820) lands on faded voices.
+Nothing when no track is silenced; no landing / purge / sequencer change. **Why that tick, not the landing tick:** the
+sequencer runs about a tick ahead of the audio, so the landing tick is ~2 ticks before the audible boundary --
+measured (ot_emu): released there, the outgoing sound went quiet ~2 ticks early; one tick later it keeps sounding
+until ~a tick before and the switch is still clean.
+- **ot_emu render (OT DEMO A05 -> A03, SILENCE on, master track on):** odd-step landing: switch 2nd difference 0.018
+  (KDJC8 0.169, no switch 0.028), no new transient before it, level up to then 0.118 (KDJC8 0.227); 2-step landing:
+  0.025 (KDJC8 0.890). SILENCE off: identical to KDJC8; DJ on without a jump: identical. After the switch at the
+  2-step point the level is lower (0.032 vs 0.105): the released voices' FX tails are smaller -- check by ear that
+  the first new trig is at full level. Side effect: the release leaves the tracks' 0x8000184a bits set (held release,
+  as MUTE_MODES OTFX-T) until each track's next trig clears them (0x4000bf22); clearing them after the switch
+  rendered identically.
+- **Gates:** REF-LOCK all 5 standalone scenarios PASS; KY+CL DJC6 16<->7 / A07<->A08 PASS; check_dj_full PASS
+  (21 / 26 / 1); overlap test PASS (5 overlaps, 42 applies, none dangling); DJ-off and DJ-on-idle identity
+  IDENTICAL; Bugbuild BUG_DJC5 DISJOINT / ALL PRESERVED / NO STRAYS. octabam REFERENCE 688978da… (3846 B).
+- **Builds:** standalone 140C_KDJC9 (syx 81014221…, mainos 7c6131e7…); Bugbuild BUG_DJC5 (syx 3a6dbd79…); KY+CL
+  DJC6 from trkseq c72b4bc (out/djc3/kyoti_clyps6/, syx 78493ad3…, mainos 2de0388c…). A/B partner: 140C_KDJC8
+  (syx 5a906055…, the same build without the release). FLASHING §4 has the A/B.

@@ -285,7 +285,19 @@ quick check for each:
   5. **LFO AUTO CHANGE on** (project settings), jump to a pattern on another Part with a sample ringing: the ringing
      sample's LFO is not reset at the jump; each track's new LFO starts with its first trig. With it off: as stock.
   6. **Unchanged:** Part change on a jump, program change on re-cue, MIDI tracks, DIRECT JUMP off = stock.
+- **DIRECT_JUMP_KYOTI `140C_KDJC9` -- A/B against `140C_KDJC8`** (WIP, 2026-11-15; V7.2.2 = V7.2 + the tracks the
+  switch will silence are released with stock's note-off about a tick before the boundary; `140C_KDJC8` is the same
+  build without it). NOT yet run on hardware. The case: OT DEMO, CONTROL > SEQUENCER > SILENCE TRACKS on, T8 as MASTER
+  TRACK with different FX in A05 (Part 2) and A03 (Part 1), a sample ringing, DIRECT JUMP on, jump A05 -> A03 (`[PTN]` +
+  trig 3; landing on a step where A03 has no trig, and on a 2-step point).
+  1. **KDJC8:** the pop at the switch (as reported on KDJC6).
+  2. **KDJC9:** no pop; the outgoing sound fades out over the last moment before the boundary (about a tick, ~21 ms
+     at 120 BPM) instead of being cut on it. Listen also that the new pattern's first trigs still sound at full level.
+  3. **KDJC9, SILENCE TRACKS off:** exactly as KDJC8 (nothing is released when no track is silenced).
+  4. Items 2-4 and 6 of the KDJC6 list above: unchanged.
 
+- **KYOTI with Clyps "KY+CL DJC6"** (WIP, 2026-11-15; Clyps CL35 c72b4bc + DIRECT JUMP V7.2.2): the KDJC9 A/B above,
+  inside and outside Clyps, then the DJC3 list below. NOT yet run on hardware.
 - **KYOTI with Clyps "KY+CL DJC3" walk-through** (WIP, 2026-11-14; Clyps CL34 bc04617 + DIRECT JUMP V7.2; NOT yet run
   on hardware). Clyps behaves exactly as the CL34 already on the unit (its list: trkseq FLASHING.md "KYOTI CL34"); RELOAD
   is not in this image (Clyps' own card reloads are). Then:
