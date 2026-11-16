@@ -38213,3 +38213,15 @@ until ~a tick before and the switch is still clean.
 - **Builds:** standalone 140C_KDJC9 (syx 81014221…, mainos 7c6131e7…); Bugbuild BUG_DJC5 (syx 3a6dbd79…); KY+CL
   DJC6 from trkseq c72b4bc (out/djc3/kyoti_clyps6/, syx 78493ad3…, mainos 2de0388c…). A/B partner: 140C_KDJC8
   (syx 5a906055…, the same build without the release). FLASHING §4 has the A/B.
+
+## 2026-11-15 cont. (3) (`dj-clyps`) — which reported standalone syx files really carry their OS VERSION name
+
+The unit flashed with syx 81014221… reads "140C_KDJ7", not "140C_KDJC9". Cause: `build_bugbuilds.py --wip
+DIRECT_JUMP_KYOTI` re-runs the base builder without a name (`python3 tools/build_direct_jump_kyoti.py`, default
+"140C_KDJ7") and so rewrites out/OCTATRACK_OS1.40C_DIRECT_JUMP_KYOTI.syx -- same mainos, default name. Every hash
+taken after a Bugbuild run is the KDJ7-named file. Checked by rebuilding each commit with both names (out/verstr_check/):
+KDJC1 8003fb8f… = KDJC1 (ok); KDJC5 b0cc35cf… = KDJ7 (the corrected 7ce3f777… = KDJC5); **KDJC6 eed4024e… = KDJ7**
+(also the rollback copy out/rollback/KDJC6/); **KDJC7 882b8e57… = KDJ7**; KDJC8 5a906055… = KDJC8 (ok); **KDJC9
+81014221… = KDJ7** (the one flashed; its mainos 7c6131e7… is V7.2.2 as intended). The mainos of each is the intended
+one. From now: build the Bugbuild with `--no-rebuild` (or the standalone last), and check the "OS VERSION will read"
+line / the syx hash against a fresh named build before reporting.
