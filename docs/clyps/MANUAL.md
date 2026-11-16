@@ -39,7 +39,7 @@ you were before. Clyps offers three ways back:
 - the **originals**: track sequences and patterns as they were when you turned on the Octatrack, or loaded/reloaded a
   project. In the latter case, the originals are identical to "the card" reloads (see below);
 - your **temp saves**: one snapshot per track, taken with a key press;
-- the **card**: the project as last saved.
+- the **card**: track sequences and patterns as saved in the project on the CF card.
 
 The analogy holds closely:
 
