@@ -340,8 +340,7 @@ def main(argv):
         check(not hits_pr and state()["open"] == 1, "[FUNC]+[CUE] in Clyps: no Part reload (0x4005e038 not run), Clyps stays")
         # CL35 (the user, 2026-11-14): a page key held in Clyps = a peek at that page; the release brings Clyps back
         if "cl_pk" in syms:
-            win_ = rd(syms["cl_win"], 4)
-            linked = lambda: (rd(win_ + 32, 4) >> 5) & 1
+            linked = lambda: rd(rd(syms["cl_win"], 4) + 32, 4) & 1     # CL36: the window's visible bit (compositor)
             enc0 = lambda: [rd(0x46C7DEDE + 20 * e, 4) for e in range(6)]
             e_before = enc0()
             key(0x23, 1)                       # AMP held
@@ -355,8 +354,55 @@ def main(argv):
                   and all(e_ == 0 for e_ in e_before) and pg_lfo != pg_amp and l_mid == 0,
                   f"[AMP] held: the Clyps window off screen, the encoders reach the page ({[hex(x) for x in e_peek]}; "
                   f"Clyps': {[hex(x) for x in e_before]}), [LFO] too: the page follows ({pg_amp} -> {pg_lfo})")
-            check(linked() == 1 and enc0() == e_before and rd(syms["cl_pk"], 1) == 0 and state()["open"] == 1,
-                  "... released: the Clyps window back, its encoders locked again")
+            hid_ = linked() == 0 and rd(syms["cl_pkw"], 1) == 1        # CL36: released inside the double-tap window
+            u.mem_write(0x460D5DE0, (100).to_bytes(4, "big"))
+            main_call_r(0x40056C28)                                     # a UI tick past it: the view comes back
+            check(hid_ and linked() == 1 and enc0() == e_before and rd(syms["cl_pk"], 1) == 0 and state()["open"] == 1
+                  and rd(0x460BABF4, 4) == rd(syms["cl_win"], 4),
+                  "... released: Clyps waits out the double-tap window, then its window is back (on top), its encoders locked")
+            # CL36: the Clyps view after every peek is the view before it, pixel for pixel; SETUP follows the user
+            setup_open = lambda: rd(rd(0x400BCD14, 4) + 8, 4) != 0
+            def screen():
+                rt.run(ms=200)
+                tailmsg()
+                return bytes(u.mem_read(PLANE, 1024))
+            def screen():
+                u.mem_write(0x460D5DE0, (100).to_bytes(4, "big"))   # past stock's double-tap window (route A has no LED tick)
+                main_call_r(0x40056C28)                             # one UI tick: a deferred return shows (cl_pkt)
+                rt.run(ms=200)
+                tailmsg()
+                # the screen AS COMPOSED (windows included): PLANE is stock's page layer only -- Clyps' window never
+                # shows there (every earlier shot too); stock's composer 0x40013abc into its buffer [0x400b9710]
+                buf_ = rd(0x400B9710, 4)
+                main_call_r(0x40013ABC)
+                return bytes(u.mem_read(buf_, 1024))
+            v0, su0 = screen(), setup_open()
+            u.mem_write(0x460D5DE0, (100).to_bytes(4, "big"))
+            key(0x23, 1); su_a = setup_open(); key(0x23, 0)
+            v1 = screen()
+            u.mem_write(0x460D5DE0, (0).to_bytes(4, "big"))      # a quick second press: stock's double tap
+            key(0x23, 1); su_b = setup_open(); shot("C5_peek_setup"); key(0x23, 0)
+            v2 = screen()
+            u.mem_write(0x460D5DE0, (100).to_bytes(4, "big"))
+            key(0x23, 1); su_c = setup_open(); key(0x23, 0)
+            v3 = screen()
+            key(FUNC, 1); key(0x23, 1); su_d = setup_open(); key(0x23, 0); key(FUNC, 0)
+            v4 = screen()
+            check(su_a == su0 and su_b != su0 and su_c == su_b and su_d != su_c,
+                  f"peek modes: held = as left ({su0} -> {su_a}); double tap flips SETUP ({su_b}); held again keeps it "
+                  f"({su_c}); [FUNC] + AMP flips it back ({su_d})")
+            P0 = lcd_view.pixels(v0)
+            def wdiff(v):     # differing pixels inside Clyps' window (x 8..119); outside it the page underneath shows
+                P = lcd_view.pixels(v)
+                return [(x, y) for y in range(len(P0)) for x in range(len(P0[0])) if P[y][x] != P0[y][x]]
+            dw = [wdiff(v) for v in (v1, v2, v3, v4)]
+            inside = [[d for d in dd if 8 <= d[0] <= 119] for dd in dw]
+            check(all(not d for d in inside),
+                  f"the Clyps view after each peek = the view before it, pixel for pixel inside its window "
+                  f"(inside: {[len(d) for d in inside]}; outside, the page underneath: {[len(d) - len(i) for d, i in zip(dw, inside)]}"
+                  f"{'; first ' + str([d for d in inside if d][0][:8]) if any(inside) else ''})")
+            lcd_view.png(P0, str(shots / "C6_before_peek.png"))
+            lcd_view.png(lcd_view.pixels(v2), str(shots / "C6_after_dbltap.png"))
         # [FUNC]+TRACK: stock's FUNC sub-map mute 0x40083dfc (it toggles through 0x4007d6a4 /
         # 0x4007d7b0); our FUNC sub-map no longer shadows it. (0x40033970 is NOT a readable mute
         # state -- it did not change with a real mute: measured.)
@@ -2404,6 +2450,46 @@ def main(argv):
         check(PTNL in state()["layers"], "... [BANK] let go first: [PTN]'s overlay back")
         key(PTN, 0)
         check(state()["layers"] == s0["layers"] and state()["showwin"] == 0, "... [PTN] let go: layers back, no window")
+        tap(NO)
+        closed_ok("[NO]")
+
+    if "9" in a.only:
+        # --- 9 (CL36, the user 2026-11-15): stock SAVE PART makes the saved Part that Part's original
+        posttail[0] = True
+        print("9: SAVE PART -> the originals' Part; ORIG FULL brings T1's slice back as saved")
+        tap(0x10)                                                   # T1 the active track
+        key(PTN, 1); key(BANK, 1); key(BANK, 0); key(PTN, 0)
+        print(f"      open {state()['open']}, active T{rd(0x80000000, 1) + 1}, running {rd(0x800065B8, 4)}", flush=True)
+        act = rd(0x800065BE, 1)
+        pb = partbase(bank, act)
+        pi = (pb - (BLOB + bank * BANKSTRIDE + PART_OFF)) // PARTSZ
+        mark = rd(pb + 0x2A, 1) ^ 0x55
+        u.mem_write(pb + 0x2A, bytes([mark]))                     # T1's slice, edited
+        main_call_r(0x4004A908, args=(pi,))                         # stock SAVE PART (its Parts-menu call)
+        settle_ = rt.run(ms=300)
+        ob = partbase(bank, act, syms["cl_bss"])
+        sh = rd(syms["cl_shok"] + (bank * 4 + pi) * 2, 2)
+        check(bytes(u.mem_read(ob, PARTSZ)) == bytes(u.mem_read(pb, PARTSZ)) and sh == 0,
+              f"SAVE PART {pi + 1}: the originals' Part = the saved Part (T1's edit in it), its shadow bits cleared ({sh:#x})")
+        q = next((x for x in range(16) if partbase(bank, x) != pb and pslice(0, partbase(bank, x)) != pslice(0, pb)), None)
+        if q is None:
+            check(False, "a slot on another Part with a different T1 slice exists (test data)")
+        else:
+            saved_sl = pslice(0, ob)
+            def wait_for(cond, ms=40000):                           # a running load lands at its cued point
+                for _ in range(ms // 200):
+                    if cond():
+                        return True
+                    rt.run(ms=200)
+                return cond()
+            key(FUNC, 1); tap(q); key(FUNC, 0)                      # FULL load of slot q onto T1
+            landed = wait_for(lambda: pslice(0, pb) != saved_sl)
+            loaded = rd(pb + 0x2A, 1)
+            key(FUNC, 1); tap(act); key(FUNC, 0)                    # ORIG FULL (the trig of your own pattern)
+            back = wait_for(lambda: pslice(0, pb) == saved_sl)
+            check(landed and back and rd(pb + 0x2A, 1) == mark,
+                  f"FULL slot {q + 1} then ORIG FULL: T1's slice back AS SAVED (landed {landed}, back {back}; "
+                  f"{loaded:#x} -> {rd(pb + 0x2A, 1):#x}, saved {mark:#x})")
         tap(NO)
         closed_ok("[NO]")
 

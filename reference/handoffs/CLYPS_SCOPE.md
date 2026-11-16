@@ -1538,16 +1538,38 @@ the investigation (NOTES "CL24 timing investigation", harness `tools/diag_clyps_
   correct variant (write it at the first sounding trig's build) only matters when that trig is after the boundary and a
   PICKUP machine is involved. Skipped.
 
-### 1.37 Peek at a parameter page (the user, 2026-11-14; KYOTI CL35)
+### 1.37 Peek at a parameter page (the user, 2026-11-14 / 15; KYOTI CL35, reworked CL36)
 
-- PLAYBACK `0x22` / AMP `0x23` / LFO `0x24` / FX1 `0x25` / FX2 `0x26` held in Clyps: that page shows (regular or SETUP as
-  stock last left it: stock's own press `0x4005578c` -> `0x40055720(page, 1)`; a quick double press flips to SETUP, as
-  stock), the encoders reach it; the release brings the Clyps view back. Grid LEDs stay Clyps'.
-- `cl_k_peek`: the window is only unlinked from the display list (`0x40011774`) and linked again (`0x40011690`), never
-  destroyed (WIN_DEL frees the slot; it calls no close callback either). while peeking Clyps' layer lists no encoders
-  (`cl_layer+8` = 0; the rebuild copies encoder records as they are -- no `-1` pass-down for encoders -- and skips a
-  layer whose list is 0); the layer rebuild `0x4003125c` makes it live (the flattened table `0x46c7dede`, 20 B per encoder). Key records keep T1's hold delay 30; holds are swallowed (stock's hold mode `0x460d1796` not entered).
-  Several page keys: back when the last is released (`cl_pk` bits). `cl_close` mid-peek restores the records.
+- PLAYBACK `0x22` / AMP `0x23` / LFO `0x24` / FX1 `0x25` / FX2 `0x26` held in Clyps: that page shows in the mode the user
+  left it (page 1 or SETUP); the encoders reach it; the release brings the Clyps view back. Grid LEDs stay Clyps'.
+- **Stock's mechanics:** a page key's press `0x4005578c` -> `0x40055720(key, ev)`: another page opens (`0x400554e0`); the
+  same page while SETUP is open, or a double tap (`0x400c0aac` = the key, timer `0x460d5de0` <= 14, the timer counted
+  by the LED tick `0x40052200`, ~60 Hz), toggles SETUP (`0x400322f0`). [FUNC] + a page key = `0x400322f0` directly.
+  SETUP is a window (its own WIN_NEW slot).
+- **`cl_k_peek`:** a plain press of the page already current does not go to stock (it would toggle SETUP); another
+  page or a double tap does. [FUNC] + page = `cl_k_fpeek` (our FUNC sub-map) -> `0x400322f0` + the peek.
+- **Hiding:** only the window's visible bit (window +32 bit 0; the compositor `0x40013ad8` skips a window without it).
+  CL35 unlinked it: the window manager `0x4005829c` finds a free slot by the linked bit (+32 bit 5), so a SETUP opened
+  during the peek was built INTO Clyps' window (the user's 1-px offset / stray pixels). Re-creating it instead evicts
+  SETUP (WIN_NEW(prio 0) evicts every slot with prio >= 0; and WIN_DEL leaves the slot's entry, whose eviction calls
+  cl_close). On return: visible bit + stock's bring-to-front `0x400117b4` (a page opened meanwhile relinks above).
+- Opening Clyps (WIN_NEW prio 0) closes an open SETUP: `cl_enter` notes it (`cl_wassu`); the first peek at that page
+  reopens it.
+- **Double tap:** a release inside stock's double-tap window leaves Clyps hidden (`cl_pkw`); the UI tick (`cl_pkt`)
+  shows it once the window is past; a second press continues the peek.
+- Encoders: Clyps' layer lists none while peeking (`cl_layer+8` = 0; the rebuild copies encoder records as they are --
+  no `-1` pass-down -- and skips a layer whose list is 0).
+- Gate C: modes, the return, and the screen AS COMPOSED (stock's composer `0x40013abc` into `[0x400b9710]`; the gate's
+  PLANE shots are stock's page layer only -- they never showed Clyps' window) identical inside the window.
+
+### 1.38 SAVE PART refreshes the originals' Part (the user, 2026-11-15; KYOTI CL36)
+
+- Stock SAVE PART `0x4004a908(part)` (one caller, the Parts menu `0x4002dd12`) copies the working Part of the current
+  bank to its SAVE PART copy. Clyps detours its only exit `0x4004a9c4` (`cl_psv`): that Part of the bank's originals
+  (`SNAPB + bank * BANKSZ + PART_OFF + part * PARTSZ`) := the saved Part; its 16 tracks' shadow bits (CL29) cleared.
+- ORIG TRK FULL then brings a track's slice back as saved; ORIG PTN+PRT the whole saved Part. Sequence originals,
+  temp saves and card reloads (the project on the card) are unchanged. octabam: that exit is STORE's (partsaved).
+- Gate 9: SAVE PART -> originals' Part = saved, shadow cleared; FULL slot 5 then ORIG FULL -> T1 as saved.
 
 ### 1.27 Combinations that must never ship (the user, 2026-11-07)
 

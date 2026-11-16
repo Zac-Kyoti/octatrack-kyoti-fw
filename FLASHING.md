@@ -267,6 +267,18 @@ quick check for each:
   responsive.
 - **PART_CHANGE_CARRYOVER_FIX** — a track that is PICKUP on one Part and FLEX on
   another: switching patterns across the Parts plays the FLEX sample, not the old loop.
+- **KYOTI CL36 walk-through** (WIP; `out/KYOTI_WIP/KYOTI_V1.7_WITH_CLYPS/OCTATRACK_OS1.40C_KYOTI_V1.7_WITH_CLYPS.syx`)
+  = CL35's peek reworked + SAVE PART. Timing unchanged.
+  1. **The page as you left it:** outside Clyps put AMP in SETUP, open Clyps, hold AMP: AMP SETUP shows. Release:
+     Clyps, drawn exactly as before (no offset, no stray pixels). Same with page 1.
+  2. **Double tap in Clyps:** AMP, AMP quickly: the page flips (page 1 <-> SETUP) and Clyps does NOT show between the
+     two taps; hold the second tap to tweak, release -> Clyps (after ~1/4 s). The flip sticks for the next peek.
+  3. **[FUNC] + AMP in Clyps:** flips page 1 <-> SETUP the same way, shown while held, Clyps back on release.
+  4. **SAVE PART:** on a pattern, change T1's machine / FX / levels, save the Part (Parts menu SAVE). In Clyps, FULL-
+     load another slot onto T1, then ORIG FULL ([FUNC] + the trig of your pattern): T1 comes back AS SAVED (with your
+     change), not as the project was loaded. ORIG PTN+PRT: the whole saved Part. The sequences' originals don't change.
+  5. Then CL35's / CL34's items below.
+
 - **KYOTI CL35 walk-through** (WIP; `out/KYOTI_WIP/KYOTI_V1.7_WITH_CLYPS/OCTATRACK_OS1.40C_KYOTI_V1.7_WITH_CLYPS.syx`)
   = CL34 + a peek at the parameter pages. Timing unchanged.
   1. In Clyps, hold **PLAYBACK** (or AMP, LFO, FX1, FX2): the Clyps window goes and that page shows -- its regular

@@ -259,7 +259,7 @@
     tst.l   %d0
     bne.w   cl_fwdbase
     .endm
-    .global cl_ptn, cl_bankp, cl_bankr, cl_land, cl_uitail, cl_wrap, cl_projload, cl_rstall, cl_creset
+    .global cl_ptn, cl_bankp, cl_bankr, cl_land, cl_uitail, cl_wrap, cl_projload, cl_rstall, cl_creset, cl_psv
     .global cl_yes, cl_no
     .global cl_hwrite, cl_hstorep, cl_hstoreb, cl_hrestp, cl_hrestb, cl_hdel, cl_hexp
     .section .dram,"ax"
@@ -421,6 +421,13 @@ ce_ph:
     lsl.l   #8,%d0
     move.b  ACT_PAT,%d0
     move.w  %d0,cl_lastp
+    clr.b   cl_wassu                    | CL36: a SETUP open now closes with our WIN_NEW (prio 0 evicts it): noted
+    movea.l 0x400bcd14,%a0
+    tst.l   8(%a0)
+    beq.b   ce_nsu
+    moveq   #1,%d0
+    move.b  %d0,cl_wassu
+ce_nsu:
     pea     cl_close                    | close_cb: eviction lands in the same teardown
     pea     PRIO
     clr.l   -(%sp)                      | dy
@@ -453,6 +460,7 @@ cl_close:
     tst.b   cl_open
     beq.w   cc_out
     clr.b   cl_open
+    clr.b   cl_pkw                      | CL36: no deferred return
     tst.b   cl_pk                       | CL35: closed mid-peek -- Clyps' encoder list back in its layer (popped below)
     beq.b   cc_npk
     clr.b   cl_pk
@@ -758,14 +766,18 @@ kcu_out:
 cl_k_nop:
     rts
 
-| CL35 (the user, 2026-11-14): PLAYBACK 0x22 / AMP 0x23 / LFO 0x24 / FX1 0x25 / FX2 0x26 held in Clyps = a peek at
-| that page (regular or SETUP, as stock left it: stock's own press 0x4005578c opens it, 0x40055720 page, 1), the
-| encoders reaching it while the key is held; the release brings the Clyps view back. The window is only
-| unlinked from the display list (0x40011774) and linked again (0x40011690) -- never destroyed (WIN_DEL would
-| free its slot); while peeking Clyps' layer lists no encoders (the layers below own them; the layer rebuild
-| 0x4003125c makes it live; a held key keeps its handlers across a rebuild). The grid LEDs stay Clyps'.
-| Several page keys: the view comes back when the last is released. Hold events: swallowed (stock's hold mode
-| is not entered). Uses d0-d1/a0-a1.
+| CL35 / CL36 (the user, 2026-11-14 / 15): PLAYBACK 0x22 / AMP 0x23 / LFO 0x24 / FX1 0x25 / FX2 0x26 held in Clyps = a
+| peek at that page, in the mode it is in (page 1 or SETUP, as the user left it); the encoders reach it while the key is
+| held; the release brings the Clyps view back. A plain press of the page already current does NOT go to stock (stock's
+| 0x40055720 would toggle SETUP); another page, or a quick second press (stock's double tap: 0x400c0aac = the key,
+| 0x460d5de0 <= 14), goes to stock's press 0x4005578c, which switches page / toggles SETUP. [FUNC] + a page key
+| (cl_k_fpeek, our FUNC sub-map) = stock's FUNC press 0x400322f0 (SETUP <-> page 1) + the peek. The window stays
+| allocated and linked; only its visible bit goes (window +32 bit 0: the compositor 0x40013ad8 skips a window without
+| it). CL35 unlinked it: the window manager 0x4005829c finds a free slot by the linked bit (+32 bit 5), so a SETUP
+| window opened during the peek was built INTO Clyps' window (the offset); re-creating it (CL36 draft) evicted SETUP
+| (WIN_NEW(prio 0) evicts every window with prio >= 0). Opening Clyps closes an open SETUP the same way, so cl_enter
+| notes it (cl_wassu / cl_wasp) and the first peek at that page opens it again (rule b). Clyps' layer lists no
+| encoders meanwhile. Several page keys: back when the last is released (cl_pk). Uses d0-d1/a0-a1.
 cl_k_peek:
     FWDCHK
     move.l  4(%sp),%d0
@@ -776,49 +788,122 @@ cl_k_peek:
     cmpi.l  #1,%d0
     beq.b   kqpk_press
     tst.l   %d0
-    bne.w   kqpk_out                      | a hold: nothing
-    not.l   %d1                         | a release
-    move.b  cl_pk,%d0
-    and.l   %d1,%d0
-    move.b  %d0,cl_pk
-    bne.w   kqpk_out                      | another page key still held
-    moveq   #0,%d0
-    bsr.w   kqpk_encs                     | the encoders Clyps' again
-    move.l  cl_win,%d0
-    beq.b   kqpk_r1
-    move.l  %d0,-(%sp)
-    jsr     0x40011690                  | the window back on top
-    addq.l  #4,%sp
-kqpk_r1:
-    jsr     cl_refresh
+    beq.w   kqpk_rel
+    rts                                 | a hold: nothing
+kqpk_press:
+    bsr.w   kqpk_begin
+    move.l  4(%sp),%d0
+    subi.l  #0x22,%d0
+    lea     0x400a7280,%a0              | stock's page of the key
+    move.l  (%a0,%d0.l*4),%d0
+    moveq   #0,%d1
+    move.b  0x46c7d8d8,%d1              | the current page
+    cmp.l   %d1,%d0
+    bne.b   kqpk_stock                  | another page: stock switches
+    tst.b   cl_wassu                    | this page was in SETUP when Clyps opened (which closed it): open it again
+    beq.b   kqpk_nsu
+    clr.b   cl_wassu
+    movea.l 0x400bcd14,%a0
+    tst.l   8(%a0)
+    bne.b   kqpk_nsu
+    pea     1
+    move.l  8(%sp),-(%sp)
+    jsr     0x400322f0
+    addq.l  #8,%sp
+    bra.b   kqpk_draw
+kqpk_nsu:
+    move.l  0x400c0aac,%d0
+    cmp.l   4(%sp),%d0
+    bne.b   kqpk_arm
+    moveq   #14,%d1
+    cmp.l   0x460d5de0,%d1
+    bge.b   kqpk_stock                  | a quick second press: stock's double tap (SETUP <-> page 1)
+kqpk_arm:
+    move.l  4(%sp),%d0                  | the page as it is: arm stock's double tap only
+    move.l  %d0,0x400c0aac
+    clr.l   0x460d5de0
+    bra.b   kqpk_draw
+kqpk_stock:
+    pea     1
+    move.l  8(%sp),-(%sp)               | (key, 1) (4(%sp) + the pea)
+    jsr     0x4005578c
+    addq.l  #8,%sp
+kqpk_draw:
     moveq   #1,%d0
     move.l  %d0,RDRAW
     rts
-kqpk_press:
-    tst.b   cl_pk
-    bne.b   kqpk_page                     | already peeking: just the page
-    move.l  %d1,-(%sp)
-    jsr     cl_flstop
-    move.l  cl_win,%d0
-    beq.b   kqpk_p1
-    move.l  %d0,-(%sp)
-    jsr     0x40011774                  | the window off the display (kept)
-    addq.l  #4,%sp
-kqpk_p1:
-    moveq   #-1,%d0
-    bsr.w   kqpk_encs                     | the encoders pass down to the page
-    move.l  (%sp)+,%d1
-kqpk_page:
-    move.b  cl_pk,%d0
-    or.l    %d1,%d0
-    move.b  %d0,cl_pk
+| cl_k_fpeek: [FUNC] + a page key in Clyps -- stock's FUNC press (SETUP <-> page 1), shown while held.
+cl_k_fpeek:
+    FWDCHK
+    move.l  4(%sp),%d0
+    subi.l  #0x22,%d0
+    moveq   #1,%d1
+    lsl.l   %d0,%d1
+    move.l  8(%sp),%d0
+    cmpi.l  #1,%d0
+    beq.b   kqf_press
+    tst.l   %d0
+    beq.b   kqpk_rel
+    rts
+kqf_press:
+    bsr.w   kqpk_begin
     pea     1
-    move.l  8(%sp),-(%sp)               | (code, 1): stock's press opens the page (4(%sp) + the pea)
-    jsr     0x4005578c
+    move.l  8(%sp),-(%sp)
+    jsr     0x400322f0
     addq.l  #8,%sp
+    bra.b   kqpk_draw
+| the release (d1 = the key's bit): the last page key up -> the Clyps view again
+kqpk_rel:
+    not.l   %d1
+    move.b  cl_pk,%d0
+    and.l   %d1,%d0
+    move.b  %d0,cl_pk
+    bne.b   kqpk_out                    | another page key still held
+    moveq   #14,%d0                     | CL36 (the user, 2026-11-15): inside stock's double-tap window (0x460d5de0
+    cmp.l   0x460d5de0,%d0              | <= 14, ~230 ms of LED ticks since the press) Clyps waits -- a second tap
+    blt.b   kqpk_show                   | goes on peeking; cl_pkt shows it once the window is past
+    moveq   #1,%d0
+    move.b  %d0,cl_pkw
+    rts
+| kqpk_show: the Clyps view again (the encoders, the window's visible bit, a redraw)
+kqpk_show:
+    clr.b   cl_pkw
+    moveq   #0,%d0
+    bsr.w   kqpk_encs                   | the encoders Clyps' again
+    movea.l cl_win,%a0
+    lea     35(%a0),%a0
+    bset    #0,(%a0)                    | the window visible again
+    move.l  cl_win,-(%sp)               | and on top: a page switched during the peek relinks its own surface above
+    jsr     0x400117b4                  | ours (stock's bring-to-front: unlink + link at the tail, nothing between)
+    addq.l  #4,%sp
+    jsr     cl_refresh
     moveq   #1,%d0
     move.l  %d0,RDRAW
 kqpk_out:
+    rts
+| kqpk_begin (d1 = the key's bit): the first page key down -> the window deleted, the encoders to the page. Keeps d1.
+kqpk_begin:
+    tst.b   cl_pkw                      | CL36: the second tap of a double tap -- still hidden, encoders the page's
+    beq.b   kqb_nw
+    clr.b   cl_pkw
+    bra.b   kqb_or
+kqb_nw:
+    tst.b   cl_pk
+    bne.b   kqb_or
+    move.l  %d1,-(%sp)
+    jsr     cl_flstop
+    movea.l cl_win,%a0
+    lea     35(%a0),%a0
+    bclr    #0,(%a0)                    | the window not drawn (kept, linked)
+    moveq   #1,%d0
+    move.l  %d0,RDRAW
+    moveq   #-1,%d0
+    bsr.w   kqpk_encs
+    move.l  (%sp)+,%d1
+kqb_or:
+    move.b  cl_pk,%d0
+    or.l    %d1,%d0
+    move.b  %d0,cl_pk
     rts
 | kqpk_encs (d0 = 0: Clyps' encoder records in its layer; -1: none, the layers below own the encoders), then the
 | layer rebuild. The rebuild copies a layer's encoder records as they are (no -1 pass-down for encoders, measured:
@@ -1498,6 +1583,61 @@ cb_set:
     move.b  %d1,cl_cph
     jsr     cl_draw
 cb_out:
+    rts
+
+| cl_pkt (UI tick): a peek released inside stock's double-tap window comes back once it is past. Uses d0-d1/a0-a1.
+cl_pkt:
+    tst.b   cl_pkw
+    beq.b   pt_out
+    tst.b   cl_open
+    beq.b   pt_clr
+    moveq   #14,%d0
+    cmp.l   0x460d5de0,%d0
+    blt.w   kqpk_show
+    rts
+pt_clr:
+    clr.b   cl_pkw
+pt_out:
+    rts
+
+| cl_psv: detour at stock SAVE PART's only exit 0x4004a9c4 (FUN_4004a908, its one caller the Parts menu 0x4002dd12;
+| replaces `movem.l (sp),d2-d4/a2-a3 ; lea 20(sp),sp`, 8 B, replayed here with the rts). CL36 (the user, 2026-11-15):
+| the Part just saved becomes the original of that Part of the current bank -- ORIG TRK FULL / ORIG PTN+PRT bring it
+| back as saved; the sequences' originals are untouched. Its slices kept from before Clyps (the CL29 shadow) go too,
+| the saved Part being the new baseline. d4 = the Part; the bank = the one in the SRAM mirror (UI_BANK); no originals
+| for it yet: nothing. octabam: this exit belongs to STORE (partsaved) -- a Clyps module is a STORE client there.
+cl_psv:
+    moveq   #0,%d0
+    move.b  UI_BANK,%d0
+    andi.l  #15,%d0
+    move.w  cl_snapok,%d1
+    btst    %d0,%d1
+    beq.b   pv3_out
+    move.l  %d4,%d1
+    andi.l  #3,%d1                      | d1 = the Part
+    move.l  %d0,%d2
+    lsl.l   #2,%d2
+    add.l   %d1,%d2
+    add.l   %d2,%d2
+    lea     cl_shok,%a0
+    clr.w   (%a0,%d2.l)                 | its 16 tracks' shadow bits ((bank * 4 + Part) * 16 + t)
+    move.l  #PARTSZ,%d3
+    muls.l  %d1,%d3                     | d3 = Part * PARTSZ
+    movea.l 0x46c82456,%a0              | the current bank's blob
+    adda.l  #PART_OFF,%a0
+    adda.l  %d3,%a0                     | src = its working Part (just saved)
+    move.l  #BANKSZ,%d2
+    muls.l  %d0,%d2
+    addi.l  #SNAPB+PART_OFF,%d2
+    add.l   %d3,%d2                     | dst = the originals' Part
+    pea     PARTSZ
+    move.l  %a0,-(%sp)
+    move.l  %d2,-(%sp)
+    jsr     MEMCPY
+    lea     12(%sp),%sp
+pv3_out:
+    movem.l (%sp),%d2-%d4/%a2-%a3
+    lea     20(%sp),%sp
     rts
 
 | cl_tuck -> d0 = 1: the active track's arrows are tucked under its select box -- the slot under them has landed
@@ -6593,6 +6733,7 @@ cl_uitick:
     cmpi.l  #CL_MAGIC,%d0
     bne.b   uk_out
     jsr     cl_cblink                   | CL34: a cued load's arrows blink
+    jsr     cl_pkt                      | CL36: a peek's deferred return
     tst.b   cl_flk
     beq.b   uk_out
     jsr     cl_flashtick
@@ -8327,6 +8468,9 @@ cl_fsub:    .long 0, cl_fkeys, 0, 0, 0
 cl_fkeys:
     KREC 0x31, cl_k_yes, 0, 0, 0, 0      | [FUNC]+[YES]: nothing in Clyps
     KREC 0x32, cl_k_no, 0, 0, 0, 0       | [FUNC]+[NO]: nothing in Clyps
+    .irp c, 0x22,0x23,0x24,0x25,0x26
+    KREC \c, cl_k_fpeek, cl_k_fpeek, cl_k_nop, 30, 0 | CL36: [FUNC] + a page key = SETUP <-> page 1, peeked (stock's delay 30)
+    .endr
     KREC 0x2a, cl_k_nop, 0, 0, 0, 0      | [FUNC]+[CUE]: nothing in Clyps (stock's Part reload 0x4005e038; CL34, the user
                                         | 2026-11-13; delay 0 as stock's)
     KREC 0x1b, cl_k_page, 0, 0, 0, 0     | [FUNC]+[PAGE] restore all
@@ -8437,6 +8581,8 @@ cl_pmoved:  .byte 0                     | the pre-select box shows (an arrow sin
 cl_ysup:    .byte 0                     | ... their solid yellow off: the slot under them landed (CL32)
 cl_cph:     .byte 0                     | CL34: the cued slot's arrows in their on phase (cl_cblink)
 cl_pk:      .byte 0                     | CL35: the page keys held for a peek (bit k = 0x22 + k)
+cl_pkw:     .byte 0                     | CL36: a peek released inside the double-tap window, the return pending
+cl_wassu:   .byte 0                     | CL36: SETUP was open when Clyps opened (its WIN_NEW closed it): the peek reopens it
 cl_bt:      .byte 0                     | CL34: cl_cblink's tick within its 30-tick (0.5 s) period
             .align 2
 cl_pre:     .space 32                   | per track: its pre-select arrows (cl_psave / cl_pload; 0 = none)
