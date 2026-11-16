@@ -807,8 +807,8 @@ kqpk_press:
     movea.l 0x400bcd14,%a0
     tst.l   8(%a0)
     bne.b   kqpk_nsu
-    pea     1
-    move.l  8(%sp),-(%sp)
+    pea     3                           | CL38: event 3 (stock's double tap) -- 0x400322f0 opens SETUP from closed
+    move.l  8(%sp),-(%sp)               | only for event 3 or with [FUNC] held (0x46c7dd26); event 1 did nothing
     jsr     0x400322f0
     addq.l  #8,%sp
     bra.b   kqpk_draw
@@ -878,6 +878,13 @@ kqpk_show:
     jsr     0x400117b4                  | ours (stock's bring-to-front: unlink + link at the tail, nothing between)
     addq.l  #4,%sp
     jsr     cl_hideunder                | CL37: a SETUP window under ours shows at our edges -- hidden while we show
+    pea     cl_layer                    | CL38: a SETUP opened during the peek pushed its key layer ABOVE ours (the
+    jsr     LAYER_POP                   | last layer listing a key wins: its [NO] closed SETUP, not Clyps): ours back on
+    jsr     LAYER_PUSH                  | top (pop + push: a push is idempotent); the LED layer the same
+    pea     cl_led
+    jsr     LED_POP
+    jsr     LED_PUSH
+    addq.l  #8,%sp
     jsr     cl_refresh
     moveq   #1,%d0
     move.l  %d0,RDRAW

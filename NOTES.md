@@ -38513,3 +38513,8 @@ Now 936 / 932 (<= 945): the pair fits, SC's donor becomes PLATE REV.
 - Gates: CL36 full set PASS (9 UI sets incl. gate 9 SAVE PART; quant running at commit); CL37 gate C PASS (composed
   screen identical, edges included, after every peek variant). Flashed: KY+CL DJC7 (CL36 + DJ V7.2.2) -- peek OK but
   the SETUP edges (fixed in CL37).
+- **CL38** (2026-11-15, the user on KY+CL DJC8 = CL37): SETUP set before Clyps showed page 1 at the first peek; two
+  [NO] after a SETUP peek; page 1 after leaving. Causes: `0x400322f0(key, 1)` does nothing from closed (needs event 3 or
+  [FUNC]); SETUP's key / LED layers stay above Clyps' after a peek. Fixes: event 3; the return re-pushes Clyps' layers on
+  top. New gate 8 (SETUP before Clyps -> first peek SETUP, one [NO], SETUP still open after); gate C PASS. Harness: the
+  diag_clyps_ui closed_ok diagnostic read a removed symbol (cl_tlayer).

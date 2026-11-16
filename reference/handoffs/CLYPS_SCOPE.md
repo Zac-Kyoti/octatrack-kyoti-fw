@@ -1562,6 +1562,11 @@ the investigation (NOTES "CL24 timing investigation", harness `tools/diag_clyps_
 - **CL37 (the user):** a SETUP opened inside Clyps showed at the window's 8-px edges. While the Clyps view shows, the
   current page object's SETUP window (`[0x400bcd14]+8`) loses its visible bit (`cl_hideunder`, `cl_hidw`); peek start
   and `cl_close` give it back. The main screen window `0x460d1758` (the track tabs) is never touched.
+- **CL38 (the user, on KY+CL DJC8):** (1) the reopen of a SETUP closed by opening Clyps passed event 1 to `0x400322f0`,
+  which opens SETUP from closed only for event 3 (stock's double tap) or with [FUNC] held (`0x46c7dd26`): now 3.
+  (2) A SETUP opened during a peek pushes its key / LED layers ABOVE Clyps' (the last layer listing a key wins): its
+  [NO] closed SETUP (two [NO] to leave Clyps, page 1 afterwards). The return now pops + pushes `cl_layer` / `cl_led`
+  (a push alone is idempotent); leaving Clyps pops them, SETUP's own keys work again. Gate 8 checks both.
 - Gate C: modes, the return, and the screen AS COMPOSED (stock's composer `0x40013abc` into `[0x400b9710]`; the gate's
   PLANE shots are stock's page layer only -- they never showed Clyps' window) identical inside the window.
 

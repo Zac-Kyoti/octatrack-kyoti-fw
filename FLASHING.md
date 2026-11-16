@@ -271,6 +271,8 @@ quick check for each:
   = CL35's peek reworked + SAVE PART. Timing unchanged.
   **CL37:** + a SETUP selected inside Clyps no longer shows at the Clyps window's left / right edges (hidden while the
   Clyps view shows, back for a peek and after leaving Clyps).
+  **CL38:** + SETUP set before entering Clyps: the first peek at that page shows SETUP; after a peek that opened SETUP,
+  one [NO] closes Clyps (was two) and SETUP is what you see afterwards (was page 1).
   1. **The page as you left it:** outside Clyps put AMP in SETUP, open Clyps, hold AMP: AMP SETUP shows. Release:
      Clyps, drawn exactly as before (no offset, no stray pixels). Same with page 1.
   2. **Double tap in Clyps:** AMP, AMP quickly: the page flips (page 1 <-> SETUP) and Clyps does NOT show between the

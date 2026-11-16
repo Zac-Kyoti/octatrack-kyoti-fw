@@ -211,7 +211,7 @@ def main(argv):
         s_ = state()
         if s_["layers"] != base["layers"] or s_["leds"] != base["leds"]:
             print(f"      layers {[hex(x) for x in s_['layers']]} leds {[hex(x) for x in s_['leds']]} "
-                  f"(cl_tlayer 0x{syms['cl_tlayer']:08x}, cl_layer 0x{syms['cl_layer']:08x})", flush=True)
+                  f"(cl_layer 0x{syms['cl_layer']:08x})", flush=True)
         check(s_["open"] == 0 and s_["layers"] == base["layers"] and s_["leds"] == base["leds"]
               and s_["showwin"] == 0, what + ": closed, layer lists at baseline, no SELECT window")
 
@@ -2452,6 +2452,42 @@ def main(argv):
         check(state()["layers"] == s0["layers"] and state()["showwin"] == 0, "... [PTN] let go: layers back, no window")
         tap(NO)
         closed_ok("[NO]")
+
+    if "8" in a.only:
+        # --- 8 (CL38): SETUP set before entering Clyps -> the first peek at that page shows SETUP (rule b)
+        posttail[0] = True
+        print("8: AMP SETUP before Clyps; the chord; the first peek at AMP = SETUP")
+        setup_obj = lambda: rd(0x400BCD14, 4)
+        su = lambda: rd(setup_obj() + 8, 4)
+        tap(0x10)
+        u.mem_write(0x460D5DE0, (100).to_bytes(4, "big"))
+        tap(0x23)                                                   # AMP page
+        u.mem_write(0x460D5DE0, (0).to_bytes(4, "big"))
+        tap(0x23)                                                   # a double tap: AMP SETUP
+        print(f"      AMP SETUP open before Clyps: {su():#x} (obj {setup_obj():#x})", flush=True)
+        closes = []
+        h8 = u.hook_add(er.eb.UC_HOOK_MEM_WRITE, lambda uc, acc, ad, sz, val, ud: closes.append(
+            (uc.reg_read(er.eb.UC_M68K_REG_PC), val)), begin=setup_obj() + 8, end=setup_obj() + 11)
+        for order in ("PTN first",):
+            key(PTN, 1)
+            print(f"      after [PTN] down: setup {su():#x}, Clyps open {state()['open']}", flush=True)
+            key(BANK, 1)
+            print(f"      after [BANK] down: setup {su():#x}, Clyps open {state()['open']}, wassu {rd(syms['cl_wassu'], 1)}", flush=True)
+            key(BANK, 0); key(PTN, 0)
+        u.hook_del(h8)
+        print(f"      writes to the SETUP handle: {[(hex(pc), hex(v)) for pc, v in closes][:8]}", flush=True)
+        u.mem_write(0x460D5DE0, (100).to_bytes(4, "big"))
+        key(0x23, 1)
+        peek_su = su() != 0
+        key(0x23, 0)
+        check(peek_su, f"SETUP before Clyps: the first peek at AMP shows SETUP (handle {su():#x})")
+        u.mem_write(0x460D5DE0, (100).to_bytes(4, "big"))
+        main_call_r(0x40056C28)
+        lay_ = state()["layers"]
+        check(lay_ and lay_[-1] == syms["cl_layer"], f"back from the peek: Clyps' key layer on top again ({[hex(x) for x in lay_]})")
+        tap(NO)
+        check(state()["open"] == 0 and su() != 0 and (rd(su() + 32, 4) & 1),
+              f"[NO]: Clyps closed; AMP SETUP still open and drawn, as the user left it (handle {su():#x})")
 
     if "9" in a.only:
         # --- 9 (CL36, the user 2026-11-15): stock SAVE PART makes the saved Part that Part's original
