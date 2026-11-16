@@ -38237,3 +38237,9 @@ V7.2.2, ec2f708; OS VERSION reads "140C_KDJ7" through the Bugbuild rename): "The
 change pop seems to be fixed." Hardware-confirmed: the pop at a DIRECT JUMP switch with SILENCE TRACKS on is no longer
 heard (the user's OT DEMO A05 -> A03 case). Not separately reported: the first new trig's level, SILENCE TRACKS off
 unchanged. Still WIP (not promoted).
+- **KY+CL DJC7** (2026-11-15, WIP, NOT flashed): trkseq 24e1e6c (Clyps CL36) + DIRECT JUMP V7.2.2 (the merge onto
+  trkseq's DJ_SELFHOOK copy byte-identical to DJC6's), scratch tree out/scratch-kc36:
+  out/djc3/kyoti_clyps7/OCTATRACK_OS1.40C_KYOTI_V1.7_WITH_CLYPS.syx, syx b3dabfde…, mainos fdabb6b3…, OS VERSION
+  "KY+CL DJC7" (builder line). build_kyoti green with CL36's SAVE PART detour 0x4004a9c4 (every feature within its
+  own sites, 104 spans, no branch into one; B1/B2). REF-LOCK 16<->7 / A07<->A08 PASS; check_dj_full PASS
+  (21 / 26 / 1); overlap test PASS (5 overlaps, 42 applies, none dangling).
