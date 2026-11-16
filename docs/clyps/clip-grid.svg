@@ -1,0 +1,73 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 470" width="780" height="470" font-family="-apple-system, Segoe UI, Helvetica, Arial, sans-serif" font-size="13">
+  <title>Clyps: every pattern's tracks are clips</title>
+  <defs>
+    <marker id="ah" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#0969da"/>
+    </marker>
+    <g id="row">
+      <rect x="114" y="0" width="52" height="24" rx="3"/><rect x="174" y="0" width="52" height="24" rx="3"/>
+      <rect x="234" y="0" width="52" height="24" rx="3"/><rect x="294" y="0" width="52" height="24" rx="3"/>
+      <rect x="354" y="0" width="52" height="24" rx="3"/><rect x="414" y="0" width="52" height="24" rx="3"/>
+      <rect x="474" y="0" width="52" height="24" rx="3"/><rect x="534" y="0" width="52" height="24" rx="3"/>
+    </g>
+  </defs>
+  <rect width="780" height="470" fill="#ffffff"/>
+
+  <text x="20" y="30" font-size="15" font-weight="600" fill="#1f2328">Bank A, as Clyps sees it</text>
+
+  <!-- track headers -->
+  <g fill="#59636e" text-anchor="middle" font-weight="600">
+    <text x="140" y="62">T1</text><text x="200" y="62">T2</text><text x="260" y="62">T3</text><text x="320" y="62">T4</text>
+    <text x="380" y="62">T5</text><text x="440" y="62">T6</text><text x="500" y="62">T7</text><text x="560" y="62">T8</text>
+  </g>
+  <!-- slot labels -->
+  <g fill="#59636e" text-anchor="end">
+    <text x="100" y="92">A01</text><text x="100" y="126">A02</text><text x="100" y="160">A03</text><text x="100" y="194">A04</text>
+    <text x="100" y="228">A05</text><text x="100" y="262">A06</text><text x="100" y="296">A07</text><text x="100" y="330">A08</text>
+    <text x="100" y="358">⋮</text><text x="100" y="384">A16</text>
+  </g>
+
+  <!-- your pattern row -->
+  <rect x="106" y="70" width="488" height="32" rx="4" fill="#ffebe9" stroke="#cf222e" stroke-width="1.5"/>
+
+  <g fill="#eef1f4" stroke="#d0d7de">
+    <use href="#row" y="74"/><use href="#row" y="108"/><use href="#row" y="142"/><use href="#row" y="176"/>
+    <use href="#row" y="210"/><use href="#row" y="244"/><use href="#row" y="278"/><use href="#row" y="312"/>
+    <use href="#row" y="366"/>
+  </g>
+
+  <!-- the Clyps view = one column -->
+  <rect x="228" y="66" width="64" height="330" rx="6" fill="none" stroke="#8250df" stroke-width="1.5" stroke-dasharray="5 4"/>
+  <text x="260" y="416" text-anchor="middle" fill="#8250df" font-weight="600">the Clyps view</text>
+  <text x="260" y="432" text-anchor="middle" fill="#8250df">(active track, 16 slots)</text>
+
+  <!-- loaded clips -->
+  <rect x="234" y="278" width="52" height="24" rx="3" fill="#ddf4ff" stroke="#0969da" stroke-width="1.5"/>
+  <rect x="414" y="176" width="52" height="24" rx="3" fill="#ddf4ff" stroke="#0969da" stroke-width="1.5"/>
+  <rect x="234" y="74" width="52" height="24" rx="3" fill="#ddf4ff" stroke="#0969da" stroke-width="1.5"/>
+  <rect x="414" y="74" width="52" height="24" rx="3" fill="#ddf4ff" stroke="#0969da" stroke-width="1.5"/>
+  <g font-size="11" text-anchor="middle" fill="#0969da" font-weight="600">
+    <text x="260" y="90">A07</text><text x="440" y="90">A04</text>
+  </g>
+  <g stroke="#ffffff" stroke-width="5" fill="none">
+    <path d="M273 276 L273 102"/><path d="M453 174 L453 102"/>
+  </g>
+  <g stroke="#0969da" stroke-width="2" fill="none" marker-end="url(#ah)">
+    <path d="M273 276 L273 104"/><path d="M453 174 L453 104"/>
+  </g>
+
+  <!-- notes -->
+  <g fill="#1f2328">
+    <text x="610" y="84" font-weight="600" fill="#cf222e">your pattern</text>
+    <text x="610" y="100" fill="#59636e">the one playing</text>
+    <text x="610" y="160" font-weight="600" fill="#0969da">a load</text>
+    <text x="610" y="176" fill="#59636e">one track's clip from</text>
+    <text x="610" y="192" fill="#59636e">another row drops onto</text>
+    <text x="610" y="208" fill="#59636e">your row. Every other</text>
+    <text x="610" y="224" fill="#59636e">track keeps playing.</text>
+    <text x="610" y="270" font-weight="600">each cell = a clip</text>
+    <text x="610" y="286" fill="#59636e">one track's sequence</text>
+    <text x="610" y="302" fill="#59636e">in one pattern</text>
+  </g>
+  <text x="20" y="458" fill="#59636e">Columns are tracks, rows are the bank's 16 patterns. Any track can play a clip from any row, while your pattern keeps playing.</text>
+</svg>

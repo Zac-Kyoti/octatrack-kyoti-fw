@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 820 330" width="820" height="330" font-family="-apple-system, Segoe UI, Helvetica, Arial, sans-serif" font-size="13">
+<title>Clyps: the arrows stay where you aimed</title>
+<defs><marker id="ah" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#59636e"/></marker></defs>
+<rect width="820" height="330" fill="#ffffff"/>
+<text x="30" y="34" font-weight="600" fill="#1f2328">1. Aim</text>
+<text x="30" y="52" fill="#59636e" font-size="12">arrows on slot 5</text>
+<rect x="48" y="68" width="150" height="22" rx="3" fill="#cf222e" stroke="#d0d7de"/>
+<text x="60" y="83" fill="#ffffff">1  your pattern</text>
+<rect x="48" y="96" width="150" height="22" rx="3" fill="#f6f8fa" stroke="#d0d7de"/>
+<text x="60" y="111" fill="#59636e">2  slot 2</text>
+<rect x="48" y="124" width="150" height="22" rx="3" fill="#f6f8fa" stroke="#d0d7de"/>
+<text x="60" y="139" fill="#59636e">3  slot 3</text>
+<rect x="48" y="152" width="150" height="22" rx="3" fill="#f6f8fa" stroke="#d0d7de"/>
+<text x="60" y="167" fill="#59636e">4  slot 4</text>
+<rect x="48" y="180" width="150" height="22" rx="3" fill="#f6f8fa" stroke="#d0d7de"/>
+<text x="60" y="195" fill="#59636e">5  slot 5</text>
+<path d="M34,184 L44,191 L34,198 z" fill="#d4a72c"/>
+<path d="M212,184 L202,191 L212,198 z" fill="#d4a72c"/>
+<rect x="48" y="208" width="150" height="22" rx="3" fill="#f6f8fa" stroke="#d0d7de"/>
+<text x="60" y="223" fill="#59636e">6  slot 6</text>
+<rect x="48" y="236" width="150" height="22" rx="3" fill="#f6f8fa" stroke="#d0d7de"/>
+<text x="60" y="251" fill="#59636e">7  slot 7</text>
+<text x="300" y="34" font-weight="600" fill="#1f2328">2. [YES]: slot 5 plays</text>
+<text x="300" y="52" fill="#59636e" font-size="12">box on 5, arrows tucked under it</text>
+<rect x="318" y="68" width="150" height="22" rx="3" fill="#cf222e" stroke="#d0d7de"/>
+<text x="330" y="83" fill="#ffffff">1  your pattern</text>
+<rect x="318" y="96" width="150" height="22" rx="3" fill="#f6f8fa" stroke="#d0d7de"/>
+<text x="330" y="111" fill="#59636e">2  slot 2</text>
+<rect x="318" y="124" width="150" height="22" rx="3" fill="#f6f8fa" stroke="#d0d7de"/>
+<text x="330" y="139" fill="#59636e">3  slot 3</text>
+<rect x="318" y="152" width="150" height="22" rx="3" fill="#f6f8fa" stroke="#d0d7de"/>
+<text x="330" y="167" fill="#59636e">4  slot 4</text>
+<rect x="318" y="180" width="150" height="22" rx="3" fill="#f6f8fa" stroke="#d0d7de"/>
+<text x="330" y="195" fill="#59636e">5  slot 5</text>
+<rect x="316" y="178" width="154" height="26" rx="4" fill="none" stroke="#1f2328" stroke-width="2"/>
+<path d="M304,184 L314,191 L304,198 z" fill="#d0d7de"/>
+<path d="M482,184 L472,191 L482,198 z" fill="#d0d7de"/>
+<rect x="318" y="208" width="150" height="22" rx="3" fill="#f6f8fa" stroke="#d0d7de"/>
+<text x="330" y="223" fill="#59636e">6  slot 6</text>
+<rect x="318" y="236" width="150" height="22" rx="3" fill="#f6f8fa" stroke="#d0d7de"/>
+<text x="330" y="251" fill="#59636e">7  slot 7</text>
+<text x="570" y="34" font-weight="600" fill="#1f2328">3. Your own trig: the original</text>
+<text x="570" y="52" fill="#59636e" font-size="12">box gone, arrows back on 5</text>
+<rect x="588" y="68" width="150" height="22" rx="3" fill="#cf222e" stroke="#d0d7de"/>
+<text x="600" y="83" fill="#ffffff">1  your pattern</text>
+<rect x="588" y="96" width="150" height="22" rx="3" fill="#f6f8fa" stroke="#d0d7de"/>
+<text x="600" y="111" fill="#59636e">2  slot 2</text>
+<rect x="588" y="124" width="150" height="22" rx="3" fill="#f6f8fa" stroke="#d0d7de"/>
+<text x="600" y="139" fill="#59636e">3  slot 3</text>
+<rect x="588" y="152" width="150" height="22" rx="3" fill="#f6f8fa" stroke="#d0d7de"/>
+<text x="600" y="167" fill="#59636e">4  slot 4</text>
+<rect x="588" y="180" width="150" height="22" rx="3" fill="#f6f8fa" stroke="#d0d7de"/>
+<text x="600" y="195" fill="#59636e">5  slot 5</text>
+<path d="M574,184 L584,191 L574,198 z" fill="#d4a72c"/>
+<path d="M752,184 L742,191 L752,198 z" fill="#d4a72c"/>
+<rect x="588" y="208" width="150" height="22" rx="3" fill="#f6f8fa" stroke="#d0d7de"/>
+<text x="600" y="223" fill="#59636e">6  slot 6</text>
+<rect x="588" y="236" width="150" height="22" rx="3" fill="#f6f8fa" stroke="#d0d7de"/>
+<text x="600" y="251" fill="#59636e">7  slot 7</text>
+<path d="M222,160 L292,160" stroke="#59636e" stroke-width="2" marker-end="url(#ah)"/>
+<text x="257" y="150" text-anchor="middle" fill="#59636e">[YES]</text>
+<path d="M492,160 L562,160" stroke="#59636e" stroke-width="2" marker-end="url(#ah)"/>
+<text x="527" y="150" text-anchor="middle" fill="#59636e">own trig</text>
+<path d="M660,272 C660,312 390,312 390,278" stroke="#59636e" stroke-width="2" fill="none" marker-end="url(#ah)"/>
+<text x="525" y="322" text-anchor="middle" fill="#59636e">[YES] again: slot 5 again, no re-aiming</text>
+</svg>
