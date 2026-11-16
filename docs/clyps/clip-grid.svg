@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 470" width="780" height="470" font-family="-apple-system, Segoe UI, Helvetica, Arial, sans-serif" font-size="13">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 492" width="780" height="492" font-family="-apple-system, Segoe UI, Helvetica, Arial, sans-serif" font-size="13">
   <title>Clyps: every pattern's tracks are clips</title>
   <defs>
     <marker id="ah" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
@@ -11,7 +11,7 @@
       <rect x="474" y="0" width="52" height="24" rx="3"/><rect x="534" y="0" width="52" height="24" rx="3"/>
     </g>
   </defs>
-  <rect width="780" height="470" fill="#ffffff"/>
+  <rect width="780" height="492" fill="#ffffff"/>
 
   <text x="20" y="30" font-size="15" font-weight="600" fill="#1f2328">Bank A, as Clyps sees it</text>
 
@@ -69,5 +69,6 @@
     <text x="610" y="286" fill="#59636e">one track's sequence</text>
     <text x="610" y="302" fill="#59636e">in one pattern</text>
   </g>
-  <text x="20" y="458" fill="#59636e">Columns are tracks, rows are the bank's 16 patterns. Any track can play a clip from any row, while the active pattern keeps playing.</text>
+  <text x="20" y="460" fill="#59636e">Columns are tracks, rows are the bank's 16 patterns.</text>
+  <text x="20" y="478" fill="#59636e">Any track can play a clip from any row, while the active pattern keeps playing.</text>
 </svg>

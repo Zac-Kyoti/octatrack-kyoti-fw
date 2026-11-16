@@ -39,7 +39,7 @@
 <text x="330" y="223" fill="#59636e">6  slot 6</text>
 <rect x="318" y="236" width="150" height="22" rx="3" fill="#f6f8fa" stroke="#d0d7de"/>
 <text x="330" y="251" fill="#59636e">7  slot 7</text>
-<text x="570" y="34" font-weight="600" fill="#1f2328">3. Active pattern's trig: original</text>
+<text x="570" y="34" font-weight="600" fill="#1f2328">3. Trig 1: the original</text>
 <text x="570" y="52" fill="#59636e" font-size="12">box gone, arrows back on 5</text>
 <rect x="588" y="68" width="150" height="22" rx="3" fill="#cf222e" stroke="#d0d7de"/>
 <text x="600" y="83" fill="#ffffff">1  active pattern</text>
