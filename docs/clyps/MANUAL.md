@@ -73,8 +73,8 @@ member of a Multi. The Clyps view shows one column of the library: the active tr
   FX and settings from the source pattern's Part.
 
 **Cued or legato.** This decides *when* you hear a change.
-- **Cued** is Clyps on its own. Bringing in something new works like a pattern change: it waits for the CHAIN
-  AFTER point, or the end of the pattern.
+- **Cued** is stock's own timing. Bringing in something new works like a stock pattern change: it respects the
+  CHAIN AFTER settings.
 - **Legato** comes with **Direct Jump Kyoti**. The new clip takes over on the track's very next step, exactly
   where it would be had it been playing all along. Nothing waits and nothing restarts, so you can swap clips as
   fast as you can press trigs: a quick, musical, fluid way to make a lot of sequence variation on the fly.
