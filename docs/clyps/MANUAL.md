@@ -36,7 +36,8 @@ plays the other pattern's sequence on the pattern you're on. The other tracks do
 **The reload suite.** However you mix, match, or edit your track sequences, there's always a way to get back to where
 you were before. Clyps offers three ways back:
 
-- the **originals**: the bank as it was when you last loaded or saved it;
+- the **originals**: track sequences and patterns as they were when you turned on the Octatrack, or loaded/reloaded a
+  project. In the latter case, the originals are identical to "the card" reloads (see below);
 - your **temp saves**: one snapshot per track, taken with a key press;
 - the **card**: the project as last saved.
 
