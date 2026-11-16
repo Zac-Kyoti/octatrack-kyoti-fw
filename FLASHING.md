@@ -269,6 +269,8 @@ quick check for each:
   another: switching patterns across the Parts plays the FLEX sample, not the old loop.
 - **KYOTI CL36 walk-through** (WIP; `out/KYOTI_WIP/KYOTI_V1.7_WITH_CLYPS/OCTATRACK_OS1.40C_KYOTI_V1.7_WITH_CLYPS.syx`)
   = CL35's peek reworked + SAVE PART. Timing unchanged.
+  **CL37:** + a SETUP selected inside Clyps no longer shows at the Clyps window's left / right edges (hidden while the
+  Clyps view shows, back for a peek and after leaving Clyps).
   1. **The page as you left it:** outside Clyps put AMP in SETUP, open Clyps, hold AMP: AMP SETUP shows. Release:
      Clyps, drawn exactly as before (no offset, no stray pixels). Same with page 1.
   2. **Double tap in Clyps:** AMP, AMP quickly: the page flips (page 1 <-> SETUP) and Clyps does NOT show between the

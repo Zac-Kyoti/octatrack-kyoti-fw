@@ -461,6 +461,7 @@ cl_close:
     beq.w   cc_out
     clr.b   cl_open
     clr.b   cl_pkw                      | CL36: no deferred return
+    jsr     cl_showunder                | CL37: a SETUP hidden under ours back on screen
     tst.b   cl_pk                       | CL35: closed mid-peek -- Clyps' encoder list back in its layer (popped below)
     beq.b   cc_npk
     clr.b   cl_pk
@@ -876,6 +877,7 @@ kqpk_show:
     move.l  cl_win,-(%sp)               | and on top: a page switched during the peek relinks its own surface above
     jsr     0x400117b4                  | ours (stock's bring-to-front: unlink + link at the tail, nothing between)
     addq.l  #4,%sp
+    jsr     cl_hideunder                | CL37: a SETUP window under ours shows at our edges -- hidden while we show
     jsr     cl_refresh
     moveq   #1,%d0
     move.l  %d0,RDRAW
@@ -892,6 +894,7 @@ kqb_nw:
     bne.b   kqb_or
     move.l  %d1,-(%sp)
     jsr     cl_flstop
+    jsr     cl_showunder                | CL37: the windows hidden under ours (a SETUP) back for the peek
     movea.l cl_win,%a0
     lea     35(%a0),%a0
     bclr    #0,(%a0)                    | the window not drawn (kept, linked)
@@ -1583,6 +1586,41 @@ cb_set:
     move.b  %d1,cl_cph
     jsr     cl_draw
 cb_out:
+    rts
+
+| cl_hideunder / cl_showunder (CL37, the user 2026-11-15): Clyps' window is 112 px wide; a SETUP window under it (full
+| width) shows at its edges (page 1's edges are the main screen's track tabs, which stay). The current page object
+| [0x400bcd14] holds its SETUP window at +8 while SETUP is open (measured: the compositor list head -> tail = the main
+| screen 0x460d1758, SETUP 0x46c7d384 = [0x400bcd14]+8, Clyps 0x46c7d34c). While the Clyps view shows that window loses
+| its visible bit (+32 bit 0; cl_hidw remembers it); peek start / Clyps' close give it back. Uses d0-d1/a0-a1.
+cl_hideunder:
+    movea.l 0x400bcd14,%a0
+    move.l  8(%a0),%d0
+    beq.b   hu_out                      | no SETUP open
+    cmp.l   cl_win,%d0
+    beq.b   hu_out
+    movea.l %d0,%a1
+    lea     35(%a1),%a1
+    btst    #0,(%a1)
+    beq.b   hu_out                      | not drawn anyway
+    bclr    #0,(%a1)
+    move.l  %d0,cl_hidw
+    moveq   #1,%d0
+    move.l  %d0,RDRAW
+hu_out:
+    rts
+cl_showunder:
+    move.l  cl_hidw,%d0
+    beq.b   su_out
+    clr.l   cl_hidw
+    movea.l %d0,%a1
+    lea     35(%a1),%a1
+    btst    #5,(%a1)                    | still linked (a SETUP closed meanwhile stays closed)
+    beq.b   su_out
+    bset    #0,(%a1)
+    moveq   #1,%d0
+    move.l  %d0,RDRAW
+su_out:
     rts
 
 | cl_pkt (UI tick): a peek released inside stock's double-tap window comes back once it is past. Uses d0-d1/a0-a1.
@@ -8587,6 +8625,7 @@ cl_bt:      .byte 0                     | CL34: cl_cblink's tick within its 30-t
             .align 2
 cl_pre:     .space 32                   | per track: its pre-select arrows (cl_psave / cl_pload; 0 = none)
 cl_cq:      .long -1                    | CL34: the active track's cued slot, as cl_draw last saw it (cl_cueslot)
+cl_hidw:    .long 0                     | CL37: the SETUP window hidden under Clyps' (cl_hideunder)
             .align 2
 cl_ptngo:   .byte 0                     | 0x80 | N: a pattern reload finished, go to pattern N (cl_ptnswitch)
 cl_boxreq:  .byte 0                     | a card reload: the box home at the UI tail (cl_boxhome)

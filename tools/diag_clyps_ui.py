@@ -397,8 +397,8 @@ def main(argv):
                 return [(x, y) for y in range(len(P0)) for x in range(len(P0[0])) if P[y][x] != P0[y][x]]
             dw = [wdiff(v) for v in (v1, v2, v3, v4)]
             inside = [[d for d in dd if 8 <= d[0] <= 119] for dd in dw]
-            check(all(not d for d in inside),
-                  f"the Clyps view after each peek = the view before it, pixel for pixel inside its window "
+            check(all(not d for d in dw),     # CL37: the edges too -- a SETUP under Clyps is hidden while it shows
+                  f"the Clyps view after each peek = the view before it, pixel for pixel, edges included "
                   f"(inside: {[len(d) for d in inside]}; outside, the page underneath: {[len(d) - len(i) for d, i in zip(dw, inside)]}"
                   f"{'; first ' + str([d for d in inside if d][0][:8]) if any(inside) else ''})")
             lcd_view.png(P0, str(shots / "C6_before_peek.png"))

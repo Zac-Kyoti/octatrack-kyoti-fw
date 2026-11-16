@@ -1559,6 +1559,9 @@ the investigation (NOTES "CL24 timing investigation", harness `tools/diag_clyps_
   shows it once the window is past; a second press continues the peek.
 - Encoders: Clyps' layer lists none while peeking (`cl_layer+8` = 0; the rebuild copies encoder records as they are --
   no `-1` pass-down -- and skips a layer whose list is 0).
+- **CL37 (the user):** a SETUP opened inside Clyps showed at the window's 8-px edges. While the Clyps view shows, the
+  current page object's SETUP window (`[0x400bcd14]+8`) loses its visible bit (`cl_hideunder`, `cl_hidw`); peek start
+  and `cl_close` give it back. The main screen window `0x460d1758` (the track tabs) is never touched.
 - Gate C: modes, the return, and the screen AS COMPOSED (stock's composer `0x40013abc` into `[0x400b9710]`; the gate's
   PLANE shots are stock's page layer only -- they never showed Clyps' window) identical inside the window.
 

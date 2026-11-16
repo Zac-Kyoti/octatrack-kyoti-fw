@@ -38496,3 +38496,20 @@ Now 936 / 932 (<= 945): the pair fits, SC's donor becomes PLATE REV.
   into the flattened table 0x46c7dede (a knob during a peek would have jumped to 0xffffffff); caught by the new gate check.
 - Gates on CL35 (syx 0a2fafee..., NOT flashed): diag_clyps_ui 9/9 sets PASS (incl. the new peek check), diag_clyps_quant
   PASS (DJ off + on). Timing untouched.
+
+## 2026-11-15 (`trkseq`) — KYOTI CL36 / CL37: the peek reworked, SAVE PART, SETUP edges
+
+- CL35 on the unit: the peek drew wrong over a SETUP page (a 1-px offset, stray pixels; [FUNC] + page locked SETUP;
+  a second hold toggled SETUP back). Causes: unlinking Clyps' window freed its slot to the window manager (0x4005829c
+  finds a free slot by the linked bit), so stock built its SETUP window INTO ours; a plain press of the current page
+  went to stock, which toggles SETUP. Fix (scope §1.37): only the window's visible bit (+32 bit 0; compositor
+  0x40013ad8) + bring-to-front 0x400117b4 on return; no stock press for the current page; double tap / [FUNC] + page
+  flip SETUP via stock; no Clyps between the two taps (cl_pkw / cl_pkt vs stock's timer 0x460d5de0, LED tick ~60 Hz);
+  a SETUP closed by opening Clyps reopened at the first peek. CL37: the SETUP window ([0x400bcd14]+8) hidden while the
+  Clyps view shows (its pixels showed at the window's edges).
+- SAVE PART (scope §1.38): detour at its only exit 0x4004a9c4 -> that Part of the originals := the saved Part.
+- **Harness lessons:** the UI gate's PLANE shots are stock's page layer only (no window ever showed there); compare the
+  screen as composed (stock's composer 0x40013abc into [0x400b9710]). Route A runs no LED tick: age 0x460d5de0 by hand.
+- Gates: CL36 full set PASS (9 UI sets incl. gate 9 SAVE PART; quant running at commit); CL37 gate C PASS (composed
+  screen identical, edges included, after every peek variant). Flashed: KY+CL DJC7 (CL36 + DJ V7.2.2) -- peek OK but
+  the SETUP edges (fixed in CL37).
