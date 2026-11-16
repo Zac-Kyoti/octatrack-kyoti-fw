@@ -38225,3 +38225,7 @@ KDJC1 8003fb8f… = KDJC1 (ok); KDJC5 b0cc35cf… = KDJ7 (the corrected 7ce3f777
 81014221… = KDJ7** (the one flashed; its mainos 7c6131e7… is V7.2.2 as intended). The mainos of each is the intended
 one. From now: build the Bugbuild with `--no-rebuild` (or the standalone last), and check the "OS VERSION will read"
 line / the syx hash against a fresh named build before reporting.
+- **Correctly named A/B pair** (built last in scratch trees, no Bugbuild after; name from the builder's container line
+  "ELEK0178<name>"): `out/ab/KDJC8/OCTATRACK_OS1.40C_DIRECT_JUMP_KYOTI.syx` = V7.2 (ffff346), 140C_KDJC8, syx
+  5a906055…, mainos 1f0ea5cd…; `out/ab/KDJC9/OCTATRACK_OS1.40C_DIRECT_JUMP_KYOTI.syx` = V7.2.2 (ec2f708), 140C_KDJC9,
+  syx eb2436c0…, mainos 7c6131e7…. The card .bin is ELUP-obfuscated, so the name is not readable there directly.
