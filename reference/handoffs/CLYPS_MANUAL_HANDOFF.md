@@ -14,6 +14,9 @@ Start here if you are the session writing the Clyps manual. Read this whole file
 > Don't leave anything out, but do focus on the high level organizational strategy and logic of the
 > system, and the playable features."
 
+**Scope rule (the author, 2026-11-15): "Don't need history. Just current features, what they do, and how
+to use them."** No changelog, no "previously", no version numbers in the manual.
+
 **Standing rule (the author):** the manual is updated whenever a Clyps change affects its (approved)
 content. Note it in the Clyps change's NOTES entry when you do.
 
@@ -193,7 +196,7 @@ content. Note it in the Clyps change's NOTES entry when you do.
 - Known, not a bug: a FULL load's new settings can be heard for a few milliseconds on the outgoing
   sound's fade (the Octatrack has one sound path per track) — describe only if the author wants it.
 
-## 4. Which parts of `CLYPS_SCOPE.md` are history
+## 4. Which parts of `CLYPS_SCOPE.md` are history (for YOUR research only — none of this goes in the manual)
 
 The scope grew in layers; later sections override earlier ones. For the manual:
 - **Current:** §1.26 – §1.38 (persistent arrows onward), §1.27 (combinations), §1.20 (executions, groups),
