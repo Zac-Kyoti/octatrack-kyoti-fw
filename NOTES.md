@@ -37607,6 +37607,364 @@ is not edited) and `tools/emu_sc_shared.py`.
   same way, not flashed as such). Every FINAL builder matches its pin without the opt-in under the new
   table check (13 builders + 9 Bugbuilds; BLACKPYRAMIDS_303's two FINAL images checked directly: table stock).
   V1.6 builds from tag ref/kyoti-v1.6-2026-10-29 (8868867). README: KYOTI V1.7 + a "Before you flash" line.
+## Session 131 (2026-10-22, `trkseq`) — TRACK_SEQ_SELECT scoped (research only, no build)
+User ask: `[PTN]`+`[BANK]` → modal list of the active track's sequence in the 16 patterns of a bank
+(LEFT/RIGHT bank, UP/DOWN, YES/NO, trig pick), a trig-LED view (green / half / off / red / flashing
+red), the pick cued to land like a pattern change, the Part untouched; phase 2 = named sequences.
+Scope: `reference/handoffs/TRACK_SEQ_SELECT_SCOPE.md`. Static reads only, by five parallel research
+passes plus spot-checks (`0x4002b3b4`, `0x40029b9c`, the gate `0x400a4352..`).
+Key facts:
+- All 16 banks are resident, so a load is a RAM memcpy of a 0x91a / 0x8b0 record.
+- Stock's sequence-only write `0x4002b3b4` / `0x4002b2f4` + `0x40029b9c` is our model; PASTE TRACK
+  is not (it writes the Part).
+- A key held during a layer rebuild keeps its old handlers (`0x400312e2`), so [PTN]/[BANK] releases
+  always reach stock and are suppressed via `PTN_CONSUMED` / `BANK_SEL = 2`.
+- Windows: `FUN_4005829c(w,h,dx,dy,prio,close_cb)`, priority eviction, a close_cb that is never
+  cleared; CHOOSE PROJECT (`0x400647a0`) is the template.
+- LED layer stack `0x4007e760` / `0x4007e81c` / `0x4007e998`, dim level 7; stock never flashes a cued
+  pattern.
+- The gate never reads SCALE_MODE; the wrap body re-homes every track.
+- Names: the bank file has no free serialised byte (exact chunk lengths, checksum), so they go in a
+  sidecar file; editor `FUN_4007e664`.
+- KB corrections are listed in §9 (window constructor arguments, arrow codes, `0x40027e00`, [PTN]'s
+  layer), to apply with the first code commit.
+
+**Session 131 cont. (2026-10-23)** — The user's answers turn the scope into **CLYPS**
+(`reference/handoffs/CLYPS_SCOPE.md`, renamed from `TRACK_SEQ_SELECT_SCOPE.md`). Terms: Clyps mode /
+Clyps view / Clyps grid.
+- **View:** all 16 slots visible (2 × 8); UP/DOWN wrap 16→1.
+- **Grid:** cued = yellow (red + green, stock's own cue pair), playing = red.
+- **Closing:** YES or a trig, with the chord not held, closes Clyps; with the chord held the grid
+  keeps picking.
+- **Saved sequences:** [FUNC]+[YES]/[NO] = 16 per-track saved sequences (DRAM; they survive pattern,
+  bank and project changes but not a power cycle).
+- **Model correction given to the user:** a plain copy loses the playing pattern's own slot. The
+  scope now keeps a per-track backup, restores the own sequences when the pattern is left, and
+  writes backups (not clyps) to the card. The hook point is the single bank writer `0x400917c8` (5
+  callers, including SAVE AS NEW `0x4008505c`). Its O1/O2 are open.
+- **Placement:** buffers 72,864 B, so Clyps is a DRAM unit standalone too.
+- **Font:** `0x400ba876` is ≈ 4 px a character (RELOAD's measured widths), so a 64-px column holds
+  ≈ 15 characters.
+
+**Session 131 cont. (2) (2026-10-23)** — CLYPS landing oracle, phase 1 (emulator, stock image).
+`tools/diag_clyps_landing.py` (recorder: diag_reflock's, plus in-RAM `--copypat`/`--copytrk`/`--setb`
+setup on a real export and a harness-side `--clyp`) and `tools/cmp_clyps.py` (A vs B, pattern number
+ignored). Base: the user's OT DEMO export, bank 1.
+- **A1 vs B1** (PER TRACK A15, master 32, T6 ← A14's 64-step T6; copy at the wrap-body entry
+  `0x400a43a0` on the master-wrap tick, vs a stock change to an in-RAM copy holding that T6):
+  IDENTICAL, 450/450 ticks.
+- **Controls fail:** no load never locks. The copy one tick late (phase D of t187) loses step 0's
+  event at t192, then locks from t193.
+- **A2 vs B2** (NORMAL A10, T1 ← A12): IDENTICAL, 260/260.
+- **CHANGE = 4** (A3 vs B3): the stock change lands at t42 and restarts **every** track. With no
+  pending change, the wrap body runs only at the master wrap. So mid-pattern Clyps landings need a
+  one-track rule (scope O9: phase-continuous, oracle = a never-switched run of the clyp's pattern).
+User decisions this round: a DJ-on load lands like DIRECT_JUMP_KYOTI; [YES] with the chord held =
+DJ toggle; saved sequences are destroyed by a power cycle or a project reload; O1 (keep vs restore)
+is open, with the "originals" proposal in scope §1.5b.
+
+**Session 131 cont. (3) (2026-10-23)** — CLYPS decisions: FULL loads (sequence + machine/FX, scene
+locks and LFO designer included; [FUNC] held = momentary `FULL` highlight); [FUNC]+[PAGE] =
+restore all; held/latched states; keep + guaranteed originals (≈ 9 MiB DRAM). Single-track Part
+apply `0x40001f18(bank, part, t)` found (C), to be used for FULL landings.
+**Candidate stock bug:** TRACK COPY `0x40029754` leaves the LFO designer behind (C: clipboard
+`+0x91f..+0x9a1` holds only the six Part blocks), so a pasted track with WAVE = designer plays the
+destination track's designer. Not yet observed on the unit. The user's check: on T1 set an LFO WAVE
+to the designer, draw an obvious shape, aim it at volume with high depth; leave T2's designer
+different; GRID REC copy T1, paste onto T2; does T2's LFO follow T1's shape? If not → a
+BATCH_BUGFIXES candidate (TRACK_PASTE_DESIGNER_FIX, working name); MIDI tracks likewise.
+
+**Session 131 cont. (4) (2026-10-25, `trkseq`)** — CLYPS: DRAM move, saved sequences, originals.
+`140C_CLYP9` built, NOT flashed (syx `9bd97e27…`; CLYP7 was never flashed and is superseded).
+- Code split: tick path in the classic cave (2,130 B), the rest linked at the arena reserve and
+  carried by the boot loader; 9.6 MB of buffers via the new `dram.build(bss=)` (1,563 pages).
+  The split alone (CLYP8) is tick-for-tick identical to CLYP7 on the landing runs.
+- Saved sequences ([FUNC]+[YES] / [FUNC]+[NO], immediate), originals (first replacement wins,
+  `ORIG` cursor entry, [PAGE], [FUNC]+[PAGE], NORMAL→PER TRACK undone byte for byte), cleared on a
+  project load. UI gate 61/61; running restores lock the tick after landing.
+- User decision: with the [PTN]+[BANK] chord held, [YES] must not toggle DIRECT JUMP; [PTN]+[YES]
+  in Clyps mode does.
+- Found: a key's sub-maps chain across layers (stock's FUNC sub-map took [FUNC]+[YES]); LOAD
+  PROJECT reads banks through `0x400905d4(ctx, mask, …)`, not `0x40090504`; route A never ages
+  the TRACK double-tap timer `0x460d5de0`. Details: CLYPS_SCOPE.md §0 traps, §8b, §9.
+
+**Session 131 cont. (5) (2026-10-26..28, `trkseq`)** — CLYPS CLYPA..CLYPF; CLYPF FLASHED, the user's
+walk-through all passed. The 2026-10-27 model (scope §1.0): highlight = your pattern, 1 px select box,
+trig = select + load, only [NO] closes, [BANK] + arrows page; originals = banks as loaded (10.2 MB
+snapshot); temp save / reload OUTSIDE Clyps (hold [YES] / [NO] + TRACK; stock ARM / DISARM on a
+quick tap); names via [FUNC]+[BANK] (stock editor, 9 chars) saved per bank in clypsNN.work / .strd
+alongside stock's bank files; the "edited" x; the user's cell layout. Harness lesson: never
+call_as_main a poster that touches the card first (CARD SYNC 0x40022cd4) -- it corrupts the
+emulator's task frames (looked like a Clyps stack bug for hours). Next: scope §0 step 0 (stock
+[PTN] / [BANK] inside Clyps). Details: CLYPS_SCOPE.md §0, §1.0, §10.
+
+**Session 131 cont. (6) (2026-10-28, `trkseq`)** — CLYPS `140C_CLYPG` BUILT, NOT flashed: scope §0
+step 0 (stock [PTN] / [BANK] inside Clyps), the BANK box, the [MIDI] key inside Clyps, no load modes
+on the MIDI side.
+- RE (scope §1.0 "Step 2 as built"): [BANK]'s press opens SELECT BANK and pushes layer `0x400cff14`
+  (trigs pick a bank, state 1, then a pattern, state 2); [PTN]'s press pushes `0x400bf0f2` (trig =
+  pick `0x40056b2c`, consumed := −1). SHOW_WIN `0x40059f8c` is a prio-10 window: the Clyps view stays
+  under it.
+- In Clyps: [PTN] = stock's handler; [BANK] = stock's press minus SELECT BANK (shown on a plain tap's
+  release; none after arrow paging); a bank picked on the grid stays pending; a stock pattern pick
+  closes Clyps (UI tail). The header boxes `BANK A` while [BANK] is held. The UI tail refreshes the
+  view / grid when the active track changes under Clyps ([MIDI] is not our key). MIDI side: no
+  `LOAD: SEQ` label, [FUNC] changes nothing (the user: a MIDI load always takes everything; the
+  MIDI Part slice arrives with FULL loads).
+- Scoped (not built): `ORIG SEQ` / `ORIG SEQ+MCH/FX` (§1.7); names follow stock track / pattern
+  copy / paste (§10.3).
+- Harness: the gate called set_key_state directly, so Clyps' UI tail ran only when stock posted a
+  message; K and M now post a type-0 SYS message after each key (straight to the tail). Posting
+  it in every scenario made S fault after A..E+G+T (an emulator accumulation effect; every shorter
+  prefix passes), so only K and M do. Gate K (21 checks) new; M gains the [MIDI] check.
+
+**Session 131 cont. (7) (2026-10-28, `trkseq`)** — CLYPS `140C_CLYPH` BUILT, NOT flashed (the user
+flashes it next round; CLYPG was never flashed): FULL loads (scope §1.7 "Built").
+- Audio: [FUNC] + trig / [FUNC]+[YES] load the sequence + the track's Part slice (machine, FX,
+  levels, all pages, slot, recorder, 16 scene-lock rows, per-scene bytes, LFO designer); `ORIG SEQ`
+  / `ORIG SEQ+MCH/FX` on the box. MIDI: every load carries its slice (pages, setup, designer).
+- Applied at the landing for that one track: stock's `0x40001f18` (audio; restart bit on a new
+  machine) or `cl_mapply` (stock's per-track MIDI body of `0x40009094`); the UI tail does stock
+  TRACK PASTE's SRAM / edited flags, PICKUP setup and page redraw. Saved sequences keep their Part.
+- Gates: F 14/14 (incl. a running landing from the tick), M 8/8, full 109/109; landings C1wH
+  (plain), C1wF (FULL) and C1wP (FULL from another Part) = stock B1 at all 450 ticks. ROM cave 3,328 B (2,620 left); bss +101 KB (SAVEPART).
+- Harness traps: a [BANK] tap with no arrow now opens SELECT BANK (the gate paged with zero
+  arrows and the overlay ate the next trig); `diag_clyps_landing.py` stages into one fixed tree
+  (no parallel runs); a wait loop on `pgrep -f <name>` matches its own command line.
+
+**Session 131 cont. (8) (2026-10-29, `trkseq`)** — CLYPH FLASHED by the user; their changes built as
+`140C_CLYPI`, NOT flashed (scope §0 "2026-10-29"): rounded bar / box; header outlines (BANK while
+[BANK] alone is held, `LOAD: ` + outlined SEQ / SEQ + MCH/FX / ORIG SEQ / ORIG SEQ + MCH/FX / ORIG /
+ORIG PTN + PART; `T6` alone beside the two long ones); [BANK] outside Clyps acts on release
+(RELOAD_FROM_PROJECT's inversion); grid red / solid yellow cue / flashing red box; [PAGE] = ORIG SEQ,
+[FUNC]+[PAGE] = ORIG SEQ+MCH/FX; chord + [PAGE] = ORIG PTN + PART (pattern + whole Part as loaded;
+closes Clyps when the chord began outside); the 4th page LED shows ORIG / chord status. Gates: full
+(A..K) + F 22/22 + M 8/8 pass. Harness: E / F post one tail message before a held-flag check.
+- **CLYPJ** (same day, NOT flashed; CLYPI never flashed): all four page LEDs give the ORIG / chord
+  indication together; the temp-reload slot label reads `SAVED SEQ`; no SAVED in the header.
+  Gates F 22, M 8, A..K 113 pass. clyps_render.py now ages the TRACK double-tap timer like the gate
+  (and needs a leading `32` for the boot SET DATE/TIME dialog).
+- **CLYPJ flashed; CLYPK** (2026-10-29, NOT flashed): rounding and header outlines undone (dark
+  inverted boxes on BANK / every right-hand label after `LOAD: `); ` + ` → `/`; the select box and
+  "changed" page LEDs use stock's p-locked-trig flash (`0x40013784(green die, 3)` per 30-tick
+  period, stock trig tick `0x400340e4`); unnamed slots `-NN TRGS-`. Gates F 22, M 8, A..K 113.
+- **CLYPK flashed (all points passed); CLYPL / CLYPM** (2026-10-29, CLYPM NOT
+  flashed, supersedes unflashed CLYPL): labels `TRK SEQ` / `TRK SEQ/MCH/FX` / `ORIG TRK SEQ` /
+  `ORIG TRK SEQ/MCH/FX` / MIDI `MIDI TRK`; audio temp reload FULL; slot labels `A01 15 TR` and
+  source `B14 06 TR` / `B04 LOCKS` / `B04 ---`, empty `---` centred; load confirmation flash (0.75 s,
+  new detour on stock's 1/60 s UI tick `0x40056c28`, ROM stub `cl_uitick`); [FUNC]+TRACK = stock mute
+  in Clyps (TRACK keys out of `cl_fsub`); [FUNC]+[MIDI] Parts menu over Clyps (window prio 0:
+  `WIN_NEW` evicts prio >= p). Gates: full 119, F+Q 26, M 8. Harness: route A runs no UI tick (gate
+  B calls `0x40056c28`); `0x40033970` is not a readable mute state.
+- **CLYPN** (2026-10-30, NOT flashed; CLYPM never flashed): header `T6 BNK A` always (never hidden),
+  `LOAD: TRK SEQ` / `TRK FULL` / `ORIG TRK SEQ` / `ORIG TRK FULL` / `MIDI TRK` / `ORIG MIDI TRK` /
+  `ORIG PTN+PART`; the [PTN]+[BANK] chord inside Clyps, either order: stock's [BANK] / [PTN] overlays
+  off, the grid shows a pattern view of the playing bank (PAT_HASDATA `0x4009a464`), the select box
+  hidden until either key is let go; chord + [YES] = ORIG PTN+PART like chord + [PAGE]. Gates full
+  127, F+Q 26, M 8. Next: pattern reload from the card + RELOAD_FROM_PROJECT inside Clyps (scope §1.8).
+- **CLYPN flashed** (mostly all good); **CLYPO** (2026-10-30, NOT flashed): the load confirmation is
+  30 UI ticks (0.5 s), phase every 5 ticks: 3 inverted / normal cycles. Gates full 128, F+Q 26, M 8.
+  Order agreed next: the card reloads in Clyps (scope §1.8) before DIRECT JUMP / KYOTI integration.
+- **CLYPP** (2026-10-30, NOT flashed): reloads from the CF card in Clyps
+  (scope §1.8): [PTN] alone + TRACK = the track's sequence, [BANK] alone + TRACK = sequence + the
+  track's Part slice from the card's WORKING Part chunk (never the whole Part), chord + TRACK nothing,
+  chord + trig N = pattern N of the playing bank (slab + its whole Part). `tools/clyps/clyps_reload.s`
+  is forked from RELOAD_FROM_PROJECT's card job (two new detours `0x40085864`, `0x40023c62`). RE: the
+  .strd holds 16 PTRN, 4 working PART, 4 SAVE PART chunks (`0x4008e0c0..`). Gate L: only bytes the
+  bank file never holds differ (`+0x899`). Gates L 8, full 128, F+Q 26, M 8. Next: DIRECT JUMP /
+  KYOTI integration; RELOAD_FROM_PROJECT's own update after Clyps.
+- **CLYPP flashed; CLYPQ** (2026-10-30, NOT flashed): the MIDI side gets SEQ / FULL like audio (plain =
+  sequence only, [FUNC] = with the track's settings; `LOAD: MIDI TRK SEQ|FULL`, `LOAD: ORIG MIDI SEQ|FULL`);
+  toasts `TRACK n SEQ|FULL` / `RELOADED FROM PROJ`, `PATTERN A06` / `RELOADED FROM PROJ`, temp
+  `TRACK n FULL SAVED`, `TRACK n FULL` / `RELOADED` (MIDI two lines). Scope §1.8 lists the standalone
+  RELOAD_FROM_PROJECT work (FULL track slice, new toasts, + the pattern reload). Gates L 8, full 128,
+  F+Q 26, M 9.
+- **CLYPQ (rebuilt)**: the nothing-saved toast reads `TRACK n: SAVE FIRST!` (MIDI: `MIDI TRACK n` /
+  `SAVE FIRST!`); syx 786ba9ec…, gates full 128, M 9. NOT flashed.
+- **CLYPQ flashed; CLYPR** (2026-10-30, NOT flashed): the highlight bar flashes on a load of your own
+  pattern; stock's Part-edited flag follows "differs from the SAVE PART copy" after FULL loads (gate F
+  exercises both: equal False / True); ORIG PTN+PART box flashes after the chord + [PAGE]/[YES] inside.
+  Multi-track loads ([CUE] group) scoped (§1.9); RE so far: [CUE] = key 0x2a (sub-map 0x400bf2a0: TRACK
+  = stock cue 0x40083dc4, YES 0x400402ec, 0x2b/0x2c 0x4003234c, 0x18 0x40062d58); track LEDs = LED
+  slot 6 painter 0x40083eb0 (tick 0x40083fdc, period 2; active track via 0x80000000); the sidebar tab
+  is NOT drawn with RECT/TEXT (no edge draws on a track change): next to find. Gates L 8, full 128,
+  F 27, M 9.
+- **CLYPT** (2026-10-30, NOT flashed; CLYPR never flashed, the unit has CLYPQ): multi-track loads with a
+  [CUE] group (scope §1.9 "Built"). Sidebar RE solved: the tabs ARE drawn with RECT / glyph calls, by
+  `FUN_4003fed8`, run on every pass of `FUN_40052200` (route A never runs it, hence no draws on a track
+  change); found by a write watch on the main window's edge columns during a project load
+  (`tools/clyps_probe_sidebar.py`). Its two loops and the track LED painter's four colour picks share
+  one 6-byte active test `mvzb 0x80000000,%d0` -> `jsr cl_act4/cl_act5` (ROM): members get stock's own
+  tab and active colours. Our [CUE] record + sub-map (TRACK = toggle, [YES] = nothing); loads / ORIG /
+  [PAGE] loop the members (`cl_each`, `cl_restore`); [NO] dismisses the group. Header `MULTI BNK A`
+  (41 px, x 3..43): the per-track right labels collide (their `LOAD:` starts at x 34-42), so a group
+  shows `LOAD: SEQ|FULL`, `LOAD: ORIG SEQ|FULL` (proposal, to confirm). KB memory-map rows added
+  (`FUN_4003fed8`, `0x460d168c`, slot 6 details). Gates: full 128, F+Q 27, L 8, M+U on JAM2 26 (U 17,
+  incl. muted members = yellow), U on OT DEMO 17. syx 368bb03a….
+- **CLYPT flashed (2026-10-31); CLYPV** (NOT flashed): CLYPT's track LEDs were right, but the sidebar tab followed
+  the group only in its upper half (machine glyph); the lower half (play-status glyph) stayed on the active
+  track, with a stray `!` from the mismatched halves. The lower half is a second painter `FUN_4004bd48`
+  (`0x40052200` calls it just before `0x4003fed8`) with its own active tests `0x4004bd64` (d4) / `0x4004be9c`
+  (d3) -> `jsr cl_act4` / new `cl_act3`. Renders calling both painters: a member's tab = stock's active tab
+  pixel for pixel. Lesson: the 2026-10-30 write probe had listed `0x4004bd48`'s writes too (returns
+  `0x4004bf50..0x4004c064`); every writer a probe finds must be accounted for. Also the user's rename: the UI
+  word FULL -> ALL in every Clyps label and toast (all narrower; widths re-measured). syx 527ec87e….
+- **CLYPW** (2026-10-31, NOT flashed; replaces the unflashed CLYPV): no ALL in the save / reload toasts, one line
+  where it fits. Trap: toasts use the toast font `0x400ba862` (width table `0x400c205c`, digits 5 px), not the
+  header font `0x400ba876`; measuring with the header font said every toast fits. One line now: `TRACK n
+  SAVED`, `MIDI TRACK n SAVED`, `TRACK n RELOADED`; still two: `MIDI TRACK n` / `RELOADED` (114 px > 113), the
+  MIDI SAVE FIRST!, the card reloads (`TRACK n SEQ` / `TRACK n` + `RELOADED FROM PROJ`). syx 29a579ee….
+- **CLYPX** (2026-10-31, NOT flashed): hardware on CLYPW showed a stray `!` beside the machine glyph wherever the
+  shown tab and the real active track differ. A third drawer of `FUN_40052200`, `FUN_40044804`, paints a per-track
+  status mark (4 pixels, `!`-shaped) coloured to blend into the tab or background from its own active test
+  `0x4004482a` -> `jsr cl_act4`. Reproduced only by calling `0x40052200` itself in the render (the painters alone
+  did not show it); a write watch during that call accounts for every sidebar writer: `0x4004bd48`, `0x4003fed8`,
+  `0x40044804`. Card reload toast back to `TRACK n ALL` / `MIDI TRACK n ALL` + `RELOADED FROM PROJ` (the user).
+  syx 35ffcec8….
+- **CLYPX flashed, all good (2026-10-31). CLYPY** (NOT flashed): temp toasts `TRACK n TEMP SAVED` (104 px, one line),
+  `MIDI TRACK n` / `TEMP SAVED`, `TRACK n` / `TEMP RELOADED`, `MIDI TRACK n` / `TEMP RELOADED`. Gates full 128, M+U 26.
+- **KYOTI CL1** (2026-10-31, WIP, NOT flashed): KYOTI V1.6 with Clyps in place of RELOAD_FROM_PROJECT, tied to
+  DIRECT JUMP (CLYPS_SCOPE §1.10): `build_kyoti.py --with CLYPS`. Clyps is one all-DRAM unit (no ROM bytes: the
+  loader runs at the boot site 0x4000050c before any task / ISR); it owns phase D 0x400a1f72 and calls DJ's
+  dj_land first (SUPERSEDE, asserted); DJ's landing tick drops Clyps cues; DJ on = cues land at every master
+  step; [PTN]+[YES] in Clyps tail-calls dj_toggle. RAM cost 10.2 MB. Gates on the KYOTI image: full 128, F+Q
+  27, L 8, M+U 26, new J 10. Default build still = FINAL V1.6 (c2692220…). Aside (told the user): KYOTI's SAFE
+  zone is the live tail of the curve table at 0x400d1ce0 (entries 508-1023, read by 0x40003522).
+- **KYOTI CL2** (2026-11-01, WIP, NOT flashed; CL1 never flashed, superseded): CL1 was built in a worktree 30
+  commits behind origin/main (old V1.6: REC_TRIG_MUTE on [YES]/[NO]). trkseq rebased onto origin/main; CL2 = the
+  same Clyps on main's V1.6 (default build still = FINAL 05460b97…). syx 30fdf640…. Gates on CL2: full 128, F+Q
+  27, L+J 16, M+U 26. Gate F's running ALL load now allows one KYOTI-only difference: SIDE-CHAIN's sc_norm turns
+  a playing COMPRESSOR's MON (FX page 2 slot 2, Part +0x2f2+30t+13/19) from an older 0/1 into 2 (OFF).
+- **The curve table under KYOTI's SAFE zone = DELAY's filter coefficients (2026-11-01, RE; KYOTI V1.6 FINAL
+  affected).** `0x400d1ce0` holds 1,024 one-pole coefficients of the stock ColdFire DELAY (`0x400031a0`,
+  called from the eDMA state machine 0x40004b12; gate: FX2 id == 8 = DELAY): HP pole = table[BASE>>6]
+  (+20), LP pole = table[(BASE+WDTH)>>6] (+24); entries 508..1023 are 0 (filter open). KYOTI V1.6 puts ~2 KB of
+  code at 0x400d24d0..0x400d2cdc = entries 508..1022, so every DELAY with BASE+WDTH >= 127 (the stock
+  default BASE 0 / WDTH 127 included) reads a code word as its LP pole: entry 508 = 0x40068ce0 (c ~ 0.50,
+  verified in main's V1.6 image) -> repeats low-passed at ~5 kHz and darker each repeat; other knob sums give
+  0.7-12 kHz or negative c; entry 678 = 0x80000003 (only via slides / LFO / scenes) runs the loop 1 sample
+  instead of 16 (a glitch while held). |H| <= 1: no runaway, no crash. Init 0x40002f44 reads entries 0 and
+  1023 only (stock in V1.6). Emulator (stock image, OT DEMO): the reader ran 4,133 times in 1.5 s and read
+  entries 508 and 764. Fix direction: vacate 0x400d24d0..0x400d2cdc in KYOTI (V1.7) + a seal() check; the
+  Bugbuilds' SAFE fallback (build_bugbuilds.py SAFE_START) has the same problem when it is used. Probe:
+  scratchpad curve/probe.py (subagent, 2026-11-01).
+- **KYOTI CL3** (2026-11-02, WIP, NOT flashed; CL2 superseded): trkseq rebased onto main 4b83b4c (KYOTI V1.7 FINAL);
+  the same Clyps on V1.7 (DIRECT JUMP in DRAM too: Clyps' phase-D site calls dj_land at its DRAM address). syx
+  2c59c6ad…. Gates on CL3: full 128, F+Q 27, L+J 16, M+U 26. Standalone CLYPY unchanged (111d6103…, passes the
+  new DELAY-table seal check); the default build still = FINAL V1.7.
+- **CLYPZ / KYOTI CL4** (2026-11-02, NOT flashed; CL3 flashed by the user): header swapped (LOAD: left, BNK right,
+  widths at runtime), MIDI labels = audio, ALL -> FULL, group TRK SEQS / TRKS FULL / ORIG SEQS / ORIG FULL; no 17th
+  ORIG entry (your own slot is ORIG: `cl_onorig`); SAVE PROJECT retakes the originals; temp save / reload = TRACK +
+  [YES] / [NO] inside and outside Clyps (TRACK-held sub-map 0x400d164a records -> cl_tsy / cl_tsn; stock ARM /
+  DISARM only with Recording Setup open, 0x460d10cc), toasts TEMP TRK SAVED / RELOADED, temp saves preloaded with
+  the originals (`cl_presave`); fixed: a temp reload while playing was cancelled by the re-pick rule once the
+  source was "saved" (`cl_asplays`); Recording Setup over Clyps: Clyps forwards its keys to the base keymap
+  (FWDCHK). Trap: a held key's sub-map is linked into the layer chain above ours, so "a layer above Clyps" is NOT a
+  menu test. Card toasts TRK SEQ / TRK FULL + RELOADED FROM PROJ; slot label SAVED TRK. Gates on CL4: full 115, T
+  20, F+Q 27, L+J 16, M+U 26. KYOTI CL4 syx 4e02aa9d…; standalone CLYPZ in out/.
+- **KYOTI CL5** (2026-11-02, NOT flashed; CL4 never flashed): the user's corrections -- header order `T6 LOAD: <label>
+  BNK A` (`MULTI LOAD: ...`), group ORIG `ORIG SEQS` / `ORIGS FULL`, SAVE BANK retakes those banks' originals
+  (+ temp saves when the playing bank is saved), the TRACK release after TRACK + [YES] / [NO] selects nothing (clear
+  0x460fab44, stock's "select on release"). Gates on CL5: full 115, T 21, F+Q 27, L+J 16, M+U 26. syx 27c9999c….
+- **KYOTI CL6** (2026-11-02, NOT flashed; CL5 never flashed): `[PTN]`+`[BANK]` + trig N on a pattern whose Part is not
+  the sounding one restored that Part from the card but left stock's edited mark; now `cl_pmark` (factored out of
+  `cl_postpart`) recomputes it for the Part pattern N links to, and no other. Gate L's new check fails on CL5
+  (control) and passes on CL6. Gates on CL6: full 115, T 21, F+Q 27, L+J 18, M+U 26. syx bba0fbb5….
+- **KYOTI CL7** (2026-11-04, NOT flashed; unit has CL3, CL4-CL6 never flashed): (1) the `[CUE]` group's view follows
+  the group (the user): `[CUE]`+TRACK selects the added track (stock's select 0x40083bf8); after a removal the newest
+  member on the side you are on (`cl_gord` add order), else the pre-group track (`cl_gpre`) if on this side, else
+  no change -- never a side switch (the screen must not show MIDI tracks off the MIDI side). (2) The card reloads
+  copied our parse scratch over the live slab including the bytes the bank file never holds (each audio record's
+  +0x899, the slab tail +0x8e5c..): leftover 255 / 127 there made a reloaded SAVED pattern differ from its original
+  -> the "x" on its slot (gate X: FAIL before, PASS after); now those bytes keep their live values, as stock's own
+  reload (it parses into the live slab). (3) ORIG PTN+PART with DIRECT JUMP on crawled its 0.5 s flash on hardware:
+  DJ lands the restore at the next master step, inside the flash (DJ off: at the wrap, usually after it), and the
+  landing's UI pass did per track what is shared -- 16 x the 36 KB slab into the battery NVRAM mirror, 16 x the
+  Part's mark / SRAM copy / seven page redraws, SEQ_DIRTY twice per audio index. Now `cl_postmask` does each once.
+  Emulator cannot time NVRAM / LCD: the cause is a hypothesis until the unit shows the flash right (gate O shows one
+  landing and a correct flash either way; its instruction counter is not isolating the pass -- do not quote it).
+  Gates on CL7: full 115, T 21, F+Q 27, L+J 18, M+U 32, X 2, O 3. syx 796e9fde….
+- **KYOTI CL8** (2026-11-04, NOT flashed; CL7 never flashed): lean loads (the user: no read / write of data the target
+  slot does not need; scope §1.12). NVRAM mirror writes per load (gate W, OT DEMO, CL7 -> CL8): TRK SEQ 36,568 ->
+  2,466 B; TRK FULL 42,890 -> 2,466 B + its slices; group of 2 73,136 -> 4,796; ORIG PTN+PART 686,240 -> 42,890; card
+  TRK SEQ / FULL / pattern ~672-679 KB -> 4,932 / 4,932 + slices / 45,356 (stock's whole-bank 0x4000faf0 dropped);
+  mirror == RAM after every load. Card reads seek straight to PTRN P / PART p (offsets per version, 816 real files:
+  st 0x8eec from 0x17, 0x8ee8 before; OctaLib's table fits 0x17 only). TRAP: stock's buffered seek 0x4001660c keeps a
+  partly read buffer and re-seeks the backend exactly -> the parser saw no PTRN tag (-51); `rq_seek` = backend seek
+  0x46c8243e to the block + buffer index (+12) cleared + the remainder read and dropped. Fallback: reopen, chunk by
+  chunk. Batches (`cl_bbeg`/`cl_bend`) serve a stopped group / ORIG / temp chord once. Originals = slabs + working
+  Parts (0x95048 a bank): 1,703 -> 1,637 pages. TRAP caught by gate N/P: `cl_snapbank` used the snapshot stride for
+  the live source too (banks 2-16 snapshotted from the wrong place); fixed. DIRECT JUMP's hand-off NOT used for ORIG
+  PTN+PART (pattern-switch semantics: START SILENT, COND_RESET) -- a question for the user. Header (the user):
+  a group or the [PTN]+[BANK] chord reads `MULTI LD: <label>` (ORIG PTN+PART -> `ORIG PTN+PRT`, its box to x 86).
+  Gate L now starts on the audio side (JAM2 comes up on MIDI: L failed there on CL7 too, a gate gap). Gates on
+  CL8: full 116, T 21, F+Q 27, L+J 19, M+U 32, X+O+W 15 (OT DEMO); X+L 14 (JAM2). syx 9480e707….
+- **KYOTI CL9** (2026-11-04, NOT flashed; CL7 / CL8 never flashed): ORIG PTN+PRT while playing = a pattern change to
+  itself (the user: DJ on -> DJ's jump; off -> a stock pattern change; stopped unchanged; row spacing stays 1 px).
+  Stock: `cl_sw6` (jsr 0x400a4352) forces the switch gate's d6 = 1 for a pending request, so the CHAIN AFTER rule /
+  pattern end lands it through stock's real-switch hand-off (0x400a45b4.., COND_RESET -1); `cl_scommit` (jsr
+  0x400a44a0, the commit) puts the originals back first. DJ: `DJ_SELFHOOK` (off by default; standalone DJ FINAL
+  3fa14332… unchanged) + `dj_selfvec` -> Clyps' {request, originals' slab, put back}: DJ arms on the request, lands
+  from the originals' lengths, and puts them back at the top of `dl_commit`. Gate Z (both modes, OT DEMO + JAM2):
+  edited until the switch, then byte-exact (JAM2: SIDE-CHAIN's sc_norm MON 0/1 -> 2 on the Part apply tolerated, as
+  gate F); DJ off master step 3 -> 0 (restart), stock real switch x1; DJ on 3 -> 4 (clock-locked), no stock switch.
+  Gates on CL9: full 116, T 21, F+Q 27, L+J 19, M+U 32, X+O+W 15; X+L+Z (JAM2) 20. syx 196c2239….
+- **KYOTI CL10** (2026-11-05, NOT flashed; CL7-CL9 never flashed): a box per track (the user). No per-track memory:
+  `cl_boxhome` puts the box on the track's sequence (`cl_srccode` = where what it plays was loaded from; ORIG / SAVED
+  / card reload -> the pattern's own slot) at open and whenever `cl_refresh` sees another track; moving it within
+  a view is free. Grid: cued = yellow flashing half the period (`cl_blink`, both dies CL_BLINK/2), the sequence =
+  red + 3-tick green flash, the box elsewhere = solid yellow, your pattern red; the chord's pattern view flashes
+  the cued pattern too. Gate V (new); gate B's box check updated (box = solid yellow); gate Z's "before" is
+  informational (earlier scenarios load). Harness: X stalled after Z in one session (passes alone / after O+W).
+  Gates on CL10: full 115 + B 10, T 21, F+Q 27, L+J 19, M+U 32, V 9, X+O+W 15, Z 5. syx 4160cbbc….
+- **KYOTI CL11** (2026-11-05, NOT flashed; CL10 flashed): card reloads end a Clyps load (the user, on CL10: after a
+  card reload of a fully saved project the "x" stayed, the box / LED stayed on the loaded slot, and the name did not
+  follow). Gate I reproduced all on CL10. Fixes in the card worker: live PER TRACK + saved NORMAL (a Clyps
+  conversion) -> the track gets the saved pattern's length / scale, `cl_back` undoes the conversion when every
+  track is original, the mirror gets the whole slab; `rj_ok` clears the reloaded tracks' provenance (`cl_home`)
+  and asks the UI tail for `cl_boxhome` (`cl_boxreq`); `rq_names` reads the reloaded names from clypsNN.strd
+  (the card's version, not the original's: never named there -> cleared). Headers: the chord `PTN LOAD:`, a group
+  `MULTI LOAD:` ("ORIGS FULL"'s box to x 86). Gates on CL11: full 116, T 21, F+Q 27, L+J 19, M+U 32, X+O+W 15,
+  V+Z 14, I 11. syx 02d37da2….
+- **KYOTI CL12** (2026-11-05, NOT flashed; CL11 never flashed, CL10 on the unit): three boxes (the user): the highlight;
+  the selection box (full frame) = where the playing sequence was loaded from, not moved by the keys, hidden on the
+  playing slot; the pre-select box = corner brackets (`cd_brk`, 3 px a corner; a dotted frame was rejected as
+  unreadable) moved by the arrows (grid solid yellow). Groups keep one pre-select position across the view's track
+  changes (`cl_refresh` skips `cl_boxhome` while `cl_gmask` != 0; gate U). Column text 1 px right (`cl_colx` 7 / 63).
+  Gates on CL12: full 116, T 21, F+Q 27, L+J 19, M+U 32, X+O+W 15, V+Z+I 25. syx 2877c110….
+- **KYOTI CL13** (2026-11-05, NOT flashed; CL11 / CL12 never flashed, CL10 on the unit): the boxes as decided (scope
+  §1.17): select box = full frame on the last load (hidden on the playing slot); pre-select box = the same frame
+  flashing slowly in step with the grid blink (`cl_blink` sets the phase, data only; `cl_ptick` on the UI tick turns
+  it off half a period later and redraws), shown from an arrow to the next execution; over the highlight only the
+  bar's outline flashes. The "x" = the sequence only: a Part-level "x" was built (cl_edx / cl_pdiffs) and dropped by
+  the user (Parts are shared; stock's Part "x" has another reference). `cl_same` skips audio +0x899 (not on the card;
+  the likely cause of the "x" a card reload left on hardware). TRAP (caught by renders, not the gates): cl_edx kept a
+  value in d1 across cl_slab, which uses d1 -> an "x" on every slot; renders compare CL12 / CL13 to catch such.
+  Gates on CL13: full 116, T 21, F+Q 27, L+J 19, M+U 32, X+O+W 15, V+Z+I 26. syx 07dda811….
+- **KYOTI CL14** (2026-11-06, NOT flashed; CL11-CL13 never flashed, CL10 on the unit): the pre-select box as two
+  arrowheads (`cd_glyph`, XORed over the highlight; the flashing frame and its phase code removed); "LOCKS" ->
+  `A01 07 LK` (`cl_nlocks`: steps with a lock trig or a parameter lock, each once, max 64; step n = bit n of the
+  big-endian 64-bit mask, checked on 100 real tracks). No renders this round (the user). Gates on CL14: full 116,
+  T 21, F+Q 27, L+J 19, M+U 32, X+O+W 15, V+Z+I 26. syx e72e7c17….
+- **KYOTI CL15 / CL16** (2026-11-06, NOT flashed; CL14 on the unit; CL15 never built for flashing on its own): the grid's
+  yellow only while the pre-select arrows show; ORIG restores no longer bring garbage names (NAMESNAP: cleared before
+  names exist, refreshed per bank as names are read -- a boot-time snapshot left DRAM leftovers); pre-select arrows
+  per track (`cl_pre`); no flash when nothing loads. CL16: every execution through `cl_exec` (per track: a trig's slot
+  for the active track -- with [CUE] held for every member -- else the arrows, else the select box, else the original);
+  `cl_cueload` skips loads of data already playing (`cl_samein`, `cl_slsame`); groups: a non-member TRACK does nothing,
+  [CUE] held moves every member's arrows, the active member's tab gets an inner line (`cl_tabhook`, RECT mode 0 on
+  0x400bf10a after stock's painter); the columns realigned so 35 px names clear the arrows and every "x" clears
+  everything (`cl_colx`). TRAPS: `cl_pexec` (d0-d1) placed before `cl_tsyn` kept its d1 broke temp save / reload
+  (gate T caught it); `cl_tps` was already the ticks-per-step routine (the array is `cl_pre`). Gates on CL16: full
+  116, T 21, F+Q 27, L+J 19, M+U 38, X+O+W 15, V+Z+I 29, H 3. syx bc274305….
+- **KYOTI CL17** (2026-11-06, NOT flashed; CL16 on the unit): the active-track tab line fixed (the user's CL16
+  report: earlier members kept the bottom-half line, the right tab's upper half drew line / gap / pixel / gap, the
+  bottom half stayed after the group ended). Stock's tab painters (0x4004bd48 lower, 0x4003fed8 upper) repaint only
+  tabs whose cached state changed, and the status-mark painter 0x40044804 runs after them. `cl_tabhook` now
+  replaces the `jsr 0x40044804` at 0x40052238 (calls it, then draws), the 0x40052232 / 0x4004d870 detours are gone;
+  a target change (`cl_tabt`) writes -1 to the side caches 0x400c0c50 / 0x400c0c94 so the next pass repaints every
+  tab. Renders (painters + hook per pass) clean in all three states. Gates on CL17: full 116, T 21, F+Q 27,
+  L+J 19, M+U 38, X+O+W 15, V+Z+I 29, H 3. syx 69f6e4d6….
 
 ## 2026-11-01 (`mm-keyhold`) — MUTE_MODES KEYHOLD: a muted SIDE-CHAIN KEY track stays cut after its key time (octabam#934)
 
@@ -37730,6 +38088,31 @@ Now 936 / 932 (<= 945): the pair fits, SC's donor becomes PLATE REV.
 - **octabam:** since #977, octabam's HOOKS bridges `status_icon` / `icon_draw` (and FREE LOOP's `fl_draw`, which
   jumped to `rtm_draw`) were built on our two status-icon sites, so the pin PR also retires `icon_draw`, takes
   REC_TRIG_MUTE out of `status_icon` and reworks `verify_hooks.py` around REC THRESHOLD + FREE LOOP.
+- **KYOTI CL18** (2026-11-06, NOT flashed; CL17 not flashed either, CL16 on the unit): (1) the [PTN]+[BANK] +
+  trig N pattern reload from the card now goes to N (in or out of Clyps): the job sets `cl_ptngo` at its success
+  point, the UI tail's `cl_ptnswitch` runs stock's [PTN]+trig body (0x40056b2c) without PTN_CONSUMED (it would
+  close Clyps) -- 0x4009a404, 0x400a1030(playing bank, N), stock's refreshes; running = a pending cue (DIRECT JUMP
+  on: a jump; off: stock's switch), stopped = at once; your own pattern: no change. (2) The active-track tab line
+  is one vertical stroke on the outer side (x 1 / 126, rows 3..15 + 15k), top / bottom strokes gone. (3) main
+  merged in (f4a504f): REC_TRIG_MUTE's mute dots (detour 0x40040146; its old status-icon sites stock again).
+  Gate L extended (stopped in Clyps: switch + box follows; begun outside: closes + switches; playing: lands) and
+  now runs on its own: a stopped reload after the live-transport part stalls the emulator (frames on: the audio
+  MAC loops eat the key-call budget; frames off: the card job never completes) -- harness only, the check after
+  it was dropped. Gates on CL18: full 116, T 21, F+Q 27, L 17, J 8, M+U 38, X+O+W 15, V+Z+I 29, H 3.
+  syx f99f3492….
+- **KYOTI CL19** (2026-11-06, NOT flashed; CL16 on the unit): the group's tabs redrawn (the user: no vertical
+  line): the tab sites (`cl_act3` / `cl_act4`) light only the active track (when a member), the LED site
+  (`cl_act5`) still every member; `cl_tabhook` SETS a one-pixel outline of the tab's own edge on the other
+  members (top / bottom rows x 1..7, outer column x 0, mirrored right), and resets the painters' side caches on
+  a change of group / active / side (`cl_tabsig`). Gate U's tab check now reads filled vs outlined pixels
+  (painters B, A + cl_tabhook). Gates on CL19: full 116, T 21, F+Q 27, L 17, J 8, M+U 38, X+O+W 15,
+  V+Z+I 29, H 3. syx 2f27938b….
+- **KYOTI CL20** (2026-11-07, NOT flashed; CL16 on the unit): "full span" cells from the user's approved mock-ups:
+  `cl_colx` col 1 = 5 / 2..52 / x 5, col 2 = 62 / 55..109 / x 58 (each "x" 1 px before its number, bar / box over
+  the "x" and the arrows, 1 px from the border); `cd_notch` clears the select box's frame beside both ends of each
+  arrow's column when the arrows are on it. Real renders = the mock-ups pixel for pixel (geometry). Mock-ups:
+  out/clyps/mock1/ (mock.py, mock2.py edit a real render). Gates on CL20: full 116, T 21, F+Q 27, L 17, J 8,
+  M+U 38, X+O+W 15, V+Z+I 29, H 3. syx f5c308f2….
 
 ## 2026-11-07 (`rec-trig-mute`) — REC_TRIG_MUTE: the top dot on T1–T4, lost to stock's mark painter (fixed, re-pinned, NOT flashed)
 
@@ -37743,6 +38126,42 @@ Now 936 / 932 (<= 945): the pair fits, SC's donor becomes PLATE REV.
 - **Re-pinned FINAL (the 11-06 pins were the buggy build), NOT flashed:** standalone mainos `60e97fb3…`
   (syx `0c289ab5…`), BUG_RTM `dac87abd…` (syx `9582710c…`), KYOTI V1.7 `e7cadcca…` (syx `f50ece8d…`).
   A Clyps image needs Clyps's own merge of this. Scope §21. octabam #1066 updated to the new pin.
+- **KYOTI CL21** (2026-11-07, NOT flashed; CL16 on the unit): audit of CL9-CL20 against CL8's lean rule (scope
+  §1.25): only `cl_selfcopy` (ORIG PTN+PRT playing) wasn't -- it owed the NVRAM mirror the whole slab + Part.
+  Now `cl_wdiff`: `cl_postmask` / `cl_postpart` write only records / trailer / Part that differ from the mirror
+  (gate Z: 6,322 / 0 B, was 42,890 / 42,890). `cl_nlocks` skips rows a lock trig counts. main merged (9dd4287:
+  REC_TRIG_MUTE top dot on T1-T4, `0x400448ba`). New `tools/clyps_profile.py` (Clyps' instructions per state, per
+  call). Gates on CL21: full 116, T 21, F+Q 27, L 17, J 8, M+U 38, X+O+W 15, V+Z+I 31, H 3. syx 3e3fd75b….
+- **KYOTI CL22** (2026-11-07, NOT flashed; CL16 on the unit; CL21 not flashed): (1) persistent pre-select arrows:
+  `cl_pexec` removed (every load / restore / temp save cleared them); the confirmation flashes `cl_fcode` instead of
+  moving the cursor; a hidden cursor still follows a load (`ex2_cur`); a card reload homes the box only without
+  arrows; the [PTN]+[BANK] chord hides them while held. Pattern changes leave them too (the user asked for them to
+  follow pattern loads, then withdrew it; the withdrawn build was never gated to the end). Audit of every write: arrow
+  keys, a track swap (cl_psave / cl_pload), [CUE]-held arrows (every member), paths reached only without arrows
+  (cl_boxhome), a project load (clears the records; Clyps closes). (2) Stock pattern picks inside Clyps keep it open
+  (PTN_CONSUMED / BANK_SEL close removed); a bank change moves the view; `cl_lastp` set at the open. (3) A project
+  load closes Clyps (`cl_pclose`). TRAP: gate V posts no UI tail after keys (posttail off) -- a header-state check
+  needs tailmsg(). Gates on CL22: full 120, T 21, F+Q 27, L 17, J 8, M+U 38, X+O+W 15, V+Z+I 35, H 3. syx df2d4a1d….
+- **Never-ship pairs** (2026-11-07, the user): `tools/feature_exclusions.py` -- Clyps + RELOAD_FROM_PROJECT never,
+  Clyps + DIRECT_JUMP_KYOTI only as KYOTI's SUPERSEDE pair; checked by build_kyoti.py and build_bugbuilds.py.
+  Rebuilt unchanged: KYOTI CL22 df2d4a1d…, default KYOTI V1.7 mainos e7cadcca… (the pin); Bugbuilds DJV7 / RL3 clean
+  (a full Bugbuild run here stops at BLACKPYRAMIDS_303's dsp_asm, not built in this worktree). octabam / Modwerk:
+  conflicts in Clyps' manifest at port time (scope §1.27).
+- **KYOTI CL23** (2026-11-10, NOT flashed; CL22 on the unit): Clyps matches RELOAD_FROM_PROJECT's final rules (scope
+  §1.28; RELOAD itself is in reload-slice, unpushed -- ported from its source as a reference, not merged): card reloads
+  staged (`SRC_CARD`) and landed like temp reload; the pattern you are on together on the next shared step, rate
+  changes re-phased (`cl_togarm` / `cl_togland`, RELOAD's rl_rephase); generations, one card read per target, never
+  two jobs queued; a superseded pattern job cannot switch; reloading / restoring the pattern you are on cancels a
+  cued change (`cl_ptncancel`); ORIG SEQ / FULL / [PAGE] in place, ORIG PTN+PRT together in place (DJ or not); a mixed
+  execution lands at the cued point. The user's FULL-timing report (P5 T1's volume on P1 T1's sample a step early, DJ
+  off): the scheduler builds a step ahead -- the slice now reaches the engine one step after the landing
+  (`cl_spdo`), dropped if its Part no longer sounds; a Part-link change owes 0x40009094 (both from the RELOAD session,
+  checked in our image). Same fix sent to the RELOAD session (it adopted it: reload-slice 8942cfd). Gates on CL23
+  (0a1f677f…): full 120, T 21, F+Q 27, L 17, J 8, M+U 38, X+O+W 15, V+Z+I 35, H 3; new tools/diag_clyps_quant.py
+  B C D E G H P O M F, DJ off and on, I (cancel at 300 / 1500 ms, DJ off; DJ on lands a cue on the next step). Slice
+  published at t0 198 -> 204 (one step). TRAPS: emu_rtos `call_as_main` leaves its arguments on main's stack (8 B per
+  2-argument call): a gate posting every 17 ms overflowed main into its TCB -> `main_call` restores SP; Clyps' tick
+  landing measured <= 220 B. The cancel test needs a cue still pending at the press: CHAIN AFTER off.
 
 ## 2026-11-09 (`rec-trig-mute`) — REC_TRIG_MUTE: the T1–T4 top-dot fix (`91a58e9`) confirmed on hardware
 
@@ -37931,6 +38350,125 @@ Now 936 / 932 (<= 945): the pair fits, SC's donor becomes PLATE REV.
   upstream `6a2da8d` → `27ab725`, eleven detours, FREE LOOP declared a conflict in octabam's wrapper (its
   `fl_ui_stub` detours the same `0x40056c28`), usage page rewritten. Gates green (verify-docs, test/reload-from-project,
   octabam-bus, octabam, test/mods, reach); test remix mainos `ec12c327…`. This octabam form is not flashed.
+- **KYOTI CL24** (2026-11-10, NOT flashed; CL23 never flashed; CL22 on the unit): origin/main merged (6af5299: RELOAD
+  FINAL 27ab725 + pin PR #1079; build_kyoti B2 conflict resolved -- Clyps' jmps when CLYPS is in, else RELOAD's; CL23
+  rebuilt identical, default KYOTI V1.7 still its FINAL ee151d9c). Reading RELOAD's final dated rules, two were missing
+  in Clyps and are in now: machine changes on a Part-link change judged against the Part that was sounding (gate K:
+  CL23 missed T8's restart, CL24 restarts it), and unchanged slices neither copied nor published (`cl_slcmp`) except
+  on a link change. Gates on CL24 (ecb90715…): full 120, T 21, F+Q 27, L 17, J 8, M+U 38, X+O+W 15, V+Z+I 35, H 3;
+  diag_clyps_quant 43 (DJ off, B..K..I) / 39 (DJ on, no I).
+- **CL24 timing investigation** (2026-11-11; CL24 FLASHED by the user; no build): the user heard, with DIRECT JUMP on,
+  "sometimes the incoming sequence comes in a step off, back in phase once it wraps" (OT DEMO A01 T1 64 <-> 16-step
+  slots). New REF-LOCK harness after DIRECT JUMP's (`tools/diag_clyps_lock.py` records, `tools/check_clyps_lock.py`
+  grades every track, every tick, against model_reflock's position model + per-landing latency), runs R1-R8, R3b, R6b/c
+  (in-RAM pokes on the OT DEMO export). Findings: (1) **the user's report**: every in-phase landing (DJ on; ORIG / temp /
+  card in place) copies at a window start with normal lookahead, so the step sounding at the next boundary was built a
+  step earlier from the OLD sequence; the new one is heard a boundary later than a DJ jump (stock D2 lands on the tick
+  before the boundary with first-fire 0x80006624 + RELOAD 0x800065d3 = tps-1). Counters stay in phase (24/24 DJ-on
+  landings PASS the model); at the incoming sequence's step 1 it sounds like a start on step 2, right after its wrap.
+  The old A4..A8 oracles were blind to it ("identical from the tick after the landing"). DJ off: CHAIN AFTER points and
+  the master wrap exact for same-rate loads (the gate is evaluated one master step early). (2) a **rate-changing** load
+  at a CHAIN AFTER point misses the point's step (both windows must start a master step early; else lcm wait + the
+  lookahead loss). (3) **MASTER_STEP reads 0 in the master cycle's last audible step**; cl_land lands arm-now cues there
+  with an unsigned t0 = -tps_M + tick: ORIG / ORIG SEQ+MCH/FX pressed there land at tick 2 with STEP = 0x2AAAAAAB mod len
+  (11 of 16, 43 of 64), off-grid until the next landing / master wrap (R6b/c, 6/6, no pokes). RELOAD's rl_tick skips
+  MASTER_STEP == 0; Clyps does not (cl_togland / cl_ctr / cl_mreph share the t0). (4) **cl_back** reverts the pattern's
+  master length / scale / mode to the as-loaded snapshot when a restore makes every track original: a master edit made
+  after loading is undone, stock re-reads it at the next master step (0x400a4220) with no re-phase, and later landings
+  read a wrong master position (R3: T1 6 steps off, persistent). (5) Clyps never calls COND_RESET 0x400a539c (stock /
+  DJ reset A:B counters on a switch). PASS on every tick: 2x / 3/4x sources, master 3/4x (fast tracks, around the wrap),
+  master 48 + 12-step, INF, NORMAL 16 + 64-step conversion and ORIG back, wrap landings with a scale change (audible
+  timing right). Not covered: MIDI tracks, [CUE] groups, together landings under mixed rates, Clyps after a DJ jump.
+- **KYOTI CL25** (2026-11-12, NOT flashed; CL24 on the unit; syx fd1a283b…): the user's decisions A-D on the CL24
+  timing findings (scope §1.29). A: every in-phase landing (DJ on, in place, CHAIN AFTER points, the together landing)
+  lands as stock's landing / DIRECT JUMP's lands a track -- the tick whose t' ends a step, STEP = t'/tps, TICKS 0,
+  reload tps-1 + first-fire bit 0x80006624, the old boundary event purged (cl_tpurge), the reload fixed up next tick
+  (cl_fixup); DJ on, a cue arms at the request; slices published in the landing tick; signed t0, nothing lands while
+  t' < 0 or CNTDN[t] >= 0 (the cycle's last step). B: cl_back undoes only Clyps' own NORMAL -> PER TRACK conversion
+  (CVSAVE saved before the copy, kept while marked -- ORIG PTN+PRT restores the trailer first). C: cued loads
+  COND_RESET(t) (a wrap landing one tick later, cl_cdo), instant loads set the A:B counter to the passes since the
+  last all-track reset (cl_cond; stock's rule measured, M1-M3; detour 0x400a539c cl_creset). Gates on the final
+  image: diag_clyps_ui full 120, T 21, F+Q 27, L 17, J 8, X+O+W 15, V+Z+I 35, H 3, M+U 38 (JAM2); diag_clyps_quant
+  43 (DJ off) / 39 (DJ on) with its checks moved to the new rule; diag_clyps_lock + check_clyps_lock --rules: 12
+  scenarios (lengths 12-64, 2x/1x/3/4x, master 3/4x / 48 / INF, NORMAL conversion, last-step presses) PASS -- the
+  only off-model ticks: a scale-changing wrap landing's 5-tick counter transient, as CL24, audible timing right (R8
+  re-run on the final image; the other 11 on the image before the CVSAVE fixes, code they never reach). Standalone:
+  landing-time helpers in the DRAM part (ROM 46 B left). Next: the user flashes CL25 (FLASHING "KYOTI CL25"); then
+  RELOAD_FROM_PROJECT gets A + C; later DIRECT JUMP's jumps get C (the user's TODO).
+- **KYOTI CL26** (2026-11-12, NOT flashed; CL25 FLASHED -- the user: landing timing good; with DJ on a one-step
+  offset at some switches ("the sequence is offset for one step, perfectly in phase the next"), FULL settings
+  arriving before the sequence (longer with differing scales), clicks on FULL switches and a quiet one on a card
+  pattern reload press). Cause (by the user's description + the code; the emulator's exact clock never shows it):
+  CL25 landed ON the boundary tick and purged the old boundary event only if its fire time >= the sample clock --
+  on the unit the clock runs in audio frames, so at that tick the comparison flips by a frame: the old step stayed
+  and the new one was dropped (old content at the boundary, under the new slice already published). Fix: land ONE
+  TICK BEFORE the boundary (d7 = t0 + 2 = the boundary's t'), TICKS 0 + reload tps - 2 + first-fire (ahead 2: the
+  new step fires on the boundary's grid time, exactly where the old would), the purge a full tick ahead of the
+  old event (measured margin 1.0 tick in every purge), the slice published on the boundary tick (cl_spd = 2), the
+  master re-phase tick tps_M - 2, cl_cond B = cl_T + 1 - d7. Gates on CL26 (syx 4e3d4c19…): ui full 120, T 21, F+Q
+  27, L 17, J 8, X+O+W 15, V+Z+I 35, H 3, M+U 38; quant 43 / 39 (expectations moved: landing = the tick before,
+  B ticks tps - 2, slices on the boundary tick, master tick tps - 2); lock suite 12/12 --rules PASS (new sound on
+  the boundary, ahead 2); FULL timeline (diag_clyps_lock logs TRK_APPLY / Part applies / PICKUP / restarts):
+  TRK_APPLY on the same tick as the new step's sound in F1-F3 (DJ on 1x / mixed scales, DJ off), nothing earlier.
+  VERSTR holds 10 chars ("KYOTI CL25b" refused).
+- **KYOTI CL27-CL32** (2026-11-12 / 13; CL26, CL28, CL29 FLASHED -- CL29 "timing correct", the user froze timing
+  there; CL27 / CL30 / CL31 never flashed; CL32 NOT flashed, syx a599c93a...). CL27: a FULL slice published on the first
+  trig STEP's boundary (cl_ftrig; the user's repro: OT DEMO, DJ on, A01, [FUNC]+trig 5 two steps before the end -- A05 T1
+  lands on its empty step 16 and its settings sat on A01's ringing sample). CL28 (the user: wait for a trig that SOUNDS):
+  cl_spwait / cl_sptrig -- the slice and a new machine's restart wait for a pending event of the track with record bit 2
+  (29 / 61 sample trig; 25 trigless, 1 empty) at or after the landing, published where fire - now < half a tick; no
+  sample trig in the sequence: the boundary tick; cl_spd widened to words. CL29: shared Parts -- A01 and A02 share Part
+  1, so FULL slot 7 then FULL slot 2 on T3 kept Part 2's sample (slot 2's Part already held it): SHADOW (64 x PARTSZ,
+  +404,608 B reserve) keeps a track's slice of (bank, Part) from before Clyps' first overwrite (cl_shkeep / cl_shsrc /
+  cl_shdrop, cl_shok); [PAGE] does nothing in Clyps (ORIG = the trig of your own pattern, ORIG PTN+PRT = chord + [YES]);
+  page LEDs stock's (slot-7 LED record, cl_ppaint / cl_pstat / cl_pled removed). CL30-CL31: arrow experiments, reversed by
+  the user. CL32: the arrows always shown once moved, no load or reload moves or hides them (CL22 again; with none shown,
+  the unseen cursor follows a load as before); their solid yellow goes once the slot under them lands (cl_ychk from
+  cl_postmask, cl_ysup / cl_pre 0x4000) and comes back with the next arrow; an ORIG load's header flash reads ORIG
+  wherever the arrows are; cl_paint read T1's cue for every track (`moveq #0,%d0` over the index: T2..T16 cued slots red /
+  green on the unit, masked before by the arrows' yellow) -- fixed, index-clobber scan finds no other. Gates on CL32:
+  diag_clyps_ui full 120, T 21, F+Q 27, L 17, J 8, X+O+W 15, V+Z+I 39, H 3, M+U (JAM2; a gate fix: group restores =
+  [CUE] + your trig); diag_clyps_quant 39 (DJ on) + DJ off; lock 14/14 --rules, check_clyps_full PASS (incl. F4 = the
+  user's repro), P1 / P2 (the shared-Part repro) Part 1 = as loaded; out/clyps/lock/timecmp.py: landings, every build and
+  every TRK_APPLY identical to CL29 in all 18 runs. Card track reloads are inside Clyps only in KYOTI-with-Clyps (the
+  2026-10-30 design; the user: fine). Next: RELOAD_FROM_PROJECT and DIRECT JUMP ports (reference/handoffs/
+  RELOAD_CLYPS_PORT.md, DJ_CLYPS_PORT.md), agents in their own worktrees.
+
+- **KYOTI CL33** (2026-11-13; NOT flashed): the DIRECT JUMP port session (worktree dj-clyps, V7.0.2: jumps no longer
+  call COND_RESET) measured that PLAY never calls COND_RESET and STOP does (0x400a12b8) -- with cl_T still at its last
+  count, so cl_creset left cl_Tres stale and Clyps' instant loads after STOP -> PLAY came out a pass short. Reproduced
+  (diag_clyps_lock op `x`, run SP2: CL32 FAIL 3 vs 4 / 4 vs 5, CL33 PASS); fix = clear cl_Tres in cl_land's stopped branch
+  (scope §1.33). Gates on CL33: diag_clyps_ui all 9 sets PASS, diag_clyps_quant PASS (DJ off + on), lock 14/14 --rules PASS,
+  check_clyps_full PASS, timecmp (CL29 vs CL33) identical in all 18 runs. RELOAD got the same fix (reload-clyps 7f0bc12).
+
+- **KYOTI CL34, part 1** (2026-11-13; NOT flashed): PRE = 1 on every instant load (scope §1.34; the user chose it for
+  Clyps, DIRECT JUMP and RELOAD alike -- §1.29 C carries nothing of the outgoing sequence, the incoming one's own last
+  result is unknowable for a % trig, 1 = stock's STOP / pattern-change value). cl_cond cd_set writes 0x46107979[t] = 1
+  (stock COND_RESET's own store, checked). Gates: diag_clyps_ui 9/9 sets PASS, diag_clyps_quant PASS (DJ off + on), lock
+  14/14 --rules PASS, check_clyps_full PASS, timecmp (CL29 vs CL34) identical in all 18 runs; PRE on the landed track 1
+  after every instant landing (out/clyps/lock/precheck.py; CL33: 0). The arrows change follows in the same CL34.
+
+- **Clyps FULL-load settings blip -- study only** (2026-11-13): sequencer-side apply exact (TRK_APPLY on the tick whose
+  sample clock equals the first sounding trig's fire time); residual is below the tick (engine frame / the retriggered
+  voice's fade through the shared track path). Frame-exact apply rejected by the user (engine context); machine-byte
+  deferral skipped (the builder reads it at 0x400a2e80). Details + the stock A/B to start from: scope §1.36. Also logged:
+  one CL34 sighting of a playing slot's summary text going blank after a cued [YES] load (DJ off), slot number kept,
+  back after the next redraw -- not reproduced.
+
+- **KYOTI CL34, part 2** (2026-11-13 / 14; syx f5d8fb7e..., FLASHED by the user, no issues reported): the user's CL34
+  list -- the cursor is always on screen (box or arrows: tucked arrows under the box / the highlight, back where they were
+  when it goes or moves; `cl_tuck`, `cl_ychk` yc_t, `cl_boxhome`; [YES] with nothing on screen loads nothing, `ex2_none`);
+  the active pattern's LED is never yellow for the arrows (option b); a cued load's arrows blink 120 BPM fixed, 20 on /
+  10 off UI ticks (`cl_cblink` from cl_uitick); [CUE]+[YES] = the group's load (was nothing); LEFT / RIGHT no wrap;
+  [FUNC]+[CUE] (stock Part reload) nothing in Clyps; ORIG TRK SEQ / ALL flash the playing slot, header steady
+  (`cl_florig`, cl_ftgt 2); the arrows follow the viewed bank (`cl_pfollow`). Scope §1.33-1.36.
+  Gates: diag_clyps_ui 9/9 sets PASS (291 checks), diag_clyps_quant PASS (DJ off + on); walk-throughs AR1-4, BK1-2, BL1-2
+  (diag_clyps_lock ops Y / v / bK / k+ / k- / x). **Harness trap found:** diag_clyps_ui called `rt.call_as_main`
+  directly -- it leaves the args on main's stack (8 B per key event); ~500 events in, the leak reached main's TCB
+  (0x46c7ae84, ~4 KB below the top 0x46c7becc) and the next switch jumped to garbage (a UcError at "[PTN] + trig" in
+  section K, on every image incl. the PRE-only one, once CL34's checks added key events). Now `main_call_r` restores SP
+  after every call. A firmware cause was ruled out first (state diff before the step: identical with / without the extra
+  keys).
 
 ## 2026-11-10 (`reload-slice`) — RELOAD_FROM_PROJECT beside FREE LOOP: octabam HOOKS bridge `ui_tick` (PR sambanks/octabam#1083)
 
@@ -38042,3 +38580,37 @@ Now 936 / 932 (<= 945): the pair fits, SC's donor becomes PLATE REV.
   OS VERSION string, `140C_KYOTI`), `BUG_RL3` mainos `188ec12c…` (syx `cde59614…`). All 10 Bugbuilds match their pins
   without opt-in. KYOTI V1.7's pin is stale until the author promotes KYOTI (it contains RELOAD).
 - octabam REFERENCE `8035e2fa…` (51,620 B; 12 hooks incl. the COND_RESET detour 0x400a539c).
+## 2026-11-15 (`trkseq`) — KYOTI CL35: peek at a parameter page from Clyps
+
+- The user (2026-11-14): PLAYBACK / AMP / LFO / FX1 / FX2 held in Clyps = that page (regular or SETUP as stock left it),
+  knobs live while held; the release brings the Clyps view back; grid LEDs unchanged. `cl_k_peek` (scope §1.37): stock's
+  own press `0x4005578c` switches the page; the window is unlinked / relinked (`0x40011774` / `0x40011690`), never
+  destroyed; Clyps' layer lists no encoders while peeking (`cl_layer+8` = 0) and the rebuild `0x4003125c` hands them to
+  the page (measured: stock's `0x40055008` on encoders 0-5).
+- **Trap:** a `-1` encoder record does NOT pass down -- the rebuild copies encoder records as they are (0x40031406..48;
+  only key records honour -1); a layer whose encoder list is 0 is skipped (0x400313f0). The first CL35 build wrote -1
+  into the flattened table 0x46c7dede (a knob during a peek would have jumped to 0xffffffff); caught by the new gate check.
+- Gates on CL35 (syx 0a2fafee..., NOT flashed): diag_clyps_ui 9/9 sets PASS (incl. the new peek check), diag_clyps_quant
+  PASS (DJ off + on). Timing untouched.
+
+## 2026-11-15 (`trkseq`) — KYOTI CL36 / CL37: the peek reworked, SAVE PART, SETUP edges
+
+- CL35 on the unit: the peek drew wrong over a SETUP page (a 1-px offset, stray pixels; [FUNC] + page locked SETUP;
+  a second hold toggled SETUP back). Causes: unlinking Clyps' window freed its slot to the window manager (0x4005829c
+  finds a free slot by the linked bit), so stock built its SETUP window INTO ours; a plain press of the current page
+  went to stock, which toggles SETUP. Fix (scope §1.37): only the window's visible bit (+32 bit 0; compositor
+  0x40013ad8) + bring-to-front 0x400117b4 on return; no stock press for the current page; double tap / [FUNC] + page
+  flip SETUP via stock; no Clyps between the two taps (cl_pkw / cl_pkt vs stock's timer 0x460d5de0, LED tick ~60 Hz);
+  a SETUP closed by opening Clyps reopened at the first peek. CL37: the SETUP window ([0x400bcd14]+8) hidden while the
+  Clyps view shows (its pixels showed at the window's edges).
+- SAVE PART (scope §1.38): detour at its only exit 0x4004a9c4 -> that Part of the originals := the saved Part.
+- **Harness lessons:** the UI gate's PLANE shots are stock's page layer only (no window ever showed there); compare the
+  screen as composed (stock's composer 0x40013abc into [0x400b9710]). Route A runs no LED tick: age 0x460d5de0 by hand.
+- Gates: CL36 full set PASS (9 UI sets incl. gate 9 SAVE PART; quant running at commit); CL37 gate C PASS (composed
+  screen identical, edges included, after every peek variant). Flashed: KY+CL DJC7 (CL36 + DJ V7.2.2) -- peek OK but
+  the SETUP edges (fixed in CL37).
+- **CL38** (2026-11-15, the user on KY+CL DJC8 = CL37): SETUP set before Clyps showed page 1 at the first peek; two
+  [NO] after a SETUP peek; page 1 after leaving. Causes: `0x400322f0(key, 1)` does nothing from closed (needs event 3 or
+  [FUNC]); SETUP's key / LED layers stay above Clyps' after a peek. Fixes: event 3; the return re-pushes Clyps' layers on
+  top. New gate 8 (SETUP before Clyps -> first peek SETUP, one [NO], SETUP still open after); gate C PASS. Harness: the
+  diag_clyps_ui closed_ok diagnostic read a removed symbol (cl_tlayer).

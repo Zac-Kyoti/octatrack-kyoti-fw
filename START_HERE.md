@@ -364,3 +364,9 @@ are lowercase-hyphen, because octabam requires a module's name to equal its fold
 - **KYOTI load audit** (Session 125) — `reference/handoffs/KYOTI_LOAD_AUDIT.md`: ranked DSP/ColdFire
   costs of every feature, the hardware test plan (HW-A first, no flash), and **a KYOTI V1.0 crash on
   the MASTER track's PLAYBACK/LFO page** (emulator; section 8), not fixed yet.
+- **CLYPS** (Sessions 131+, worktree `trkseq`, WIP, unpushed) — `[PTN]`+`[BANK]` per-track
+  sequence picker: the view, the grid, held/latched states, cued phase-continuous landings.
+  - Latest test image `140C_CLYP7` (syx `61f9bd90…`), NOT flashed. The user still has to run
+    FLASHING §4 CLYPS steps 11–16 on it.
+  - **Start at `reference/handoffs/CLYPS_SCOPE.md` §0**: the state, the next steps (DRAM move →
+    saved sequences → originals/ORIG → FULL loads → page LEDs → KYOTI/DJ), and the traps.

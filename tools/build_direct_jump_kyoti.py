@@ -88,7 +88,7 @@ TRIGSCALE_SITE = 0x4009b6f2
 TRIGSCALE_STOCK = bytes.fromhex("203c0000091a")      # move.l #0x91a,D0
 
 PATCHES = [
-    ("patch_directjump_v7", CAVE_DJ, f"DJ_TOAST_DUR=0x{TOAST_DUR:x}" + (f",DJ_TOFS={os.environ['DJ_TOFS']}" if os.environ.get("DJ_TOFS") else "") + (",DJ_DIAG=1" if DIAG else "") + (",DJ_MODE_IN_CAVE=1" if kyoti_place.at("dj_mode_in_cave", False) else ",DJ_MODE_IN_RAM=1"),
+    ("patch_directjump_v7", CAVE_DJ, f"DJ_TOAST_DUR=0x{TOAST_DUR:x}" + (f",DJ_TOFS={os.environ['DJ_TOFS']}" if os.environ.get("DJ_TOFS") else "") + (",DJ_DIAG=1" if DIAG else "") + (",DJ_MODE_IN_CAVE=1" if kyoti_place.at("dj_mode_in_cave", False) else ",DJ_MODE_IN_RAM=1") + (",DJ_SELFHOOK=1" if kyoti_place.at("dj_selfhook", False) else ""),
      [(0x400a1f72, "dj_land", "103980006687", 6, "jsr"),   # move.b (0x80006687).l,%d0
       (0x400a221c, "dj_nofa", "4a398000002a", 6, "jsr"),   # tst.b (0x8000002a).l
       (0x40043418, "dj_ptnrel", "4879400bf0f2", 6, "jmp")]),

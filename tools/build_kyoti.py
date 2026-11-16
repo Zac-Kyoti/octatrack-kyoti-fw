@@ -125,6 +125,7 @@ import hashlib, json, os, pathlib, shutil, struct, subprocess, sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from kyoti_status import gate, seal
+import feature_exclusions                      # noqa: E402  pairs that never share an image
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "dram"))
 import dram                                    # noqa: E402  (tools/dram/dram.py)
 
@@ -186,7 +187,8 @@ RECLAIM_WHOLE = {"SPRING": (0x400d575e, 0x400d58f0), "PERS1": (0x400b2a34, 0x400
 #   on DELAY's table (SAFE, above).
 PLAN = {
     "DRAM":  ["patch_reload3",                     # key-handler + sys-task code; DRAM-proven in V1.2-V1.3
-              "patch_directjump_v7"],              # V1.7: out of CAVE (2,026 B), into the same arena page
+              "patch_directjump_v7",               # V1.7: out of CAVE (2,026 B), into the same arena page
+              "patch_clyps_dram"],                 # --with CLYPS: LAST (its CL_BSS_SIZE buffers follow it)
     "CAVE":  ["patch_varispeed",                   # first: 0x400d6500, VARISPEED's own address (frame ISR)
               "patch_softmute", "patch_partreapply",
               # V1.7: everything that sat in SAFE (DELAY's table) until V1.6
@@ -236,7 +238,18 @@ FEATURES = {
 }
 VARISPEED_AT = 0x400d6500           # tools/varispeed_buildlib.py CAVE
 # Features that are WIP (not promoted, or demoted): only with --with NAME.
-WIP_FEATURES = {}
+#   CLYPS (reference/handoffs/CLYPS_SCOPE.md §1.10): replaces RELOAD_FROM_PROJECT (it carries the card
+#   reloads); one all-DRAM unit, tick hooks included (the loader runs from the boot site before any
+#   task or ISR; DIRECT JUMP's phase-D hook ran from DRAM on the unit, OBKYOTI6-12). It owns the
+#   phase-D site 0x400a1f72 and calls DIRECT JUMP's dj_land from there (SUPERSEDE below).
+WIP_FEATURES = {"CLYPS": ("build_clyps.py", "mainos_clyps.bin", "prep",
+                          {"patch_clyps_dram": "patch_clyps_dram.bin"})}
+# Detour sites one feature takes over from another that it calls itself: (owner, other, site, n).
+# The other's bytes there must be exactly `jsr <its entry>`, and the owner must have been built
+# with that entry (asserted before the composition; never a silent overwrite).
+SUPERSEDE = [("CLYPS", "DIRECT_JUMP_KYOTI", 0x400a1f72, 6, "dj_land", "DJ_LAND")]
+DJ_SIZING = {"dj_land": 0x400d6eda, "dj_toggle": 0x400d6e54, "dj_state": 0x400d7600, "dj_mode": 0x400d7606,
+             "dj_selfvec": 0x400d7608}
 # REC_TRIG_MUTE's code regions: three dead stock routines (build_rec_trig_mute.py REGIONS),
 # and the only references allowed into them -- the base keymaps' [REC] records
 RTM_REGIONS = [(0x40032bd4, 0x40032d08), (0x4005a0e0, 0x4005a14c), (0x4009e7dc, 0x4009e884)]
@@ -254,6 +267,12 @@ def flags_for(feat):
     f = dict(FLAGS.get(feat, {}))
     if feat == "MUTE_MODES" and "SIDECHAIN_COMPRESSOR" in FEATURES:
         f["mutemode_sc_key"] = True
+    if feat == "DIRECT_JUMP_KYOTI" and "CLYPS" in FEATURES:
+        f["dj_selfhook"] = True                  # Clyps' ORIG PTN+PART as a jump (dj_selfvec)
+    if feat == "CLYPS":
+        f["clyps_kyoti"] = True
+        if "DIRECT_JUMP_KYOTI" in FEATURES:      # pass 1 sizes with these; pass 2 gives DJ's real ones
+            f.update(DJ_SIZING)
     if feat == "VARISPEED" and "SIDECHAIN_COMPRESSOR" in FEATURES:
         # QUAN's rotary switch is SIDE-CHAIN's ui_switch unit (no copy in VARISPEED's unit:
         # the proven cave cannot hold it). A stand-in address while sizing (a jmp's size does
@@ -430,7 +449,9 @@ def apply_with(argv):
         sys.exit(f"--with: unknown or non-WIP feature(s) {bad}; choose from {sorted(WIP_FEATURES)}")
     for a in add:
         FEATURES[a] = WIP_FEATURES[a]
-    VERSTR = ("KV17+" + "".join(a[:3] for a in add))[:10]
+    if "CLYPS" in add:                       # Clyps replaces RELOAD_FROM_PROJECT (scope §1.10)
+        FEATURES.pop("RELOAD_FROM_PROJECT", None)
+    VERSTR = os.environ.get("KYOTI_VERSTR") or ("KV17+" + "".join(a[:3] for a in add))[:10]
     TAG = "KYOTI_V1.7_WITH_" + "_".join(add)
     OUTDIR = ROOT / "out/KYOTI_WIP" / TAG
     SANDBOX = OUTDIR / "_sandbox"
@@ -459,7 +480,7 @@ def apply_without(argv):
     short = {"MUTE_MODES": "MM", "QUANTIZE_LIVE_REC_TOGGLE": "QL", "SIDECHAIN_COMPRESSOR": "SC", "ERASE_EMPTY_TRIGLESS_LOCKS": "TL",
              "RELOAD_FROM_PROJECT": "RL", "DIRECT_JUMP_KYOTI": "DJ",
              "MIDI_PLAYS_FREE_FIX": "PF", "EMPTY_PATTERN_LED_FIX": "PL", "PART_CHANGE_CARRYOVER_FIX": "PR",
-             "REC_TRIG_MUTE": "RTM", "VARISPEED": "VS"}
+             "REC_TRIG_MUTE": "RTM", "VARISPEED": "VS", "CLYPS": "CL"}
     VERSTR = ("KV17-NO-" + "".join(short[d] for d in drop))[:10]
     TAG = "KYOTI_V1.7_WITHOUT_" + "_".join(drop)
     OUTDIR = ROOT / "out/KYOTI_BISECT" / TAG
@@ -473,6 +494,12 @@ def main():
     apply_with(sys.argv)
     apply_without(sys.argv)
     VERSTR = os.environ.get("KYOTI_VERSTR") or VERSTR   # a WIP test image's own OS VERSION (2026-11-13)
+    # pairs that must never share an image (tools/feature_exclusions.py, the user 2026-11-07): Clyps
+    # with RELOAD_FROM_PROJECT never; Clyps with DIRECT_JUMP_KYOTI only as the integrated pair, i.e.
+    # while SUPERSEDE makes the shared site Clyps' and chains dj_land (asserted again after the build)
+    feature_exclusions.check(FEATURES, integrated=[(own, other) for own, other, *_ in SUPERSEDE
+                                                   if own in FEATURES and other in FEATURES],
+                             who="build_kyoti: ")
     # a reclaim zone is zeroed only when this plan puts something in it
     for z in [z for z in RECLAIM_WHOLE if not PLAN.get(z)]:
         del RECLAIM_WHOLE[z]
@@ -579,6 +606,10 @@ def main():
         p.update(flags_for(feat))
         if "uis_sw9_at" in p:
             p["uis_sw9_at"] = uis_sw9
+        if feat == "CLYPS" and "DIRECT_JUMP_KYOTI" in FEATURES:     # built after DJ: its real entries
+            dj = syms["patch_directjump_v7"]
+            p.update(dj_land=dj["dj_land"], dj_toggle=dj["dj_toggle"], dj_state=dj["dj_state"],
+                     dj_mode=dj["DJ_MODE"], dj_selfvec=dj["dj_selfvec"])
         for k in keys:
             if zone_of.get(k) == "DRAM":
                 p[k + "_dram"] = True
@@ -637,6 +668,22 @@ def main():
 
     # --- compose -------------------------------------------------------------------------
     print("\n=== compose ===")
+    for own, other, site, n, entry, defsym in SUPERSEDE:
+        if own not in FEATURES or other not in FEATURES:
+            continue
+        stem = [s_ for s_ in FEATURES[other][3].values() if isinstance(s_, str)][0][:-len(".bin")]
+        ent = syms[stem][entry]
+        theirs = bytes(deltas[other].get(o(site) + k, prep[o(site) + k]) for k in range(n))
+        mine_stem = [s_ for s_ in FEATURES[own][3].values() if isinstance(s_, str)][0][:-len(".bin")]
+        if theirs != b"\x4e\xb9" + ent.to_bytes(4, "big") + bytes(n - 6):
+            flag(f"SUPERSEDE: {other}'s 0x{site:08x} is {theirs.hex()}, not jsr {entry} 0x{ent:08x}")
+        elif syms[mine_stem].get(defsym) != ent:
+            flag(f"SUPERSEDE: {own} was not built calling {other}'s {entry} 0x{ent:08x} "
+                 f"({defsym} = {syms[mine_stem].get(defsym)})")
+        else:
+            for k in range(n):
+                deltas[other].pop(o(site) + k, None)
+            print(f"  0x{site:08x}: {own} owns it and calls {other}'s {entry} 0x{ent:08x} first")
     comp = bytearray(prep)
     owner = {}
     names = list(FEATURES)
@@ -707,8 +754,17 @@ def main():
 
         # B2: the keymap overlays -- DJ's YES press field is the only change
         ptn_yes = 0x400bf0be
-        for addr, what in ((0x400d00ee, "[BANK]-layer YES record"), (0x400d00d4, "[BANK]-layer NO record"),
-                           (0x400bf0a4, "[PTN]-layer NO record"), (0x4007af80, "[BANK] key handler")):
+        b2 = [(0x400d00ee, "[BANK]-layer YES record"), (0x400d00d4, "[BANK]-layer NO record"),
+              (0x400bf0a4, "[PTN]-layer NO record")]
+        if "CLYPS" in FEATURES:          # Clyps' own detours there: jmp into its DRAM unit (RELOAD is dropped)
+            clo = place["patch_clyps_dram"]
+            for addr, what in ((0x4005a044, "[PTN] key handler"), (0x4007af80, "[BANK] key handler")):
+                tgt = int.from_bytes(comp[o(addr) + 2:o(addr) + 6], "big")
+                if comp[o(addr):o(addr) + 2] != b"\x4e\xf9" or not clo <= tgt < clo + size["patch_clyps_dram"]:
+                    flag(f"B2: {what} 0x{addr:08x} is not Clyps' jmp into its DRAM unit")
+        else:
+            b2 += [(0x4007af80, "[BANK] key handler")]
+        for addr, what in b2:
             if comp[o(addr):o(addr) + 8] != stock[o(addr):o(addr) + 8]:
                 flag(f"B2: {what} 0x{addr:08x} is not stock")
         # the [PTN] key handler: stock, or (RELOAD_FROM_PROJECT's pattern reload, 2026-11-08) exactly its
@@ -716,7 +772,7 @@ def main():
         k = o(0x4005a044)
         rl = syms.get("patch_reload3", {}).get("rl3_ptn_key") if "RELOAD_FROM_PROJECT" in FEATURES else None
         want = (b"\x4e\xf9" + rl.to_bytes(4, "big")) if rl else stock[k:k + 6]
-        if comp[k:k + 6] != want or comp[k + 6:k + 8] != stock[k + 6:k + 8]:
+        if "CLYPS" not in FEATURES and (comp[k:k + 6] != want or comp[k + 6:k + 8] != stock[k + 6:k + 8]):
             flag("B2: [PTN] key handler 0x4005a044 is neither stock nor RELOAD_FROM_PROJECT's jmp")
         for i in range(8):
             rec = 0x400bf122 + i * 26
@@ -816,7 +872,17 @@ def main():
             if len(dram_blob[k]) != size[k]:
                 sys.exit(f"{k}: pass-2 blob is {len(dram_blob[k])} B, pass 1 sized {size[k]}")
             raw += dram_blob[k]
-        append, dram_report = dram.build(bytes(raw), OUTDIR / "_dram", comp)
+        bss = 0
+        if any(k == "patch_clyps_dram" for _, k in dkeys):     # Clyps' buffers follow its unit
+            if dkeys[-1][1] != "patch_clyps_dram":
+                sys.exit("patch_clyps_dram must be the last DRAM unit: its buffers follow it")
+            cs = syms["patch_clyps_dram"]
+            bss = cs["CL_BSS_SIZE"]
+            if cs["cl_bss"] != dram.ARENA_BASE + len(raw):
+                sys.exit(f"Clyps' cl_bss 0x{cs['cl_bss']:08x} is not the DRAM image's end "
+                         f"0x{dram.ARENA_BASE + len(raw):08x}")
+            print(f"  Clyps: {bss:,} B of buffers after the DRAM image (0x{cs['cl_bss']:08x}..)")
+        append, dram_report = dram.build(bytes(raw), OUTDIR / "_dram", comp, bss=bss)
         comp.extend(append)
         r = dram_report
         print(f"  DRAM: {', '.join(k for _, k in dkeys)} -- {r['raw']:,} B linked at 0x{r['base']:08x}, "

@@ -71,6 +71,7 @@ run without --wip is unchanged: the final Bugbuilds, and any base not on FINAL i
 import os, pathlib, subprocess, sys
 import hashlib
 from kyoti_status import gate, seal, FINAL
+import feature_exclusions                      # pairs that never share an image (the user, 2026-11-07)
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "dram"))
 import dram                                    # noqa: E402  (tools/dram/dram.py)
 
@@ -351,6 +352,7 @@ def wrap(mainos, name, verstr, blurb):
 
 def compose(name, builder, basepath, verstr, blurb, stock, rebuild, wip=False):
     """One Bugbuild: the feature's image + the bug-fix caves, checked and wrapped."""
+    feature_exclusions.check(name.split("+"), who=f"build_bugbuilds {name}: ")   # a combined base, never
     if not wip and builder not in FINAL:
         print(f"---- {name}: {builder} is not promoted to FINAL -- skipped\n")
         return
