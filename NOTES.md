@@ -38248,3 +38248,7 @@ unchanged. Still WIP (not promoted).
   syx 1ae6e764…, mainos a49b9463…, OS VERSION "KY+CL DJC8" (builder line). build_kyoti green (0x400a1f72 shared, 104
   spans, B1/B2). REF-LOCK 16<->7 / A07<->A08 PASS; check_dj_full PASS (21 / 26 / 1); overlap test PASS (5 overlaps,
   42 applies, none dangling).
+- **KY+CL DJC9** (2026-11-15, WIP, NOT flashed): trkseq cfe1a54 (Clyps CL38) + DIRECT JUMP V7.2.2 (same merged file
+  as DJC7/8), scratch tree out/scratch-kc38: out/djc3/kyoti_clyps9/OCTATRACK_OS1.40C_KYOTI_V1.7_WITH_CLYPS.syx, syx
+  09825a2c…, mainos 32108f95…, OS VERSION "KY+CL DJC9" (builder line). build_kyoti green. REF-LOCK 16<->7 / A07<->A08
+  PASS; check_dj_full PASS (21 / 26 / 1); overlap test PASS (5 overlaps, 42 applies, none dangling).
