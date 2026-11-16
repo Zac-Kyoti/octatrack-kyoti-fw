@@ -90,19 +90,27 @@ Part change on a jump, first from the ROM cave (2026-09-27/28), then from DRAM i
 octabam-built image with all six KYOTI modules (2026-10-01). That image also confirmed
 OFF at power-on, the `[PTN]`+`[YES]` toggle, and OFF again after a power cycle.
 
+**V7.2.2 on hardware (2026-11-15):** the standalone image `140C_KDJ7` (mainos
+`7c6131e7…`): with SILENCE TRACKS on, the pop at a Part-changing jump is gone. KYOTI V1.8C
+(the same DIRECT JUMP code beside Clyps, flashed as `KY+CL DJC9`) passed the author's
+walk-through: jumps between patterns of other lengths and scales land in time, a cue in
+the outgoing pattern's last step lands on its grid point, `1:2` / `1:4` trigs carry on
+across a jump (a held `[FILL]` survives it, a `PRE` right after it plays), and with LFO
+AUTO CHANGE on a ringing sample keeps its LFO until its own track's first trig.
+**This octabam form has not been flashed.**
+
 **Emulator only** (`ot_emu`, Unicorn on real image bytes): Program Change on fast
 re-cues, MIDI tracks, and START SILENT (exactly as on a stock pattern change in the
-emulator, not exercised on the unit). V7.0.2's trig conditions (WIP, not flashed): every
-track's A:B counter and the FILL / PRE latches equal a never-switched reference run's at
-every tick after each jump (`tools/cmp_reflock.py --cond`).
+emulator, not exercised on the unit). The trig conditions also equal a never-switched
+reference run's at every tick after each jump (`tools/cmp_reflock.py --cond`).
 
 Everything the emulators prove is control flow and image bytes, not how the unit
 sounds. Nothing here has been tested on an MKII.
 
 Reproduction: assembled with `m68k-elf-as -mcpu=5407` or `54455` (identical) and no
-symbols, linked at `0x400d6d38` → 1980 bytes, sha256 `b86e3c3255674cef…`: byte for byte
-the DIRECT JUMP code of the KYOTI V1.0 image flashed on the author's MKI. octabam
-re-links it there on every build and compares.
+symbols, linked at `0x400d6d38` → 3846 bytes, sha256 `688978daa1ed86c0…`: V7.2.2, the
+code of the standalone image above. octabam re-links it there on every build and
+compares.
 
 ## Required: the bugfix bundle
 
@@ -133,8 +141,8 @@ Either can be selected without the other; the sites are disjoint.
 ## What is open
 
 - MKII is untested.
-- Hardware confirmation of Program Change on fast re-cues, MIDI tracks, START SILENT
-  and V7.0.2's trig conditions.
+- Hardware confirmation of Program Change on fast re-cues, MIDI tracks and START SILENT.
+- This octabam form of V7.2.2 on hardware.
 
 ## Design notes
 

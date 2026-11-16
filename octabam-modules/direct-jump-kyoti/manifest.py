@@ -47,10 +47,13 @@ the same speed; what DRAM adds is the dependency on octabam's loader at boot.
 MEASURED. Hardware-confirmed on the author's MKI: the clock-locked timing and the Part
 change, from the ROM cave (2026-09-27/28) and from DRAM in an octabam-built image with
 all six KYOTI modules (2026-10-01; also OFF at power-on, the PTN+YES toggle, OFF again
-after a power cycle). Emulator-verified only (ot_emu, real image bytes):
-Program Change on fast re-cues, MIDI tracks, START SILENT (identical to a stock
-pattern change in the emulator) and V7.0.2's trig conditions (equal to a never-switched
-reference run at every tick, tools/cmp_reflock.py --cond; not flashed).
+after a power cycle). V7.2.2 (2026-11-15): the standalone image 140C_KDJ7 (mainos
+7c6131e7...) ends the SILENCE TRACKS pop at a Part-changing jump; KYOTI V1.8C (the same
+code beside Clyps, flashed as KY+CL DJC9) passed the author's walk-through -- landings
+at other lengths and scales, a cue in the last step, trig conditions carried across a
+jump, each track's Part at its first trig with LFO AUTO CHANGE on. This octabam form is
+not flashed. Emulator-verified only (ot_emu, real image bytes): Program Change on fast
+re-cues, MIDI tracks, START SILENT (identical to a stock pattern change in the emulator).
 Standalone image and version string: tools/build_direct_jump_kyoti.py -> 140C_KDJ7.
 """
 
@@ -95,8 +98,9 @@ PTN_LAYER_YES_PRESS = PTN_LAYER_YES + 2                # the u32 press handler
 # never-switched pattern instead of COND_RESET(-1)) and V7.1 (2262 B, WIP 2026-11-13: a jump lands one
 # tick before the boundary, ahead 2, like Clyps CL26) and V7.1.1 (2610 B: an armed cue is never taken by
 # stock's wrap-change) and V7.2 (3808 B: each track's Part at its first sounding trig, with LFO AUTO
-# CHANGE on; a waiting track whose sequence has no sample trig publishes at once) and V7.2.2 (3846 B: the
-# tracks a jump's switch will silence are released with stock's note-off first) are not flashed yet.
+# CHANGE on; a waiting track whose sequence has no sample trig publishes at once) came after it. V7.2.2
+# (3846 B: the tracks a jump's switch will silence are released with stock's note-off first) is the
+# code of the standalone image the author flashed on 2026-11-15 (140C_KDJ7, mainos 7c6131e7...).
 REFERENCE = (0x400d6d38, "688978daa1ed86c0a0874404e859ee781fbfbed7808be33c2f862beb3e373011")
 
 MODULE = Module(
