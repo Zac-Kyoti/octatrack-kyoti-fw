@@ -38174,3 +38174,19 @@ trigs do.
 Hardware (KY+CL DJC5): the pop is unchanged with cec74de, so "T8's FX swap at the next trig" was not the cause (the
 route-A emulator streams no samples; the cause was inferred, not heard). cec74de reverted; V7.2 is the head again
 (standalone rebuilt as 140C_KDJC8). Next: measure with real audio (octabam ot_emu's render).
+
+## 2026-11-15 cont. (`dj-clyps`) — the SILENCE TRACKS pop rendered with real audio (octabam ot_emu), measurement only
+
+- ot_emu (octabam d77466c8 build copied to out/otemu/; DSP on) renders OT DEMO with its 24 samples staged
+  (`stage_card.py --audio` x24, AUDIO/ELEKTRON/*): audio on core-0 TX slots 2-5. Renders (out/otemu/, 9000 frames,
+  standalone 140C_KDJC8 = V7.2): no switch; stock CHAIN AFTER 2 (A05 -> A03, switch frame 6202); DJ 2-step landing
+  (same frame); DJ odd-step landing (switch frame ~6547); variants SILENCE off, T8's FX made equal (Part poke),
+  MASTER TRACK off (0x80000034 = 0). Metric: per-frame RMS and the peak 2nd difference (levels / transients only).
+- **Measured:** with SILENCE TRACKS on, the switch's kill is a hard cut in the render: DJ odd-step 2nd-difference
+  0.169 at frame 6552 (5 frames after the switch; baseline 0.028; SILENCE off 0.028). At the 2-step point the kill
+  coincides with new trigs' attacks (stock 0.459, DJ 0.890, no switch 0.070).
+- **Not reproduced:** the hardware's dependence on MASTER TRACK and on T8's FX. The odd-step cut is the same with
+  T8's FX equal (0.169, identical samples until the next trig) and with MASTER TRACK off (0.180). In the render T8's
+  FX change shows only at the next trig (frame 6894). So the render cannot confirm the cut is the user's pop.
+- **Fix 1 emulated** (stock's note-off 0x40008f84(all) called ~107 or ~47 frames before the switch, ot_emu --step
+  call, no firmware change): the switch transient disappears (0.015 / 0.018), no new transient at the note-off.
