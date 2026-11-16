@@ -78,8 +78,8 @@ member of a Multi. The Clyps view shows one column of the library: the active tr
 - **Legato** comes with **Direct Jump Kyoti**. The new clip takes over on the track's very next step, exactly
   where it would be had it been playing all along. Nothing waits and nothing restarts, so you can swap clips as
   fast as you can press trigs: a quick, musical, fluid way to make a lot of sequence variation on the fly.
-- **Putting back** what belongs here (an original, a temp save, the card's version) is always legato, with or
-  without Direct Jump Kyoti.
+- **Reloads** to the active pattern (whether an original, a temp save, or the card's version) are always legato,
+  with or without Direct Jump Kyoti.
 
 Direct Jump Kyoti is built into Clyps. It is off at power-on, so Clyps starts with stock timing (cued);
 [PTN] + [YES] switches between cued and legato at any time.
