@@ -38614,3 +38614,309 @@ Now 936 / 932 (<= 945): the pair fits, SC's donor becomes PLATE REV.
   [FUNC]); SETUP's key / LED layers stay above Clyps' after a peek. Fixes: event 3; the return re-pushes Clyps' layers on
   top. New gate 8 (SETUP before Clyps -> first peek SETUP, one [NO], SETUP still open after); gate C PASS. Harness: the
   diag_clyps_ui closed_ok diagnostic read a removed symbol (cl_tlayer).
+## 2026-11-13 (`dj-clyps`) — DIRECT JUMP V7.0.2 (WIP, NOT flashed): trig conditions as a never-switched pattern; purge race and Part timing measured
+
+Handoff: `reference/handoffs/DJ_CLYPS_PORT.md` (trkseq). Item 1 only is implemented; items 2-3 are measured, not changed.
+- **Item 1:** `dj_handoff` no longer calls COND_RESET(-1); `dj_cond` sets every track's A:B counter 0x46107918[t] to
+  F(t_L) = the passes it would have begun since PLAY in the incoming pattern's model (Clyps' rule 3 formula, R = PLAY,
+  B = 0 in dj_T: F(0) = 0). PRE latch 0x46107979[t] = 1 (COND_RESET's value; the incoming pattern's own last result is
+  unknown), FILL latches 0x46107959 / 69 kept (the performer's press). No COND_RESET detour: no collision with Clyps'
+  `cl_creset` (0x400a539c) in KYOTI-with-Clyps, where `cl_Tres` now stays at its PLAY value across jumps (0 in c1/c2).
+- Measured: PLAY never calls COND_RESET (KEY_PLAY and FW_TRANSPORT probed, 0 calls); STOP does (0x400a12b8, by reading).
+  `diag_reflock.py --cond` records the counters + latches, `--stop-reset` runs STOP's COND_RESET(-1) before PLAY (the
+  harness otherwise starts with PRE = RAM's 0); `cmp_reflock.py --cond` grades them per segment.
+- Gates (emulator only): REF-LOCK with --cond on the standalone image (3214517c…): 16↔7 NORMAL 4 jumps, A07↔A08
+  PER-TRACK master 1x↔2x, DJMAST2 1x↔2x, master INF -- PASS (counters + latches from the landing tick, state from the
+  tick after, pending events identical); mixed 3/4x+3/2x+1/4x: PASS for 2 of 3 jumps, the third is a PRE-EXISTING
+  V7.0.1 race (identical on the old image, run o4): a cue in the outgoing pattern's last step arms DJ for the lcm grid
+  (24 ticks with a 1/4x track), stock's wrap-change takes the cue first (t372, step 0, conditions reset), DJ re-lands
+  at t383 -- 11 ticks off the reference. V7.0.1 (old image) fails --cond on every jump, as expected. KYOTI default and
+  KYOTI-with-Clyps: 16↔7 + A07↔A08 PASS. DJ-OFF and DJ-ON-idle identity vs stock: IDENTICAL. Bugbuild (WIP base
+  entry in build_bugbuilds.py, BUG_DJC1): DISJOINT / ALL PRESERVED / NO STRAYS. octabam REFERENCE re-pinned
+  (2444840d…, 2188 B); octabam's own build not run.
+- **Item 2 (purge race), measured on the 16↔7 run:** at dj_purge the outgoing boundary event's fire time equals the
+  sample clock EXACTLY (fire - SCLK = +0.0000 tick, both landings): purged by `bmi` only because the tie counts as
+  "not yet due". The incoming step's events are written with fire - SCLK = 0 (ahead 1). The engine does not protect:
+  its switch (0x4000af24..0x4000b1dc, at ENG_ATIME's frame) applies the Part and resets 0x8000182a..39; the firing loop
+  (0x4000b834..) drops events only for the mute masks -- nothing drops old-pattern events. So DIRECT JUMP has the CL25
+  tie; on the unit it would flip only if SCLK is re-derived from the frame clock (0x4000ae06, armed by 0x80006686)
+  between the old event's scheduling and the landing. Not observed by the user. Not changed.
+- **Item 3:** the light Part apply (0x40009e00 via 0x4000b1d8) ran in the frame right after the landing (frame clock
+  - landing SCLK = 0.017 tick) -- the same frame the incoming first step fires; a track whose incoming sequence has no
+  trig there keeps ringing under the new Part. Not changed.
+- Builds (WIP): standalone `out/OCTATRACK_OS1.40C_DIRECT_JUMP_KYOTI.syx` (140C_KDJC1); KYOTI V1.7 image (reads
+  "KYOTI V1.7"); KYOTI-with-Clyps built in a scratch trkseq@ae75d15 tree + this DJ source (KYOTI DJC1); Bugbuild
+  BUG_DJC1. None flashed. Evidence: out/djc/ (runs, launch.sh, probes).
+
+## 2026-11-13 cont. (`dj-clyps`) — DIRECT JUMP V7.1 (WIP, NOT flashed): a jump lands one tick before the boundary (Clyps CL26)
+
+The user's decision (2026-11-13), item 2 of DJ_CLYPS_PORT: fix the boundary tie the Clyps CL26 way.
+- **Change:** dl_arm looks for the tick whose NEXT tick has t' = 0 mod L (t' >= 0); dl_commit's snapshot is
+  the boundary's (t'(t_L) + 1); Hook N, after stock's loader, takes one off every RELOAD byte and off TICK_CTR
+  (ahead 2: phase E builds the landing step a tick early, fired for the boundary; the master steps on the
+  boundary); dj_handoff stamps the engines' switch one tick ahead (ENG_ATIME = SCLK + 0x285ff0, the two MIDI
+  times + 16800, i.e. stock's d5 = 1); dj_purge runs a tick ahead and cancels events firing half a tick or more
+  from now (0x142ff8 audio / 8400 MIDI); dl_fixup unchanged (next tick = the boundary tick). dj_cond reads
+  F(t_L): no pass starts on t_L (t'(t_L) = -1 mod every tps), so it equals V7.0.2's F(boundary).
+- **Why half a tick, not Clyps' "fire >= now":** DJ's landing grid is the INCOMING pattern's lcm; an outgoing
+  track (another rate / length) can have a step on the landing tick itself (fire - now = 0). V7.0.x played it
+  (it was due before the boundary); "fire >= now" would drop it. Clyps never meets this (it lands each track on
+  its own old AND new grid).
+- **Measured purge margin** (out/djc2/probe_purge2.py, 16<->7 and the mixed run, every purge): the only pending
+  outgoing events at the purge are the boundary events at fire - now = **+1.0000 tick** (purged; half a tick
+  from the threshold, a full tick from the clock; V7.0.x: +0.0000). The engine's switch applies 0.0065-0.0174
+  tick after the boundary (as before).
+- **REF-LOCK** (tools/cmp_reflock.py --cond vs out/djc/r*.json, standalone 140C_KDJC2 a1114bb5…): 16<->7 NORMAL,
+  A07<->A08, INF: PASS (state from the tick after each landing, counters + latches, pending events identical --
+  the new step fires exactly where the old boundary event would have). DJMAST2 and the mixed 3/4x+3/2x+1/4x run
+  fail only by the item-4 race (a stock wrap-change taking an armed cue): the cue deadline is now one tick
+  earlier, so DJMAST2's cue at t185 (V7.0.2 landed at once) waits for the next grid point and stock's wrap at
+  t189 takes it. Fixed by V7.1.1 (next entry). DJMAST2's first cue moved to t93 (as V7.0.2's run n3b: a cue
+  written in the very phase G of a wrap is a harness artifact no unit can produce).
+- Builds: none committed with this step (the final builds come with V7.2). Evidence: out/djc2/ (v1-v5, vpp*).
+
+## 2026-11-13 cont. (2) (`dj-clyps`) — DIRECT JUMP V7.1.1 (WIP, NOT flashed): stock's wrap-change no longer takes an armed cue
+
+Item 4 (the race found with V7.0.2, run o4/n4). **Cause, read on our image:** a cue made shortly before the
+outgoing pattern's switch point (its last master step, or a CHAIN AFTER boundary) is armed for the incoming
+pattern's grid, up to L - 1 ticks away (24 with a 1/4x track). Phase G reaches its switch point first: the
+wrap body 0x400a43a0 commits PEND into ACT whenever PEND is set (0x400a44b8-0x400a44dc, whatever the d6
+"real switch" flag says) and with PEND != ACT runs the full switch (step 0 a master step on, COND_RESET(-1));
+DJ then re-landed on its grid. V7.1 makes it likelier (the cue deadline is a tick earlier).
+- **Fix (no stock site, no new hook):** dj_hide, at the end of dj_land while ARMED, replays stock's decision
+  for this tick's phase G (0x400a3fdc-0x400a439c: the master step rolls; CHAIN AFTER N from blob +0x8e56 or
+  0x8000004e via 0x400d80dc with step mod N == 0, or the 0x8000662c override, or the pattern's master length;
+  not when STOP_END 0x8000667e is set) and, only when the switch would be taken, makes PEND read as the playing
+  pattern for that one tick -- the wrap body then wraps the outgoing pattern as if nothing were cued.
+  dj_unhide, first thing in the next phase D, puts the cue back (unless the performer cued meanwhile) and
+  posts the wrap's own {0x11, pattern, 1} so the UI repaints the cue.
+- **REF-LOCK** (standalone 140C_KDJC3 1d43b88e…): the mixed 3/4x+3/2x+1/4x run's third jump -- before (V7.1,
+  run v4): stock's wrap at t372 took the cue, state locked only from t384 (11 ticks late), A:B counters 0 vs
+  the reference's [3,5,1,3,…], 10 ticks of wrong pending events (pattern 4 from step 0); after (run w4):
+  plain wrap at t372, DJ lands at t382, LOCKED from the tick after, counters + latches + pending IDENTICAL:
+  PASS. All five scenarios (16<->7, A07<->A08, DJMAST2, INF, mixed) PASS. octabam REFERENCE 64968ef9… (2610 B).
+- **Open (by design):** for that one tick the PTN page's cued LED reads PEND == playing; the repaint post
+  restores it on the next tick. A cue cancel pressed exactly in that tick is lost (the old cue comes back).
+
+## 2026-11-13 cont. (3) (`dj-clyps`) — DIRECT JUMP V7.2 (WIP, NOT flashed): each track's Part at its first sounding trig
+
+Item 3 (the user: a performer should never hear the incoming sequence's track settings on the sound being changed
+away from; Clyps' FULL rule). **First, what stock's light Part apply 0x40009e00 is** (read on our image + measured):
+its Part-wide items are the publish bytes 0x80001828/29 (the bank / Part every new trig's voice reads), the scene
+table 0x800010e4..e7, the UI block 0x46c7d6d4..d7d4 and its two UI posts (0x400d64b9 / bb); its ONLY per-track
+part is every audio and MIDI track's LFO setup (0x80000816.., 0x80000110 / 0x80000dbc state, designer waves
+0x80001388 / slopes 0x80001508; MIDI 0x46c76dc6.., 0x46c7738c, 0x46c7750c), and only with **LFO AUTO CHANGE**
+(0x80000050, project CONTROL > SEQUENCER) on. Every other track setting of the new Part reaches the voice through
+the publish bytes at its trigs (voice code 0x4000b4f6.. / 0x4000c9e8 records bank / Part per trig).
+- **Verified** (tools/check_dj_part.py on a snapshot of OT DEMO playing Part 0, applying Part 1, a bare Unicorn,
+  every byte): dj_pwide (= the light apply with its per-track part skipped) writes exactly the light apply's
+  Part-wide bytes (12 B); Part-wide + TRK_APPLY(t) for t 0..7 + dj_mapply(m) for m 0..7 reproduce every byte
+  the light apply writes, same values, for LFO AUTO CHANGE off (12 B) and on (111 B): PASS. TRK_APPLY / the
+  MIDI apply write ~540 B more (base words, machine setup, levels, MIDI page values, MBANK); a V7.1.1-vs-V7.2
+  run (same jumps, out/djc3/g1 vs h1) shows no lasting difference in static engine values after every track
+  published -- the trigs write the same values -- but TRK_APPLY re-initialises the LFOs.
+- **Change:** the jump's switch (unchanged hand-off, the boundary) applies the Part-wide items only: a new detour
+  at the light apply's `tst.b 0x80000050` (0x40009ebe, `dj_lfoq`, jsr) skips its per-track loops for the one
+  apply after a jump. dj_sparm arms every track at the landing; dj_spdo (each tick, end of dj_land) publishes a
+  track (TRK_APPLY / dj_mapply = Clyps' cl_mapply) on the tick a pending event of the new sequence with record
+  bit 2 (fire >= the landing clock + half a tick, dj_purge's line) fires within half a tick; no sample trig in
+  the sequence, or START SILENT (stock silences the track at the switch): the boundary tick. A new jump, STOP,
+  DJ off / chain / arranger: everything pending at once (dj_spflush). **With LFO AUTO CHANGE off nothing is
+  armed** (the light apply has no per-track part then; a TRK_APPLY would impose the new Part's LFOs, which stock
+  never does). No restart bit: the voice code restarts a machine whose voice Part differs when it triggers.
+  Standalone cave moved to 0x400d6800 (3716 B; caves.md §2b zone; the Bugbuild's fixes keep 0x400d6500..).
+- **Graded** (tools/diag_dj_partpub.py --trace + tools/check_dj_full.py, OT DEMO, patterns on Parts 0-3, LFO
+  AUTO CHANGE poked on): standalone 21 tracks published exactly on their first sounding trig's tick, 26 on the
+  boundary tick (no sample trig), 1 published by the next jump's flush (no trig in between): PASS; KYOTI default
+  and KYOTI-with-Clyps the same (21 / 26 / 1, PASS). AUTO CHANGE off: no arm, no publish (3 jumps). REF-LOCK
+  (all five DJTEST2 / DJMAST2 scenarios) PASS on standalone 140C_KDJC5, KYOTI default (16<->7, A07<->A08,
+  mixed) and KYOTI-with-Clyps (same three) PASS.
+- **KYOTI-with-Clyps interplay, the rule (by construction, no Clyps code change):** every publish -- DJ's and
+  Clyps' -- applies the Part as it is at that moment and only at a sounding trig of the sequence then playing
+  the track. A jump: Clyps' pending publish drops itself when the incoming pattern's Part differs (cl_sppub's
+  Part check) or applies the same Part at the same first trig as DJ's (identical apply). A Clyps load on a track
+  DJ still owes: Clyps purges the track's events at its landing, so DJ's publish fires at Clyps' new sequence's
+  first trig, with the Part that now holds Clyps' slice -- the same apply Clyps makes there. Runs (trkseq's
+  harness, KYOTI-with-Clyps, DJ on): FULL load then jump to another Part, jump then FULL load, FULL load then
+  jump on the same Part -- every TRK_APPLY names the Part playing at that moment, none early. The two overlap
+  cases themselves (both pending at once) did not occur in those runs: not exercised.
+- DJ-OFF and DJ-ON-idle identity vs stock (tools/diff_stock_vs_patch.py) on 140C_KDJC5: IDENTICAL (also on the
+  V7.1 and V7.1.1 images). Bugbuild BUG_DJC2: DISJOINT / ALL PRESERVED / NO STRAYS. octabam REFERENCE 5ba3ac14…
+  (3716 B, 5407 = 54455), manifest + README list the fourth detour.
+- **Builds (all WIP, NONE flashed):** standalone `out/OCTATRACK_OS1.40C_DIRECT_JUMP_KYOTI.syx` (140C_KDJC5, syx
+  7ce3f777…, mainos 617af798…); Bugbuild BUG_DJC2 (syx 890cabeb…); KYOTI default "KYOTI DJC2" (out/djc3/
+  kyoti_default/, syx bf84e47a…, mainos e4ca6bb1…); KYOTI-with-Clyps "KY+CL DJC2" from trkseq c83ba6e in a scratch
+  detached tree + this DJ source merged onto trkseq's (DJ_SELFHOOK kept; out/djc3/kyoti_clyps/, syx bae3d5ad…,
+  mainos 428b495e…). Evidence: out/djc2/ (REF-LOCK v/w/x/y/k/c runs, identity), out/djc3/ (Part dumps, traces).
+
+## 2026-11-14 (`dj-clyps`) — DIRECT JUMP V7.2 in KYOTI-with-Clyps: the publish overlaps tested; KY+CL DJC3 on Clyps CL34 (WIP, NOT flashed)
+
+The user (2026-11-14) accepted the four V7.2 answers (nothing deferred with LFO AUTO CHANGE off; the cue deadline
+a tick earlier; dj_hide's one-tick window) and asked for a dedicated test of the two Clyps overlaps.
+- **Tools:** `tools/diag_dj_clyps_overlap.py` (drives OT DEMO in the KYOTI-with-Clyps image the way trkseq's
+  diag_clyps_lock does -- Clyps open on T5, SEQ / FULL loads, DIRECT JUMP cues that return as soon as they land --
+  with LFO AUTO CHANGE poked on; records per tick the playing pattern / Part, trig masks, the audio event table,
+  cl_spd / cl_spn, dj_spd / dj_spn, and every apply / publish / landing call) and `tools/check_dj_clyps_overlap.py`
+  (OVERLAP happened; PART = every TRK_APPLY names the Part playing then; TRIG = every publish on a tick where the
+  sequence then playing the track has a sounding trig (fired after its latest landing) within half a tick, or has
+  no sample trig, or is a flush; no publish left DANGLING -- pending although its sequence has no sample trig).
+  Launcher: out/djc3/overlap.sh. Cases on T5 (sparse trigs): (a) FULL slot 0 then a jump to P5 (same Part 1) /
+  P8 (Part 2); (b) a jump P0 -> P4, then a Clyps SEQ slot 3 / FULL slot 3 / FULL slot 1 (no trig) on T5.
+- **Found and fixed:** case (b) with a trig-less Clyps load left DIRECT JUMP's T5 publish pending for ever (it
+  waited for a trig the new sequence never has; harmless -- no wrong apply -- but dangling until the next
+  jump / STOP). dj_spdo now re-checks a waiting track each tick: the sequence now playing it has no sample trig
+  -> publish now (the boundary rule). dj_tmask / dj_hastrig factor the mask test out of dj_sparm.
+- **Result** (KY+CL DJC3, below): all five overlaps happened; 42 applies, every one PASS on PART and TRIG
+  (same Part: DIRECT JUMP's and Clyps' publish of T5 fall on the same tick with the same Part; another Part:
+  Clyps' pending publish drops itself, DIRECT JUMP's applies Part 2 at T5's first trig; Clyps loads over a DJ
+  publish: both publish at Clyps' new sequence's first trig, or at once when it has no trig); no dangling (one
+  track still legitimately waiting at the run's end for a trig its sequence has, beyond the run). Before the
+  fix (c83ba6e image): the trig-less case FAIL (dangling).
+- **Other gates on KY+CL DJC3:** REF-LOCK 16<->7 and A07<->A08 PASS; check_dj_full PASS (21 on their first
+  trig, 26 boundary, 1 flushed by the next jump; standalone 140C_KDJC6 the same); Clyps' check_clyps_full with
+  DIRECT JUMP on PASS 4/4 (loads spaced; with loads closer than their first trig the superseded load has no
+  publish to grade -- a property of that grader, 2 of 4, same image).
+- **Builds (all WIP, none flashed):** KYOTI-with-Clyps "KY+CL DJC3" from trkseq **bc04617** (Clyps CL34) in a
+  scratch detached tree (out/scratch-kc34) + this DJ source 3-way merged onto trkseq's DJ_SELFHOOK copy
+  (out/djc3/patch_directjump_v7_kyoti_clyps34.s): out/djc3/kyoti_clyps34/OCTATRACK_OS1.40C_KYOTI_V1.7_WITH_CLYPS.syx
+  (syx 687c0e61…, mainos c0d25631…). Standalone 140C_KDJC6 (syx eed4024e…, mainos 1f0ea5cd…); Bugbuild
+  BUG_DJC3 (syx 851620a3…); KYOTI default "KYOTI DJC3" (out/djc3/kyoti_default3/, syx 46f0f637…, mainos
+  00d747fd…). octabam REFERENCE 482af144… (3808 B).
+
+## 2026-11-14 cont. (`dj-clyps`) — the pop at a Part-changing jump with SILENCE TRACKS on: measured (no code)
+
+The user (HW, standalone 140C_KDJC6): OT DEMO A05 (Part 2) -> A03 (Part 1) with a sample ringing pops with DIRECT
+JUMP, not with stock's CHAIN AFTER 2 change, and only with CONTROL > SEQUENCER > SILENCE TRACKS on. Tool:
+`tools/diag_dj_switchpop.py` (per-frame calls, Part-byte reads, writes and engine-record diffs around the switch);
+runs out/djpop/ (a/b/c: SILENCE TRACKS off; as/bs/cs: on via 0x8000004f = 1).
+- **SILENCE TRACKS = 0x8000004f** (setter 0x40065a96 also writes the battery copy 0x100b14af; the per-track START
+  SILENT byte, track record +3, -1 = "use the project's"). Stock's wrap-change (0x400a45cc..) and DJ's dj_handoff
+  (ho_bits) both turn it into ENG_AFLAGS bits 8..15 (measured: 0xff03 in both, every audio track).
+- **The silencing, the same in both:** at the switch frame the engine (0x4000af52) folds the bits into its frame
+  mask; the per-track loop at 0x4000d446 calls **0x40006820(t) for each -- a hard voice kill** (voice record +0
+  cleared, 0x80004898 cleared, generation 0x80004a68+168t bumped, 0x4000672c bookkeeping). **No fade:** stock's
+  declicked release is the note-off 0x40008f84(t) (sets 0x8000184a bit t, 0x46c7dfba[t] = 45; the DSP's own
+  fade, MUTE_MODES OTFX-T / STOP), which this path does not use. Measured: stock and DJ kill all 8 tracks in the
+  SAME frame (f6202 in runs as / bs, the boundary + 0.017 tick; ENG_ATIME, TEMPO_APPLY, light apply, publish
+  bytes identical; the 0x8000182a reset and the 0x80006904 paths not taken in either).
+- **The difference:** what the incoming pattern triggers in that frame. Stock's 2/16 change starts A03 at step 0,
+  where T1 T2 T3 (and T6, T8) trigger: their killed voices are restarted in the same frame (records written at
+  f6203). A DIRECT JUMP lands A03 at its clock position (step 2 in run bs: only T3 triggers; step 3 in run cs:
+  none), so a ringing track without a trig on that step is just cut -- the pop. Prediction for the unit: the
+  ringing track has a trig on A03 step 0 but not on DJ's landing step; stock should pop the same way with a
+  ringing track that A03's step 0 does not trigger (T4, T5, T7). The emulator cannot play it (route A streams no
+  samples; idle voices are killed every frame by 0x40008110), so the cut itself is not measurable here.
+- **RELOAD / Clyps:** neither posts ENG_AFLAGS silent bits nor calls 0x40006820 -- their in-place landings
+  (RELOAD's rt3_all pattern reload, Clyps' card pattern reload, track loads) do not apply SILENCE TRACKS at all
+  (not affected; also not stock-parity). Clyps' ORIG PTN+PRT and every change to another pattern go through
+  stock's switch or DIRECT JUMP's hand-off and inherit whatever they do.
+
+## 2026-11-14 cont. (2) (`dj-clyps`) — DIRECT JUMP V7.2.1 (WIP, NOT flashed): T8's master restart at the switch (the master-track pop)
+
+The user isolated the pop on 140C_KDJC6: DIRECT JUMP on + SILENCE TRACKS on + T8 as MASTER TRACK (0x80000034,
+"MASTER_TRACK=%d"; OT DEMO has it on) + T8's FX types differing between the Parts, a sample ringing, a landing step
+without a trig. Approved fix (with rollback): queue T8's master restart in the switch frame, as stock's step-0
+trigs do.
+- **Verified first** (diag_dj_switchpop --mrq, the request poked from Python at the switch's light-apply call): the
+  frame's track loop acts on it in that same frame -- T8's FX read from the incoming Part at 0x4000c40e in the kill
+  frame (f6547) instead of at the next trig (f6891). The request is a per-track voice-start message (0x46c7feb4 bit
+  t, record 0x46c7fe00 + 4t = {bank, Part, offset, code}); the light apply runs inside the switch block, before the
+  track loop and before the silence kill at 0x4000d446 -- stock's order.
+- **Change (one commit):** dj_handoff sets dj_mrq when MASTER TRACK is on, T8 is silenced by this switch (its START
+  SILENT / SILENCE TRACKS bit) and the bank or Part changes; dj_lfoq (the light apply's detour, the switch frame)
+  then queues 0x46c7feb4 bit 7 + 0x46c7fe1c..1f = (bank, Part, 0, 6) from the apply's own d6 / d5. Only then: with
+  T8 not silenced it keeps sounding and stock leaves it alone too. STOP / DJ off clears the request. No landing,
+  purge or sequencer state touched.
+- **Gates:** switchpop on the user's case (landing on a step without a trig): T8's restart with Part 1 now in the
+  kill frame (standalone f6547, KY+CL DJC4 f6547; before f6891), as stock's 2/16 (f6202); REF-LOCK all five
+  standalone scenarios + 16<->7 / A07<->A08 on KY+CL DJC4 PASS; check_dj_full PASS (21 / 26 / 1, both); overlap
+  test PASS (5 overlaps, 42 applies, none dangling); DJ-off and DJ-on-idle identity IDENTICAL; Bugbuild BUG_DJC4
+  DISJOINT / ALL PRESERVED / NO STRAYS. octabam REFERENCE 5ac91908… (3924 B).
+- **Builds (WIP, none flashed):** standalone 140C_KDJC7 (syx 882b8e57…, mainos fc9d8f5f…); Bugbuild BUG_DJC4 (syx
+  09414f43…); KYOTI default "KYOTI DJC4" (out/djc3/kyoti_default4/, syx 30604c50…); KY+CL DJC4 from trkseq bc04617
+  (out/djc3/kyoti_clyps4/, syx 178bb593…, mainos 38d5e737…). **Rollback:** out/rollback/KDJC6/ (140C_KDJC6 syx
+  eed4024e…) and out/rollback/DJC3/ (KY+CL DJC3 syx 687c0e61…), unchanged copies.
+
+## 2026-11-15 (`dj-clyps`) — V7.2.1 REVERTED: the T8 master restart did not fix the pop on the unit
+
+Hardware (KY+CL DJC5): the pop is unchanged with cec74de, so "T8's FX swap at the next trig" was not the cause (the
+route-A emulator streams no samples; the cause was inferred, not heard). cec74de reverted; V7.2 is the head again
+(standalone rebuilt as 140C_KDJC8). Next: measure with real audio (octabam ot_emu's render).
+
+## 2026-11-15 cont. (`dj-clyps`) — the SILENCE TRACKS pop rendered with real audio (octabam ot_emu), measurement only
+
+- ot_emu (octabam d77466c8 build copied to out/otemu/; DSP on) renders OT DEMO with its 24 samples staged
+  (`stage_card.py --audio` x24, AUDIO/ELEKTRON/*): audio on core-0 TX slots 2-5. Renders (out/otemu/, 9000 frames,
+  standalone 140C_KDJC8 = V7.2): no switch; stock CHAIN AFTER 2 (A05 -> A03, switch frame 6202); DJ 2-step landing
+  (same frame); DJ odd-step landing (switch frame ~6547); variants SILENCE off, T8's FX made equal (Part poke),
+  MASTER TRACK off (0x80000034 = 0). Metric: per-frame RMS and the peak 2nd difference (levels / transients only).
+- **Measured:** with SILENCE TRACKS on, the switch's kill is a hard cut in the render: DJ odd-step 2nd-difference
+  0.169 at frame 6552 (5 frames after the switch; baseline 0.028; SILENCE off 0.028). At the 2-step point the kill
+  coincides with new trigs' attacks (stock 0.459, DJ 0.890, no switch 0.070).
+- **Not reproduced:** the hardware's dependence on MASTER TRACK and on T8's FX. The odd-step cut is the same with
+  T8's FX equal (0.169, identical samples until the next trig) and with MASTER TRACK off (0.180). In the render T8's
+  FX change shows only at the next trig (frame 6894). So the render cannot confirm the cut is the user's pop.
+- **Fix 1 emulated** (stock's note-off 0x40008f84(all) called ~107 or ~47 frames before the switch, ot_emu --step
+  call, no firmware change): the switch transient disappears (0.015 / 0.018), no new transient at the note-off.
+
+## 2026-11-15 cont. (2) (`dj-clyps`) — DIRECT JUMP V7.2.2 (WIP, NOT flashed; hardware A/B vs KDJC8): release the silenced tracks before the switch
+
+The user approved fix 1 as an A/B. **Change (one commit):** dj_relsil, on the tick after the landing (ST_FIXUP), calls
+stock's note-off 0x40008f84(t) for every audio track whose START SILENT / SILENCE TRACKS bit the hand-off set
+(dj_silA bits 8..15): the DSP's declick release, so the switch's hard kill (0x40006820) lands on faded voices.
+Nothing when no track is silenced; no landing / purge / sequencer change. **Why that tick, not the landing tick:** the
+sequencer runs about a tick ahead of the audio, so the landing tick is ~2 ticks before the audible boundary --
+measured (ot_emu): released there, the outgoing sound went quiet ~2 ticks early; one tick later it keeps sounding
+until ~a tick before and the switch is still clean.
+- **ot_emu render (OT DEMO A05 -> A03, SILENCE on, master track on):** odd-step landing: switch 2nd difference 0.018
+  (KDJC8 0.169, no switch 0.028), no new transient before it, level up to then 0.118 (KDJC8 0.227); 2-step landing:
+  0.025 (KDJC8 0.890). SILENCE off: identical to KDJC8; DJ on without a jump: identical. After the switch at the
+  2-step point the level is lower (0.032 vs 0.105): the released voices' FX tails are smaller -- check by ear that
+  the first new trig is at full level. Side effect: the release leaves the tracks' 0x8000184a bits set (held release,
+  as MUTE_MODES OTFX-T) until each track's next trig clears them (0x4000bf22); clearing them after the switch
+  rendered identically.
+- **Gates:** REF-LOCK all 5 standalone scenarios PASS; KY+CL DJC6 16<->7 / A07<->A08 PASS; check_dj_full PASS
+  (21 / 26 / 1); overlap test PASS (5 overlaps, 42 applies, none dangling); DJ-off and DJ-on-idle identity
+  IDENTICAL; Bugbuild BUG_DJC5 DISJOINT / ALL PRESERVED / NO STRAYS. octabam REFERENCE 688978da… (3846 B).
+- **Builds:** standalone 140C_KDJC9 (syx 81014221…, mainos 7c6131e7…); Bugbuild BUG_DJC5 (syx 3a6dbd79…); KY+CL
+  DJC6 from trkseq c72b4bc (out/djc3/kyoti_clyps6/, syx 78493ad3…, mainos 2de0388c…). A/B partner: 140C_KDJC8
+  (syx 5a906055…, the same build without the release). FLASHING §4 has the A/B.
+
+## 2026-11-15 cont. (3) (`dj-clyps`) — which reported standalone syx files really carry their OS VERSION name
+
+The unit flashed with syx 81014221… reads "140C_KDJ7", not "140C_KDJC9". Cause: `build_bugbuilds.py --wip
+DIRECT_JUMP_KYOTI` re-runs the base builder without a name (`python3 tools/build_direct_jump_kyoti.py`, default
+"140C_KDJ7") and so rewrites out/OCTATRACK_OS1.40C_DIRECT_JUMP_KYOTI.syx -- same mainos, default name. Every hash
+taken after a Bugbuild run is the KDJ7-named file. Checked by rebuilding each commit with both names (out/verstr_check/):
+KDJC1 8003fb8f… = KDJC1 (ok); KDJC5 b0cc35cf… = KDJ7 (the corrected 7ce3f777… = KDJC5); **KDJC6 eed4024e… = KDJ7**
+(also the rollback copy out/rollback/KDJC6/); **KDJC7 882b8e57… = KDJ7**; KDJC8 5a906055… = KDJC8 (ok); **KDJC9
+81014221… = KDJ7** (the one flashed; its mainos 7c6131e7… is V7.2.2 as intended). The mainos of each is the intended
+one. From now: build the Bugbuild with `--no-rebuild` (or the standalone last), and check the "OS VERSION will read"
+line / the syx hash against a fresh named build before reporting.
+- **Correctly named A/B pair** (built last in scratch trees, no Bugbuild after; name from the builder's container line
+  "ELEK0178<name>"): `out/ab/KDJC8/OCTATRACK_OS1.40C_DIRECT_JUMP_KYOTI.syx` = V7.2 (ffff346), 140C_KDJC8, syx
+  5a906055…, mainos 1f0ea5cd…; `out/ab/KDJC9/OCTATRACK_OS1.40C_DIRECT_JUMP_KYOTI.syx` = V7.2.2 (ec2f708), 140C_KDJC9,
+  syx eb2436c0…, mainos 7c6131e7…. The card .bin is ELUP-obfuscated, so the name is not readable there directly.
+
+## 2026-11-15 cont. (4) (`dj-clyps`) — V7.2.2 hardware result: the SILENCE TRACKS pop is fixed
+
+The user flashed `out/OCTATRACK_OS1.40C_DIRECT_JUMP_KYOTI.syx` syx 81014221… (mainos 7c6131e7… = DIRECT JUMP
+V7.2.2, ec2f708; OS VERSION reads "140C_KDJ7" through the Bugbuild rename): "The DJ on, silence tracks ON, pattern
+change pop seems to be fixed." Hardware-confirmed: the pop at a DIRECT JUMP switch with SILENCE TRACKS on is no longer
+heard (the user's OT DEMO A05 -> A03 case). Not separately reported: the first new trig's level, SILENCE TRACKS off
+unchanged. Still WIP (not promoted).
+- **KY+CL DJC7** (2026-11-15, WIP, NOT flashed): trkseq 24e1e6c (Clyps CL36) + DIRECT JUMP V7.2.2 (the merge onto
+  trkseq's DJ_SELFHOOK copy byte-identical to DJC6's), scratch tree out/scratch-kc36:
+  out/djc3/kyoti_clyps7/OCTATRACK_OS1.40C_KYOTI_V1.7_WITH_CLYPS.syx, syx b3dabfde…, mainos fdabb6b3…, OS VERSION
+  "KY+CL DJC7" (builder line). build_kyoti green with CL36's SAVE PART detour 0x4004a9c4 (every feature within its
+  own sites, 104 spans, no branch into one; B1/B2). REF-LOCK 16<->7 / A07<->A08 PASS; check_dj_full PASS
+  (21 / 26 / 1); overlap test PASS (5 overlaps, 42 applies, none dangling).
+- **KY+CL DJC8** (2026-11-15, WIP, NOT flashed): trkseq a21b95f (Clyps CL37) + DIRECT JUMP V7.2.2 (the same merged
+  file as DJC7), scratch tree out/scratch-kc37: out/djc3/kyoti_clyps8/OCTATRACK_OS1.40C_KYOTI_V1.7_WITH_CLYPS.syx,
+  syx 1ae6e764…, mainos a49b9463…, OS VERSION "KY+CL DJC8" (builder line). build_kyoti green (0x400a1f72 shared, 104
+  spans, B1/B2). REF-LOCK 16<->7 / A07<->A08 PASS; check_dj_full PASS (21 / 26 / 1); overlap test PASS (5 overlaps,
+  42 applies, none dangling).
+- **KY+CL DJC9** (2026-11-15, WIP, NOT flashed): trkseq cfe1a54 (Clyps CL38) + DIRECT JUMP V7.2.2 (same merged file
+  as DJC7/8), scratch tree out/scratch-kc38: out/djc3/kyoti_clyps9/OCTATRACK_OS1.40C_KYOTI_V1.7_WITH_CLYPS.syx, syx
+  09825a2c…, mainos 32108f95…, OS VERSION "KY+CL DJC9" (builder line). build_kyoti green. REF-LOCK 16<->7 / A07<->A08
+  PASS; check_dj_full PASS (21 / 26 / 1); overlap test PASS (5 overlaps, 42 applies, none dangling).

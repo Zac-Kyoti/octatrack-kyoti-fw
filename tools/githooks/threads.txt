@@ -23,6 +23,7 @@ tools/*direct_jump*
 octabam-modules/direct-jump-kyoti/*
 tools/emu_djdiag.py
 tools/diag_dj_*.py
+tools/check_dj_*.py
 tools/*reflock*.py
 tools/diag_led_pend.py
 tools/diag_tablearm_phase.py

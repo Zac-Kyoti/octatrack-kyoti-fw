@@ -28,7 +28,7 @@ Plus every write to the fire table 0x80001904 (8x8 longs) with the tick and writ
 
 Usage:
   python3 tools/diag_reflock.py --image IMG --project DIR --start P [--switch T:P ...]
-      [--normal-len P=LEN ...] [--dj 0|1] [--ticks N] --out out/reflock_X.json
+      [--normal-len P=LEN ...] [--dj 0|1] [--cond] [--ticks N] --out out/reflock_X.json
 """
 import argparse
 import json
@@ -56,6 +56,11 @@ EV_TABLES = {  # kind: (times base, mask base)
 BUILDER_A, BUILDER_A_RET = 0x4009D1E8, 0x400A2D82   # step_handler_confirmed, audio E call
 BUILDER_M, BUILDER_M_RET = 0x4009CF4C, 0x400A39CA   # MIDI twin
 PC_SEND = 0x4009E884        # stock's MIDI Program Change sender (bank, pattern)
+# Trig conditions (--cond): the A:B pass counter per track (++ at each pass start, stock 0x400a536c)
+# and the three latch bytes COND_RESET 0x400a539c sets (59 = 69 = 0: FILL latches; 79 = 1: PRE).
+COND_CNT = 0x46107918
+COND_RESET = 0x400A539C
+COND_LATCH = {"c59": 0x46107959, "c69": 0x46107969, "c79": 0x46107979}
 
 SCALARS = {  # name: (addr, size)
     "act_bank": (0x800065BD, 1), "act_pat": (0x800065BE, 1),
@@ -91,6 +96,13 @@ def main(argv):
     ap.add_argument("--dj-mode-addr", type=lambda v: int(v, 0), default=DJ_MODE,
                     help="where DJ_MODE lives: 0x800000d8 standalone; the combined KYOTI image "
                          "keeps it in DIRECT JUMP's cave (out/KYOTI/kyoti_v1.0_map.json)")
+    ap.add_argument("--cond", action="store_true",
+                    help="also record the trig-condition state per tick: the A:B pass counters "
+                         "0x46107918 (long[16]) and the latch bytes 0x46107959 / 69 / 79 ([16] each)")
+    ap.add_argument("--stop-reset", action="store_true",
+                    help="before PLAY, run COND_RESET(-1) 0x400a539c as stock's STOP does (0x400a12b8): "
+                         "a unit that has ever stopped starts PLAY with the PRE latches at 1; the harness's "
+                         "boot-then-start leaves them at RAM's 0 (PLAY itself never resets them)")
     ap.add_argument("--ticks", type=int, default=300)
     ap.add_argument("--tag", default="")
     ap.add_argument("--out", required=True)
@@ -157,6 +169,11 @@ def main(argv):
             raw = bytes(u.mem_read(tb, 3 * 8 * 4))
             s["ev_" + kind] = [int.from_bytes(raw[i * 4:i * 4 + 4], "big") for i in range(24)]
             s["mask_" + kind] = list(bytes(u.mem_read(mb, 8)))
+        if a.cond:
+            raw = bytes(u.mem_read(COND_CNT, 64))
+            s["cond"] = [int.from_bytes(raw[i * 4:i * 4 + 4], "big") for i in range(16)]
+            for k, base in COND_LATCH.items():
+                s[k] = list(bytes(u.mem_read(base, 16)))
         s["t"] = st["tick"]
         st["states"].append(s)
         while pend and pend[0][0] == st["tick"]:
@@ -189,6 +206,12 @@ def main(argv):
         if pc in (LAND_PC, TAIL_PC) and (not st["commits"] or st["commits"][-1][0] != st["tick"]):
             st["commits"].append([st["tick"], "LAND" if pc == LAND_PC else "WRAP"])
 
+    if a.stop_reset:
+        rt.run(until=lambda x: x.pc == er.MAIN_SPIN)
+        sp0 = rt.uc.reg_read(er.eb.UC_M68K_REG_A7)
+        rt.call_as_main(COND_RESET, args=(0xFFFFFFFF,), budget=600000)
+        rt.uc.reg_write(er.eb.UC_M68K_REG_A7, sp0)       # call_as_main leaks its arguments
+        print("STOP's COND_RESET(-1): PRE latches", list(bytes(rt.uc.mem_read(COND_LATCH["c79"], 16))))
     rt.uc.hook_add(er.eb.UC_HOOK_CODE, on_tick, begin=TICK_PC, end=TICK_PC)
     rt.uc.hook_add(er.eb.UC_HOOK_MEM_WRITE, on_fire, begin=FIRE_TBL, end=FIRE_END - 1)
     rt.uc.hook_add(er.eb.UC_HOOK_CODE, on_builder, begin=BUILDER_A, end=BUILDER_A)
@@ -197,7 +220,7 @@ def main(argv):
     rt.uc.hook_add(er.eb.UC_HOOK_MEM_WRITE, on_commit, begin=STEP_ARR, end=STEP_ARR)
     rt.start_transport_live()
     spins = 0
-    while st["tick"] < a.ticks and spins < 140:
+    while st["tick"] < a.ticks and spins < max(140, a.ticks // 2):
         before = st["tick"]
         rt.run(ms=60)
         spins += 1
@@ -205,7 +228,8 @@ def main(argv):
             break
 
     meta = dict(image=a.image, project=a.project, start=a.start, switches=switches,
-                normal_len=lens, pokes=pokes, dj=a.dj, bank=bank, ticks=st["tick"])
+                normal_len=lens, pokes=pokes, dj=a.dj, bank=bank, ticks=st["tick"], cond=a.cond,
+                stop_reset=a.stop_reset)
     out = pathlib.Path(a.out)
     if not out.is_absolute():
         out = ROOT / out
