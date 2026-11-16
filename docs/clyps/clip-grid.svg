@@ -27,7 +27,7 @@
     <text x="100" y="358">⋮</text><text x="100" y="384">A16</text>
   </g>
 
-  <!-- your pattern row -->
+  <!-- the active pattern row -->
   <rect x="106" y="70" width="488" height="32" rx="4" fill="#ffebe9" stroke="#cf222e" stroke-width="1.5"/>
 
   <g fill="#eef1f4" stroke="#d0d7de">
@@ -58,16 +58,16 @@
 
   <!-- notes -->
   <g fill="#1f2328">
-    <text x="610" y="84" font-weight="600" fill="#cf222e">your pattern</text>
-    <text x="610" y="100" fill="#59636e">the one playing</text>
+    <text x="610" y="84" font-weight="600" fill="#cf222e">the active pattern</text>
+    <text x="610" y="100" fill="#59636e">the pattern you're on</text>
     <text x="610" y="160" font-weight="600" fill="#0969da">a load</text>
     <text x="610" y="176" fill="#59636e">one track's clip from</text>
     <text x="610" y="192" fill="#59636e">another row drops onto</text>
-    <text x="610" y="208" fill="#59636e">your row. Every other</text>
-    <text x="610" y="224" fill="#59636e">track keeps playing.</text>
+    <text x="610" y="208" fill="#59636e">the active pattern.</text>
+    <text x="610" y="224" fill="#59636e">Other tracks play on.</text>
     <text x="610" y="270" font-weight="600">each cell = a clip</text>
     <text x="610" y="286" fill="#59636e">one track's sequence</text>
     <text x="610" y="302" fill="#59636e">in one pattern</text>
   </g>
-  <text x="20" y="458" fill="#59636e">Columns are tracks, rows are the bank's 16 patterns. Any track can play a clip from any row, while your pattern keeps playing.</text>
+  <text x="20" y="458" fill="#59636e">Columns are tracks, rows are the bank's 16 patterns. Any track can play a clip from any row, while the active pattern keeps playing.</text>
 </svg>

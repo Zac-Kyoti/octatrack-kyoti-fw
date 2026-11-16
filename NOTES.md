@@ -38952,6 +38952,9 @@ unchanged. Still WIP (not promoted).
   power-on (cued) and toggled with [PTN] + [YES]; manual header now marks it a living document; §11 rewritten.
 - Manual committed on trkseq as a DRAFT (the author, 2026-11-15: commit on trkseq only, no push; the kyoti-v18 merge
   carries it to main). "Draft for review" stays until the author approves the full draft.
+- 2026-11-16: §11 / header name "KYOTI with Clyps" (V1.8C; plain KYOTI V1.8 has RELOAD FROM PROJECT, no Clyps) and the
+  standalone Clyps image. The author: never "your own pattern" (odd, ambiguous) -> "the active pattern" (defined once
+  as the pattern you're on), "the active pattern's trig / slot / LED"; diagrams relabelled to match.
 
 ## 2026-11-15 (`kyoti-v18`) — KYOTI V1.8 + V1.8C, DIRECT JUMP V7.2.2, CLYPS FINAL; every feature image carries the bug fixes
 

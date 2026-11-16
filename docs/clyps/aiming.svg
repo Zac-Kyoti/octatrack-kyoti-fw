@@ -5,7 +5,7 @@
 <text x="30" y="34" font-weight="600" fill="#1f2328">1. Aim</text>
 <text x="30" y="52" fill="#59636e" font-size="12">arrows on slot 5</text>
 <rect x="48" y="68" width="150" height="22" rx="3" fill="#cf222e" stroke="#d0d7de"/>
-<text x="60" y="83" fill="#ffffff">1  your pattern</text>
+<text x="60" y="83" fill="#ffffff">1  active pattern</text>
 <rect x="48" y="96" width="150" height="22" rx="3" fill="#f6f8fa" stroke="#d0d7de"/>
 <text x="60" y="111" fill="#59636e">2  slot 2</text>
 <rect x="48" y="124" width="150" height="22" rx="3" fill="#f6f8fa" stroke="#d0d7de"/>
@@ -23,7 +23,7 @@
 <text x="300" y="34" font-weight="600" fill="#1f2328">2. [YES]: slot 5 plays</text>
 <text x="300" y="52" fill="#59636e" font-size="12">box on 5, arrows tucked under it</text>
 <rect x="318" y="68" width="150" height="22" rx="3" fill="#cf222e" stroke="#d0d7de"/>
-<text x="330" y="83" fill="#ffffff">1  your pattern</text>
+<text x="330" y="83" fill="#ffffff">1  active pattern</text>
 <rect x="318" y="96" width="150" height="22" rx="3" fill="#f6f8fa" stroke="#d0d7de"/>
 <text x="330" y="111" fill="#59636e">2  slot 2</text>
 <rect x="318" y="124" width="150" height="22" rx="3" fill="#f6f8fa" stroke="#d0d7de"/>
@@ -39,10 +39,10 @@
 <text x="330" y="223" fill="#59636e">6  slot 6</text>
 <rect x="318" y="236" width="150" height="22" rx="3" fill="#f6f8fa" stroke="#d0d7de"/>
 <text x="330" y="251" fill="#59636e">7  slot 7</text>
-<text x="570" y="34" font-weight="600" fill="#1f2328">3. Your own trig: the original</text>
+<text x="570" y="34" font-weight="600" fill="#1f2328">3. Active pattern's trig: original</text>
 <text x="570" y="52" fill="#59636e" font-size="12">box gone, arrows back on 5</text>
 <rect x="588" y="68" width="150" height="22" rx="3" fill="#cf222e" stroke="#d0d7de"/>
-<text x="600" y="83" fill="#ffffff">1  your pattern</text>
+<text x="600" y="83" fill="#ffffff">1  active pattern</text>
 <rect x="588" y="96" width="150" height="22" rx="3" fill="#f6f8fa" stroke="#d0d7de"/>
 <text x="600" y="111" fill="#59636e">2  slot 2</text>
 <rect x="588" y="124" width="150" height="22" rx="3" fill="#f6f8fa" stroke="#d0d7de"/>
@@ -60,7 +60,7 @@
 <path d="M222,160 L292,160" stroke="#59636e" stroke-width="2" marker-end="url(#ah)"/>
 <text x="257" y="150" text-anchor="middle" fill="#59636e">[YES]</text>
 <path d="M492,160 L562,160" stroke="#59636e" stroke-width="2" marker-end="url(#ah)"/>
-<text x="527" y="150" text-anchor="middle" fill="#59636e">own trig</text>
+<text x="527" y="150" text-anchor="middle" fill="#59636e">trig 1</text>
 <path d="M660,272 C660,312 390,312 390,278" stroke="#59636e" stroke-width="2" fill="none" marker-end="url(#ah)"/>
 <text x="525" y="322" text-anchor="middle" fill="#59636e">[YES] again: slot 5 again, no re-aiming</text>
 </svg>

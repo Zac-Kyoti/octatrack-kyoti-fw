@@ -1,7 +1,8 @@
 # Clyps — user manual
 
 *Draft for review. Outline and voice approved by the author, 2026-11-15. This is a living document: it changes
-whenever Clyps does. It covers both firmware images that carry Clyps (§11); both include Direct Jump Kyoti.*
+whenever Clyps does. It covers both firmware images that carry Clyps, KYOTI with Clyps and the standalone Clyps image (§11); both
+include Direct Jump Kyoti.*
 
 1. [What Clyps is](#1-what-clyps-is)
 2. [The big ideas](#2-the-big-ideas)
@@ -29,7 +30,7 @@ while everything else keeps playing. Clyps reads an Octatrack bank the same way.
 sequence for every track, and each of those sequences is a clip. Pick a track, pick a pattern, and that track
 plays the other pattern's sequence on the pattern you're on. The other tracks don't change.
 
-![Bank A as Clyps sees it: columns are tracks, rows are the 16 patterns, a load drops one track's clip from another row onto your pattern](clip-grid.svg)
+![Bank A as Clyps sees it: columns are tracks, rows are the 16 patterns, a load drops one track's clip from another row onto the active pattern](clip-grid.svg)
 
 **The reload suite.** Whatever you launch, you can put back. Clyps keeps three ways back:
 
@@ -53,9 +54,9 @@ The analogy holds closely:
 
 ## 2. The big ideas
 
-**Your pattern and the library.** You never leave the pattern you're on. Every pattern in the bank, your own
-included, is a library you load clips from, one track at a time. A load replaces that one track's sequence in
-your pattern. The pattern number, its Part link and the other tracks stay as they were.
+**The active pattern and the library.** The pattern you're on is the **active pattern**, and you never leave it.
+Every pattern in the bank, the active one included, is a library you load clips from, one track at a time. A load
+replaces that one track's sequence in the active pattern. The pattern number, its Part link and the other tracks stay as they were.
 
 **The active track.** Everything happens to the active track (the one picked with the TRACK keys), or to every
 member of a group. The Clyps view shows one column of the library: the active track's sequence in each of the
@@ -78,7 +79,7 @@ member of a group. The Clyps view shows one column of the library: the active tr
 Direct Jump Kyoti is built into Clyps. It is off at power-on, so Clyps starts with stock timing (cued);
 [PTN] + [YES] switches between cued and legato at any time.
 
-**It's all editing.** A load changes your pattern in memory, exactly like editing trigs by hand. Save to keep it.
+**It's all editing.** A load changes the active pattern in memory, exactly like editing trigs by hand. Save to keep it.
 
 ## 3. The controls' grammar
 
@@ -86,9 +87,9 @@ Clyps uses a small set of conventions. Once you know them, most gestures explain
 
 | Convention | Meaning |
 |---|---|
-| **trigs = slots** | A trig loads that slot of the shown bank. Your own pattern's trig puts the original back. |
+| **trigs = slots** | A trig loads that slot of the shown bank. The active pattern's trig puts the original back. |
 | **arrows aim, [YES] fires** | The arrow keys move a pair of arrows over the slots; [YES] loads what they point at. |
-| **[FUNC] = full** | Adds the sound to whatever you do: [FUNC] + trig, [FUNC] + [YES], [FUNC] + your own trig. |
+| **[FUNC] = full** | Adds the sound to whatever you do: [FUNC] + trig, [FUNC] + [YES], [FUNC] + the active pattern's trig. |
 | **[CUE] = the group** | [CUE] + TRACK builds a group; [CUE] + trig or arrows applies one slot to every member. |
 | **[PTN] + [BANK] = the whole pattern** | Opens Clyps. With [YES]: the whole pattern and Part back as originally loaded. With a trig: that pattern back from the card. |
 | **[PTN] or [BANK] + TRACK = the card** | [PTN] + TRACK: that track's sequence from the card. [BANK] + TRACK: its sequence and sound. |
@@ -114,7 +115,7 @@ project also closes it. Pattern and bank changes don't: Clyps stays open and fol
 
 **Quick gestures without staying in.** Keep holding the [PTN] + [BANK] that opened Clyps and press:
 - **a trig**: that pattern of the playing bank reloads from the card, and Clyps closes;
-- **[YES]**: ORIG PTN+PRT (your pattern and Part as originally loaded), and Clyps closes.
+- **[YES]**: ORIG PTN+PRT (the active pattern and its Part as originally loaded), and Clyps closes.
 
 The same chords pressed again once Clyps is open do the same things, and Clyps stays open.
 
@@ -122,14 +123,14 @@ The same chords pressed again once Clyps is open do the same things, and Clyps s
 
 ![The Clyps view on T1, pattern A01, annotated with six numbered marks](clyps-view.svg)
 
-*T1 on pattern A01, rendered from the firmware.* (1) What [YES] would load. (2) The shown bank. (3) Your pattern:
+*T1 on pattern A01, rendered from the firmware.* (1) What [YES] would load. (2) The shown bank. (3) The active pattern:
 highlighted, changed (x), its sequence loaded from A05. (4) Slot 3, named BASS1, with the arrows on it.
 (5) The box: where T1's sequence came from. (6) A summary: pattern A16 has trigs on 5 steps.
 
 - **The header** shows the track, what [YES] would do, and the shown bank:
   - `T6 LOAD: TRK SEQ   BNK A`: an audio track (`M6` on the MIDI side).
   - Hold [FUNC] and the label becomes `TRK FULL`.
-  - When the arrows are on your own pattern it reads `ORIG TRK SEQ` / `ORIG TRK FULL`.
+  - When the arrows are on the active pattern's slot it reads `ORIG TRK SEQ` / `ORIG TRK FULL`.
   - With a group: `MULTI LOAD: TRK SEQS`, `TRKS FULL`, `ORIG SEQS`, `ORIGS FULL`.
   - While [PTN] + [BANK] is held: `PTN LOAD: ORIG PTN+PRT`.
   - While [BANK] is held, the bank gets a box.
@@ -137,7 +138,7 @@ highlighted, changed (x), its sequence loaded from A05. (4) Slot 3, named BASS1,
   - its **name**, if it has one (§10);
   - otherwise a summary: `A03 15 TR` (15 steps with trigs: sample trigs, or notes on a MIDI track),
     `A03 07 LK` (no trigs, only locks or trigless trigs, on 7 steps), or `---` (empty).
-  - Your own pattern's slot shows where its sequence came from while that is unchanged: `B14 06 TR`, or
+  - The active pattern's slot shows where the track's sequence came from while that is unchanged: `B14 06 TR`, or
     `SAVED TRK` after a temp reload. Once you edit it, it shows its own summary again.
 - **The marks:**
   - **highlight bar**: the pattern you're on (only in its own bank);
@@ -154,9 +155,9 @@ While Clyps is open, the trig LEDs show the active track's 16 slots in the shown
 | LED | Meaning |
 |---|---|
 | flashing yellow | a load is cued for that slot and waiting to land |
-| solid yellow | the arrows' slot (never shown on your own pattern's LED) |
-| red / yellow flicker | the slot the track's sequence comes from; your own LED flickers while the track plays its own sequence |
-| red | your pattern |
+| solid yellow | the arrows' slot (never shown on the active pattern's LED) |
+| red / yellow flicker | the slot the track's sequence comes from; the active pattern's LED flickers while the track plays its own sequence |
+| red | the active pattern |
 | bright green | the slot has trigs |
 | dim green | the slot has only locks or trigless trigs |
 | off | empty |
@@ -173,7 +174,7 @@ Every load is one of four kinds, set apart by where the material comes from:
 | Kind | Gesture | Brings | Lands |
 |---|---|---|---|
 | **Slot load** | trig, or [YES] | the slot's sequence (SEQ), plus its sound with [FUNC] (FULL) | cued; legato with Direct Jump Kyoti |
-| **Original** | your own pattern's trig | your track as originally loaded (SEQ; FULL with [FUNC]) | legato |
+| **Original** | the active pattern's trig | the track as originally loaded (SEQ; FULL with [FUNC]) | legato |
 | | [PTN] + [BANK] + [YES] | the whole pattern and its Part as originally loaded | legato, all tracks together |
 | **Temp reload** | hold TRACK, press [NO] | the track as you temp-saved it, sequence and sound | legato |
 | **Card reload** | [PTN] + TRACK | the track's sequence as saved | legato |
@@ -192,23 +193,23 @@ Every load is one of four kinds, set apart by where the material comes from:
   would have reached had it been playing all along. Trig conditions carry on too, so the music keeps flowing and
   only the clip changes.
 - **Putting back** is always legato, whether Direct Jump Kyoti is on or off. A whole pattern (ORIG PTN+PRT, or the
-  card's version of your own pattern) lands legato on the next step that all its tracks share.
+  card's version of the active pattern) lands legato on the next step that all its tracks share.
 - **Stopped:** everything lands at once.
 
 **FULL's sound** never lands on the old sequence. The new sound arrives with the new sequence's first trig that
 actually plays, so micro-timing and trig conditions are respected. Until then the old sound plays on. A sequence
 without trigs brings its sound at the landing.
 
-**Length and scale.** A loaded sequence keeps its own length and scale. If your pattern is in NORMAL scale mode
+**Length and scale.** A loaded sequence keeps its own length and scale. If the active pattern is in NORMAL scale mode
 and a load needs a different length or scale, Clyps switches the pattern to PER TRACK. When every track is back
-to its original, Clyps undoes that switch, and only that switch: your own master edits are never touched.
+to its original, Clyps undoes that switch, and only that switch: master edits you made yourself are never touched.
 
 **Trig conditions.** A cued load starts its counters fresh, as a pattern change does. A legato load carries on as
 if the sequence had been there since you pressed PLAY or last changed pattern. PRE starts as "true", and a held
 FILL carries over.
 
 **Changing your mind.** Each track holds one cued load; a new pick replaces it. Picking what the track already
-plays cancels the cue and loads nothing, so to cancel, press the trig of what is playing now: your own pattern's
+plays cancels the cue and loads nothing, so to cancel, press the trig of what is playing now: the active pattern's
 trig, or the slot with the box. Cues are per track: changing track or closing Clyps doesn't cancel them, and
 [NO] doesn't either. A pattern change, a Direct Jump Kyoti jump, a card reload of that track, and ORIG PTN+PRT all
 drop pending cues.
@@ -241,7 +242,7 @@ compare against them. They are taken again at:
 
 Copy/paste, CLEAR, and Clyps' own loads and card reloads never change the originals.
 
-- **ORIG** (your own pattern's trig, or [YES] with the arrows on your own slot) puts the track's original
+- **ORIG** (the active pattern's trig, or [YES] with the arrows on the active pattern's slot) puts the track's original
   sequence back. Hand edits since the originals were taken are undone too.
 - **ORIG FULL** ([FUNC] + the same) also puts back the track's original sound.
 - **ORIG PTN+PRT** ([PTN] + [BANK] + [YES]) puts back the whole pattern as originally loaded: every track's
@@ -266,7 +267,7 @@ These read the project as last saved with SAVE PROJECT or SAVE BANK.
 - **[PTN] + TRACK:** that track's sequence (`TRK SEQ` / `RELOADED FROM PROJ`).
 - **[BANK] + TRACK:** that track's sequence and sound (`TRK FULL` / `RELOADED FROM PROJ`).
 - **[PTN] + [BANK] + trig:** that pattern of the playing bank, with its Part (`PATTERN A05` / `RELOADED FROM PROJ`).
-  Your own pattern lands legato, all tracks together; another pattern becomes a pattern change to it.
+  The active pattern lands legato, all tracks together; another pattern becomes a pattern change to it.
 
 Notes:
 - They are available inside Clyps only. The TRACK you press is reloaded, whichever track is active.
@@ -291,14 +292,14 @@ The rule is **"[YES] loads what you see"**:
 - **UP/DOWN** step through slots 1–16, wrapping and repeating while held. **LEFT/RIGHT** jump to the same row in
   the other column (1↔9), without wrapping.
 - The arrows are your aim, and **once you move them they stay**. No load moves or hides them.
-- When the slot under the arrows lands, they **tuck** under its box (or under the highlight, for your own
+- When the slot under the arrows lands, they **tuck** under its box (or under the highlight, for the active
   pattern) and its solid yellow LED goes out.
 - When the box goes away or moves (an ORIG, a temp or card reload, a pattern change, a trig load of another
   slot), **the arrows reappear** where you left them.
 
 So you can flip back and forth without re-aiming:
 
-![Aim at slot 5; [YES] plays it and the arrows tuck under its box; your own trig brings the original back and the arrows reappear on 5; [YES] plays 5 again](aiming.svg)
+![Aim at slot 5; [YES] plays it and the arrows tuck under its box; the active pattern's trig brings the original back and the arrows reappear on 5; [YES] plays 5 again](aiming.svg)
 
 - **Nothing to aim at:** if the track plays its own sequence and you've never moved the arrows, [YES] does
   nothing. Trigs always load.
@@ -325,7 +326,7 @@ A group lets one gesture load several tracks, each with its own clip or all with
 - **Fire:**
   - **[YES]:** every member loads its own aimed slot. With [FUNC], all FULL.
   - **a trig:** the active track loads that slot, and every other member loads its own aimed slot.
-  - **[CUE] + a trig:** every member loads that slot, each from its own track. [CUE] + your own pattern's trig
+  - **[CUE] + a trig:** every member loads that slot, each from its own track. [CUE] + the active pattern's trig
     puts every member back to its original.
 - **Timing:** each member lands by the usual rules (§5.1). When one press brings in new material on some members
   and puts back on others, they all land together, like a load.
@@ -355,11 +356,11 @@ SETUP, whichever you left it on. Release, and the Clyps view comes back exactly 
 ## 10. Naming sequences
 
 **[FUNC] + [BANK]** opens `RENAME SEQUENCE` for the slot under the arrows (or, with none shown, the box's slot or
-your own slot). It is stock's name editor, up to 9 characters; [YES] keeps the name, [NO] cancels. The name
+the active pattern's slot). It is stock's name editor, up to 9 characters; [YES] keeps the name, [NO] cancels. The name
 replaces the slot's summary in the view.
 
 - A name belongs to one track in one pattern.
-- It travels with the sequence: load a named sequence and your pattern's slot shows that name. ORIG, temp and
+- It travels with the sequence: load a named sequence and the active pattern's slot shows that name. ORIG, temp and
   card reloads bring their names back too.
 - Names are saved with the project, kept by SAVE PROJECT / SAVE BANK, restored by RELOAD, and deleted with the
   project. They don't follow stock copy/paste.
@@ -380,7 +381,8 @@ replaces the slot's summary in the view.
   - [BANK] acts on release;
   - SAVE PART updates the originals' sound.
 - **The two builds.** Clyps comes in two firmware images, and both work exactly as this manual describes:
-  - **KYOTI:** Clyps and Direct Jump Kyoti, plus KYOTI's other features.
+  - **KYOTI with Clyps:** Clyps and Direct Jump Kyoti, plus KYOTI's other features. (The plain KYOTI image has
+    RELOAD FROM PROJECT instead of Clyps.)
   - **The standalone Clyps image:** Clyps and Direct Jump Kyoti, plus three small stock bug fixes.
   - Direct Jump Kyoti is part of Clyps, so there is nothing to add. Clyps can't be combined with a separate Direct
     Jump build or with RELOAD FROM PROJECT; Clyps carries its own card reloads.
@@ -394,10 +396,10 @@ replaces the slot's summary in the view.
   was made.
 - **Temp save before you experiment.** TRACK + [YES] first; TRACK + [NO] is then your undo.
 - **Aim ahead, fire on time.** Set the arrows while the music plays and press [YES] when you're ready. Flip
-  between a clip and the original with [YES] and your own trig, with no re-aiming.
+  between a clip and the original with [YES] and the active pattern's trig, with no re-aiming.
 - **Play legato.** With Direct Jump Kyoti on, every trig is a clip launch that lands on the next step without
-  breaking the groove. Tap through slots on a track, or fire a group, to build variations in real time; your own
-  trig or [YES] takes you straight back.
+  breaking the groove. Tap through slots on a track, or fire a group, to build variations in real time; the active
+  pattern's trig or [YES] takes you straight back.
 - **Or launch cued.** With Direct Jump Kyoti off, launches wait for CHAIN AFTER: pick ahead and let the change land
   with the phrase.
 - **Mind shared Parts.** A FULL load changes the Part, and other patterns using that Part hear it too.
@@ -409,8 +411,8 @@ replaces the slot's summary in the view.
 |---|---|
 | [PTN] + [BANK] | open Clyps |
 | [NO] | dismiss the group / close Clyps |
-| trig | load that slot (SEQ); your own pattern's trig = ORIG |
-| [FUNC] + trig | load FULL; your own = ORIG FULL |
+| trig | load that slot (SEQ); the active pattern's trig = ORIG |
+| [FUNC] + trig | load FULL; the active pattern's trig = ORIG FULL |
 | arrows | aim (UP/DOWN through 1–16, LEFT/RIGHT between columns) |
 | [YES] / [FUNC] + [YES] | load the aimed slot, SEQ / FULL |
 | hold TRACK + [YES] / [NO] | temp save / temp reload (outside Clyps too) |
