@@ -33,7 +33,8 @@ plays the other pattern's sequence on the pattern you're on. The other tracks do
 
 ![Bank A as Clyps sees it: columns are tracks, rows are the 16 patterns, a load drops one track's clip from another row onto the active pattern](clip-grid.svg)
 
-**The reload suite.** Whatever you launch, you can put back. Clyps keeps three ways back:
+**The reload suite.** However you mix, match, or edit your track sequences, there's always a way to get back to where
+you were before. Clyps keeps three ways back:
 
 - the **originals**: the bank as it was when you last loaded or saved it;
 - your **temp saves**: one snapshot per track, taken with a key press;
