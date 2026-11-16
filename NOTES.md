@@ -38920,3 +38920,35 @@ unchanged. Still WIP (not promoted).
   as DJC7/8), scratch tree out/scratch-kc38: out/djc3/kyoti_clyps9/OCTATRACK_OS1.40C_KYOTI_V1.7_WITH_CLYPS.syx, syx
   09825a2c…, mainos 32108f95…, OS VERSION "KY+CL DJC9" (builder line). build_kyoti green. REF-LOCK 16<->7 / A07<->A08
   PASS; check_dj_full PASS (21 / 26 / 1); overlap test PASS (5 overlaps, 42 applies, none dangling).
+
+## 2026-11-15 (`trkseq`) — Clyps user manual (draft): docs/clyps/MANUAL.md
+
+- Per reference/handoffs/CLYPS_MANUAL_HANDOFF.md. **Author decisions (2026-11-15):** repo Markdown + SVG diagrams in
+  docs/clyps/; written for KYOTI with Clyps, one note for the standalone image; timing = a paragraph + a timeline
+  diagram; no known-limits section; outline + sample section approved with changes: more concise, open on an
+  Ableton-Session-view clip launcher + reload suite framing, group by thought (the controls' grammar; the loads as one
+  family: slot / originals / temp / card), groups' per-member aiming vs [CUE] + arrows, why Part reload is off in Clyps
+  (the author: a dangerous combination beside [FUNC] = FULL and [CUE] = group), every function and sub-function.
+- Content verified against CL38 code (patch_clyps.s / clyps_reload.s key tables, cl_exec, landing, originals, card
+  jobs), diag gates and FLASHING CL22..CL38, by three read-only audits (keys, loads, screen). The handoff digest's
+  `B14 6 TRG` / `SAVED` are `B14 06 TR` / `SAVED TRK`; [FUNC]+[YES] = FULL load of the aim; renaming targets the arrows.
+- Diagrams: clip-grid.svg, landing-timeline.svg, aiming.svg (schematic), clyps-view.svg (real emulator render via
+  tools/clyps_render.py on the KYOTI CL38 image, OT DEMO, keys "32 10 2e+ 2f+ 2f- 2e- 20 20 2d+ 2f+ 2f- 2d-
+  poke:460E743C=BASS1____ 31 04 20 33", numbered badges).
+- **Behaviour questions for the author, found while writing (not fixed, not in the manual):** group members with no
+  arrows that play a temp/card reload go back to their ORIGINAL on a group trig/[YES] (the active track in that state
+  gets nothing); a plain trig after a [CUE] + trig cancels other members' pending cues; header reads ORIG TRK SEQ with
+  nothing aimed though [YES] does nothing; STOP doesn't drop a cued load (lands after PLAY); card reload busy flag
+  never cleared after a failed read (suspected: later card reloads would not post); stock RELOAD BANK of any bank
+  refills every temp save; a card reload of another pattern applies its Part at once when it shares the sounding Part;
+  names may survive a new project; page-key release after Clyps closed during a peek (no open guard, suspected);
+  SETUP-at-open reopens on the first peeked page, whichever; re-picking a cued slot inside the last master step may
+  slip a boundary. Dead text: SEQ RELOAD LOST / NOT RESTORED!.
+- **Author, 2026-11-15 (later):** contrast Clyps' own timing (cued) with **Direct Jump Kyoti** (always this full name in
+  the manual), which enables **legato** clip launching ("a fast, musical, and fluid way to create a lot of sequence
+  variation on the fly"). Putting back (originals / temp / card) is described as always legato.
+- **Release decisions (the author via session kyoti-m4-09, 2026-11-15):** both images carry Direct Jump Kyoti
+  (KYOTI V1.8; standalone Clyps = Clyps + Direct Jump Kyoti + the three BATCH_BUGFIXES), Direct Jump Kyoti off at
+  power-on (cued) and toggled with [PTN] + [YES]; manual header now marks it a living document; §11 rewritten.
+- Manual committed on trkseq as a DRAFT (the author, 2026-11-15: commit on trkseq only, no push; the kyoti-v18 merge
+  carries it to main). "Draft for review" stays until the author approves the full draft.
