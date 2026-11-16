@@ -38168,3 +38168,9 @@ trigs do.
   09414f43…); KYOTI default "KYOTI DJC4" (out/djc3/kyoti_default4/, syx 30604c50…); KY+CL DJC4 from trkseq bc04617
   (out/djc3/kyoti_clyps4/, syx 178bb593…, mainos 38d5e737…). **Rollback:** out/rollback/KDJC6/ (140C_KDJC6 syx
   eed4024e…) and out/rollback/DJC3/ (KY+CL DJC3 syx 687c0e61…), unchanged copies.
+
+## 2026-11-15 (`dj-clyps`) — V7.2.1 REVERTED: the T8 master restart did not fix the pop on the unit
+
+Hardware (KY+CL DJC5): the pop is unchanged with cec74de, so "T8's FX swap at the next trig" was not the cause (the
+route-A emulator streams no samples; the cause was inferred, not heard). cec74de reverted; V7.2 is the head again
+(standalone rebuilt as 140C_KDJC8). Next: measure with real audio (octabam ot_emu's render).
