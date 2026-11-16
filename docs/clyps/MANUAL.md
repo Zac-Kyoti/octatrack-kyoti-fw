@@ -49,7 +49,7 @@ The analogy holds closely:
 | a clip slot | that track's sequence in one of the bank's 16 patterns: a **slot** |
 | launching a clip | **loading** a slot onto the track |
 | a clip with its device chain | a **FULL** load: the sequence plus the track's sound |
-| launch quantization | CHAIN AFTER: Clyps' own **cued** launch |
+| launch quantization | CHAIN AFTER: Stock's own **cued** launch |
 | Legato launch mode | **Direct Jump Kyoti**: **legato** launch |
 | launching several tracks at once | a **group** |
 | a Live scene (a whole row) | a whole pattern: ORIG PTN+PRT, or a pattern from the card |
