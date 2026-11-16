@@ -53,7 +53,7 @@ The analogy holds closely:
 | Legato launch mode | **Direct Jump Kyoti**: **legato** launch |
 | launching several tracks at once | a **Multi** |
 | a Live scene (a whole row) | a whole pattern: ORIG PTN+PRT, or a pattern from the card |
-| — | putting things back: originals, temp saves, the card |
+| — | Reloads: originals, temp saves, the card |
 
 ## 2. The big ideas
 
