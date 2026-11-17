@@ -188,16 +188,16 @@ Every load is one of four kinds, set apart by where the material comes from:
 
 ### 5.1 When you hear it: cued or legato
 
-![Timeline: a cued load waits for the CHAIN AFTER point; a legato load or a putting-back lands on the next step at its running position; a FULL load's sound waits for the first trig that sounds](landing-timeline.svg)
+![Timeline: a cued load waits for the CHAIN AFTER point; a legato load or a reload to the active pattern lands on the next step at its running position; a FULL load's sound waits for the first trig that sounds](landing-timeline.svg)
 
-- **Cued** (Clyps on its own, bringing in): the load waits for the point where a pattern change would land, which
+- **Cued** (stock's own timing, bringing in): the load waits for the point where a pattern change would land, which
   is your CHAIN AFTER setting or else the end of the pattern. Meanwhile the slot's LED flashes yellow and the
   arrows on it blink. It lands in step with the pattern: at the pattern's end that's the new sequence's step 1.
   Trig conditions start fresh, as after a pattern change.
 - **Legato** (Direct Jump Kyoti on, bringing in): the load lands on the track's very next step, at the position it
   would have reached had it been playing all along. Trig conditions carry on too, so the music keeps flowing and
   only the clip changes.
-- **Putting back** is always legato, whether Direct Jump Kyoti is on or off. A whole pattern (ORIG PTN+PRT, or the
+- **Reloads** to the active pattern are always legato, whether Direct Jump Kyoti is on or off. A whole pattern (ORIG PTN+PRT, or the
   card's version of the active pattern) lands legato on the next step that all its tracks share.
 - **Stopped:** everything lands at once.
 
