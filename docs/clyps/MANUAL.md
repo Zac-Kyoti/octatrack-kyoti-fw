@@ -104,7 +104,7 @@ Clyps uses a small set of conventions. Once you know them, most gestures explain
 | **page keys = peek** | Hold PLAYBACK, AMP, LFO, FX1 or FX2 to see and tweak that page. |
 | **everything else is stock** | Transport, [FUNC] + TRACK mutes, scenes and crossfader, [MIDI], [FUNC] + [MIDI] (Parts menu), [TEMPO]. |
 
-**Key order can matter!** Hold the first key, then press the second. Ex.: TRACK then [YES] is a temp save, while
+**Key order can matter, depending on the function.** Hold the first key, then press the second. Ex.: TRACK then [YES] is a temp save, while
 [YES] then TRACK would execute a sequence load, then a track change.
 
 **Not used in Clyps:** [PAGE], [FUNC] + [PTN], [FUNC] + [NO], and [FUNC] + [CUE] (Part reload, see §5.6). The
