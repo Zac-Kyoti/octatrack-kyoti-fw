@@ -86,20 +86,20 @@ setting survives a power cycle.
 An optional immediate pattern change, toggled with **`[PTN]` + `[YES]`** (a toast
 confirms; it is OFF at every power-on). A cued pattern takes over on the next step
 instead of waiting for the current one to finish, **locked to the master clock**: it
-plays exactly where it would be had it been running since START, whatever its track
-lengths, scales or master settings. The Part and START SILENT change as on a stock pattern
+plays exactly where it would be had it been running since PLAY, or since the last normal
+pattern change if there was one, whatever its track lengths, scales or master settings. The Part and START SILENT change as on a stock pattern
 change, but each track's new sound settings take over with its first trig that actually
 plays, never on a sound still ringing from the old pattern. Trig conditions (`1:2`, `PRE`,
-`FILL`) carry on as if the new pattern had been playing since START instead of starting
-again. With SILENCE TRACKS on, a track the jump silences fades out just before the step
+`FILL`) carry on from the same point instead of starting again, so they stay in step with
+what was playing. With SILENCE TRACKS on, a track the jump silences fades out just before the step
 instead of popping. The last MIDI Program Change sent always names the pattern that plays.
 The arranger and chains are untouched; with DIRECT JUMP off, pattern changes are stock. It
 does not combine with CLYPS, which has it built in.
 
 **Hardware:** confirmed: the clock-locked timing, the Part change, trig conditions and the
-SILENCE TRACKS fade (on its own, and in KYOTI V1.8C). Not specifically tested: MIDI tracks,
-Program Change on fast re-cues, START SILENT. This image, with the three bug fixes, not
-flashed as such.\
+SILENCE TRACKS fade, and (in KYOTI V1.8C) a jump after a normal pattern change landing in step
+with it. Not specifically tested: MIDI tracks, Program Change on fast re-cues, START SILENT.
+This image, with the three bug fixes, not flashed as such.\
 **Final build:** [`tools/build_direct_jump_kyoti.py`](tools/build_direct_jump_kyoti.py) →
 `out/DIRECT_JUMP_KYOTI/OCTATRACK_OS1.40C_DIRECT_JUMP_KYOTI`
 
@@ -349,7 +349,8 @@ OS VERSION read `KYOTI V1.8`. It replaces KYOTI V1.7 and earlier, and the withdr
 (see below). A COMPRESSOR saved with V1.5 or earlier keeps its `KEY`; set its `KGN`, `KBAS`,
 `KWID` and `MON` again.
 
-**Hardware:** each feature confirmed; this combined image not flashed as such.\
+**Hardware:** each feature confirmed; this combined image not flashed as such (RELOAD after a
+DIRECT JUMP jump checked in the emulator only).\
 **Final build:** [`tools/build_kyoti.py`](tools/build_kyoti.py) →
 `out/KYOTI/OCTATRACK_OS1.40C_KYOTI_V1.8`
 

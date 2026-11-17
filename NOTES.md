@@ -39075,3 +39075,15 @@ step 9 (its PLAY phase) while A02 was on step 5, and set its A:B counters from P
     `CLYPS DJR1`, mainos 94e41a22…, syx f8708adf….
   - Evidence: out/djr/ (launch.sh, gate1.sh, gate1b.sh, gate3.sh; the runs; base_default / base_clyps = the FINAL
     V1.8 / V1.8C rebuilt from 109f54c for the FAIL-before runs, aa81ddfb / 32108f95).
+
+## 2026-11-16 (`dj-restart`) cont. — DIRECT JUMP V7.3 PROMOTED FINAL
+
+- **Hardware (the author):** `KY18C DJR1` (syx e50d8f5e…, mainos 9d1a29c9…): all three V7.3 checks pass by ear (A01 16
+  steps -> normal change to a 12-step A02 -> jump to a 12-step A03 lands in phase with A02; `1:2` stays in step; a
+  Clyps one-track load after the jump stays in step). `KY18 DJR1` (RELOAD after a jump) not flashed: emulator only.
+- **Promoted on the author's word**, rebased on origin/main (00897f0) and rebuilt under the final names, the same
+  hashes as the WIP builds: DJ unit 7b48fdd6…, the DJ feature image (feature_image.py) c58591c0…, KYOTI V1.8
+  8807feee…, KYOTI V1.8C 9d1a29c9… (= the flashed code, OS VERSION "KYOTI 1.8C"), CLYPS 94e41a22…. README: DIRECT
+  JUMP lands "since PLAY, or since the last normal pattern change"; trig conditions stay in step.
+- Next: octabam #1146 moves to this pin (fifth detour 0x400a4850, unit 3938 B 51478a67…); Modwerk DJK 0.2.0 rebuilt with
+  V7.3 for a fresh MKI test image.

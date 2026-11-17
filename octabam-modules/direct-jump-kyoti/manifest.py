@@ -60,8 +60,10 @@ jump, each track's Part at its first trig with LFO AUTO CHANGE on. This octabam 
 not flashed. Emulator-verified only (ot_emu, real image bytes): Program Change on fast
 re-cues, MIDI tracks, START SILENT (identical to a stock pattern change in the emulator).
 Standalone image and version string: tools/build_direct_jump_kyoti.py -> 140C_KDJ7.
-V7.3 (the restart origin, 2026-11-16): emulator-verified only (REF-LOCK against references
-that changed pattern the stock way), not flashed.
+V7.3 (the restart origin, 2026-11-16): KYOTI V1.8C with V7.3 (KY18C DJR1, mainos 9d1a29c9...)
+on the author's MKI: a jump after a normal pattern change lands in phase with it, 1:2 trigs stay
+in step, a Clyps load after it stays in step; REF-LOCK against references that changed pattern
+the stock way in the emulator. This octabam form is not flashed.
 """
 
 import os
@@ -113,8 +115,8 @@ PTN_LAYER_YES_PRESS = PTN_LAYER_YES + 2                # the u32 press handler
 # CHANGE on; a waiting track whose sequence has no sample trig publishes at once) came after it. V7.2.2
 # (3846 B: the tracks a jump's switch will silence are released with stock's note-off first) is the
 # code of the standalone image the author flashed on 2026-11-15 (140C_KDJ7, mainos 7c6131e7...); its reference
-# was 688978da.... V7.3 (3938 B, WIP 2026-11-16: dj_swres, the time origin moves to every stock pattern
-# switch) is not flashed.
+# was 688978da.... V7.3 (3938 B, FINAL 2026-11-16: dj_swres, the time origin moves to every stock pattern
+# switch) is the code of KYOTI V1.8C as the author flashed it (KY18C DJR1).
 REFERENCE = (0x400d6d38, "51478a6773f5b987dc98c595f55a3dd88e9de514d1cedb8fbd35cffe4755e48d")
 
 MODULE = Module(
@@ -122,7 +124,7 @@ MODULE = Module(
     key="DIRECT_JUMP_KYOTI",
     kind=Kind.CF_PATCH,
     doc="Clock-locked DIRECT JUMP ([PTN]+[YES]): a cued pattern lands on the "
-        "next step exactly where it would be had it played since START.",
+        "next step exactly where it would be had it played since PLAY or the last pattern change.",
     # Tim Hastie's DIRECT JUMP (modules/direct-jump) shares no address with this one,
     # but both change WHEN a cued pattern takes over; untested together.
     # Octakit shares no byte either, but wraps stock's switch block (0x400a4568..0x400a4856)

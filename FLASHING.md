@@ -1027,7 +1027,7 @@ quick check for each:
     not reported separately. Correctly named pair for further tests: out/ab/KDJC8/ (syx 5a906055…) and out/ab/KDJC9/
     (syx eb2436c0…).
 
-- **DIRECT JUMP V7.3 -- the last restart is the time origin** (WIP, 2026-11-16; NOT yet run on hardware). Images (all
+- **DIRECT JUMP V7.3 -- the last restart is the time origin** (FINAL 2026-11-16). Images (all
   WIP, OS VERSION in brackets): `out/KYOTI/OCTATRACK_OS1.40C_KYOTI_V1.8C.syx` (`KY18C DJR1`, Clyps + DIRECT JUMP),
   `out/KYOTI/OCTATRACK_OS1.40C_KYOTI_V1.8.syx` (`KY18 DJR1`, RELOAD + DIRECT JUMP),
   `out/DIRECT_JUMP_KYOTI/OCTATRACK_OS1.40C_DIRECT_JUMP_KYOTI.syx` (`140C_DJR1`), `out/CLYPS/OCTATRACK_OS1.40C_CLYPS.syx`
@@ -1055,6 +1055,9 @@ quick check for each:
      LFO AUTO CHANGE, SILENCE TRACKS -- the `140C_KDJC6` / `KDJC9` lists above). STOP -> PLAY counts from PLAY again.
   7. **Unchanged:** DIRECT JUMP off = stock; Clyps' ORIG PTN+PRT with DIRECT JUMP on (a self-jump, not a restart) and
      off (stock's change to itself: a restart); Program Change on re-cues; MIDI tracks.
+  - **Result (the user, 2026-11-16):** `KY18C DJR1` flashed (syx e50d8f5e…, mainos 9d1a29c9… = KYOTI V1.8C's FINAL):
+    all three by-ear checks pass -- A03 lands in phase with A02 after the normal change, `1:2` stays in step, and a
+    Clyps one-track load after the jump stays in step. `KY18 DJR1` (RELOAD after a jump) not flashed: emulator only.
 - **KYOTI with Clyps "KY+CL DJC6"** (WIP, 2026-11-15; Clyps CL35 c72b4bc + DIRECT JUMP V7.2.2): the KDJC9 A/B above,
   inside and outside Clyps, then the DJC3 list below. NOT yet run on hardware.
 - **KYOTI with Clyps "KY+CL DJC3" walk-through** (WIP, 2026-11-14; Clyps CL34 bc04617 + DIRECT JUMP V7.2; NOT yet run

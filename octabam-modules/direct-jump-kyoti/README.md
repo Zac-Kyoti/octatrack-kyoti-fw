@@ -108,17 +108,21 @@ AUTO CHANGE on a ringing sample keeps its LFO until its own track's first trig.
 **Emulator only** (`ot_emu`, Unicorn on real image bytes): Program Change on fast
 re-cues, MIDI tracks, and START SILENT (exactly as on a stock pattern change in the
 emulator, not exercised on the unit). The trig conditions also equal a never-switched
-reference run's at every tick after each jump (`tools/cmp_reflock.py --cond`). **V7.3** (the
-restart origin, 2026-11-16) is emulator-verified only and has not been flashed: after a stock
-pattern change, a jump's positions and trig conditions equal a run that changed straight to the
-jump's pattern the stock way.
+reference run's at every tick after each jump (`tools/cmp_reflock.py --cond`). After a stock
+pattern change, a V7.3 jump's positions and trig conditions equal a run that changed straight to
+the jump's pattern the stock way, and a RELOAD_FROM_PROJECT reload after the jump stays in step.
+
+**V7.3 on hardware (2026-11-16):** KYOTI V1.8C with V7.3 (`KY18C DJR1`, the FINAL's mainos
+`9d1a29c9…`): after a normal change from a 16-step A01 to a 12-step A02, a jump to a 12-step A03
+lands in phase with A02, `1:2` trigs stay in step across it, and a Clyps one-track load after it
+stays in step. RELOAD after a jump: emulator only.
 
 Everything the emulators prove is control flow and image bytes, not how the unit
 sounds. Nothing here has been tested on an MKII.
 
 Reproduction: assembled with `m68k-elf-as -mcpu=5407` or `54455` (identical) and no
-symbols, linked at `0x400d6d38` → 3938 bytes, sha256 `51478a6773f5b987…`: V7.3 (WIP, not
-flashed). V7.2.2, the code of the standalone image above, was 3846 bytes, `688978daa1ed86c0…`.
+symbols, linked at `0x400d6d38` → 3938 bytes, sha256 `51478a6773f5b987…`: V7.3, the code
+of the KYOTI V1.8C image above. V7.2.2 was 3846 bytes, `688978daa1ed86c0…`.
 octabam re-links it there on every build and compares.
 
 ## Required: the bugfix bundle
@@ -151,8 +155,8 @@ Either can be selected without the other; the sites are disjoint.
 
 - MKII is untested.
 - Hardware confirmation of Program Change on fast re-cues, MIDI tracks and START SILENT.
-- This octabam form of V7.2.2 on hardware.
-- V7.3 (the restart origin) on hardware.
+- This octabam form on hardware.
+- RELOAD_FROM_PROJECT after a jump, on hardware.
 
 ## Design notes
 
