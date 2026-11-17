@@ -28,7 +28,12 @@ Plus every write to the fire table 0x80001904 (8x8 longs) with the tick and writ
 
 Usage:
   python3 tools/diag_reflock.py --image IMG --project DIR --start P [--switch T:P ...]
-      [--normal-len P=LEN ...] [--dj 0|1] [--cond] [--ticks N] --out out/reflock_X.json
+      [--normal-len P=LEN ...] [--dj 0|1] [--dj-at T:V ...] [--cond] [--ticks N] --out out/reflock_X.json
+
+A RESTART scenario (2026-11-16, DIRECT JUMP V7.3: a stock pattern change is the new time origin):
+  RUN : --dj 0 --switch T0:X (stock changes at its boundary T1) --dj-at T2:1 --switch T3:Y
+  REF : --dj 0 --switch T0:Y (the same stock change at T1, straight to Y; never switched after)
+  graded with cmp_reflock.py --ref-for Y=REF.json (the reference starts on A, not Y).
 """
 import argparse
 import json
@@ -90,12 +95,18 @@ def main(argv):
     ap.add_argument("--extra", action="append", default=[],
                     help="NAME=ADDR:SIZE -- also record this address every tick (e.g. a cave counter)")
     ap.add_argument("--dj", type=int, default=1)
+    ap.add_argument("--dj-at", action="append", default=[],
+                    help="T:V -- write DJ_MODE = V at tick T (phase-G entry), e.g. a stock pattern change "
+                         "with DIRECT JUMP off, then --dj-at 120:1 turns it on (as [PTN]+[YES] would)")
     ap.add_argument("--poke", action="append", default=[],
                     help="ADDR=VAL[:SIZE] written to RAM after the project load (SIZE 1/2/4, "
                          "default 4) -- e.g. MUTE MODE's GATE 0x800000dc=1 (OTFX-T)")
     ap.add_argument("--dj-mode-addr", type=lambda v: int(v, 0), default=DJ_MODE,
                     help="where DJ_MODE lives: 0x800000d8 standalone; the combined KYOTI image "
                          "keeps it in DIRECT JUMP's cave (out/KYOTI/kyoti_v1.0_map.json)")
+    ap.add_argument("--poke-at", action="append", default=[],
+                    help="T:ADDR=VAL[:SIZE] -- write RAM at tick T (phase-G entry), e.g. a pattern chain's state "
+                         "0x80006546 (chain on) / 0x8000654a (index) / 0x8000654e (count) / 0x80006552 (entries)")
     ap.add_argument("--cond", action="store_true",
                     help="also record the trig-condition state per tick: the A:B pass counters "
                          "0x46107918 (long[16]) and the latch bytes 0x46107959 / 69 / 79 ([16] each)")
@@ -103,11 +114,22 @@ def main(argv):
                     help="before PLAY, run COND_RESET(-1) 0x400a539c as stock's STOP does (0x400a12b8): "
                          "a unit that has ever stopped starts PLAY with the PRE latches at 1; the harness's "
                          "boot-then-start leaves them at RAM's 0 (PLAY itself never resets them)")
+    ap.add_argument("--watch-pc", action="append", default=[], type=lambda v: int(v, 0),
+                    help="record the tick every time this PC executes (e.g. 0x400a4850, stock's switch "
+                         "`jsr COND_RESET`: a DIRECT JUMP jump must never run it)")
     ap.add_argument("--ticks", type=int, default=300)
     ap.add_argument("--tag", default="")
     ap.add_argument("--out", required=True)
     a = ap.parse_args(argv)
     switches = sorted((int(t), int(p)) for t, p in (s.split(":") for s in a.switch))
+    djat = sorted((int(t), int(v)) for t, v in (s.split(":") for s in a.dj_at))
+    pokeat = []
+    for spec in a.poke_at:
+        t_, rest = spec.split(":", 1)
+        ad, val = rest.split("=")
+        v_, _, sz = val.partition(":")
+        pokeat.append((int(t_), int(ad, 0), int(v_, 0), int(sz or 4)))
+    pokeat.sort()
     lens = {int(p): int(l) for p, l in (s.split("=") for s in a.normal_len)}
 
     os.chdir(OCTABAM)
@@ -154,8 +176,10 @@ def main(argv):
         val, _, sz = rest.partition(":")
         rt.uc.mem_write(int(ad, 0), int(val, 0).to_bytes(int(sz or 4), "big"))
 
-    st = dict(tick=0, states=[], fires=[], commits=[], cues=[], calls=[], pcs=[])
+    st = dict(tick=0, states=[], fires=[], commits=[], cues=[], calls=[], pcs=[], djat=[], watch=[])
     pend = list(switches)
+    pdj = list(djat)
+    ppk = list(pokeat)
 
     def rd(u, addr, n):
         return int.from_bytes(bytes(u.mem_read(addr, n)), "big")
@@ -181,6 +205,13 @@ def main(argv):
             u.mem_write(PEND_BANK, bytes([bank]))
             u.mem_write(PEND_PAT, bytes([p]))
             st["cues"].append([st["tick"], p])
+        while pdj and pdj[0][0] == st["tick"]:
+            _, v = pdj.pop(0)
+            u.mem_write(a.dj_mode_addr, v.to_bytes(4, "big"))
+            st["djat"].append([st["tick"], v])
+        while ppk and ppk[0][0] == st["tick"]:
+            _, ad, v, sz = ppk.pop(0)
+            u.mem_write(ad, (v & ((1 << (8 * sz)) - 1)).to_bytes(sz, "big"))
 
     def on_builder(u, addr, size, user):
         sp = u.reg_read(er.eb.UC_M68K_REG_A7)
@@ -206,6 +237,9 @@ def main(argv):
         if pc in (LAND_PC, TAIL_PC) and (not st["commits"] or st["commits"][-1][0] != st["tick"]):
             st["commits"].append([st["tick"], "LAND" if pc == LAND_PC else "WRAP"])
 
+    def on_watch(u, addr, size, user):
+        st["watch"].append([st["tick"], addr])
+
     if a.stop_reset:
         rt.run(until=lambda x: x.pc == er.MAIN_SPIN)
         sp0 = rt.uc.reg_read(er.eb.UC_M68K_REG_A7)
@@ -217,6 +251,8 @@ def main(argv):
     rt.uc.hook_add(er.eb.UC_HOOK_CODE, on_builder, begin=BUILDER_A, end=BUILDER_A)
     rt.uc.hook_add(er.eb.UC_HOOK_CODE, on_builder, begin=BUILDER_M, end=BUILDER_M)
     rt.uc.hook_add(er.eb.UC_HOOK_CODE, on_pc, begin=PC_SEND, end=PC_SEND)
+    for w in a.watch_pc:
+        rt.uc.hook_add(er.eb.UC_HOOK_CODE, on_watch, begin=w, end=w)
     rt.uc.hook_add(er.eb.UC_HOOK_MEM_WRITE, on_commit, begin=STEP_ARR, end=STEP_ARR)
     rt.start_transport_live()
     spins = 0
@@ -228,16 +264,18 @@ def main(argv):
             break
 
     meta = dict(image=a.image, project=a.project, start=a.start, switches=switches,
-                normal_len=lens, pokes=pokes, dj=a.dj, bank=bank, ticks=st["tick"], cond=a.cond,
+                normal_len=lens, pokes=pokes, dj=a.dj, dj_at=djat, poke_at=pokeat, bank=bank, ticks=st["tick"], cond=a.cond,
                 stop_reset=a.stop_reset)
     out = pathlib.Path(a.out)
     if not out.is_absolute():
         out = ROOT / out
     out.write_text(json.dumps(dict(meta=meta, cues=st["cues"], commits=st["commits"],
                                    states=st["states"], fires=st["fires"],
-                                   calls=st["calls"], pcs=st["pcs"])))
+                                   calls=st["calls"], pcs=st["pcs"], watch=st["watch"])))
     print(f"wrote {out}: ticks={st['tick']} cues={st['cues']} commits={st['commits']} "
           f"fires={len(st['fires'])}")
+    if a.watch_pc:
+        print("watched PCs (tick, pc):", [(t, hex(w)) for t, w in st["watch"]])
     print("program changes (tick, bank, pattern, from):",
           [(pt, b, pp, hex(r)) for pt, b, pp, r in st["pcs"]])
     return 0

@@ -4,14 +4,15 @@ power-on, so a unit that never enables it behaves exactly as stock).
 
 A cued pattern takes over on the NEXT STEP instead of waiting for the current
 one to finish, and the landing is LOCKED TO THE MASTER CLOCK: the new pattern
-plays exactly where it would be had it been running since START, whatever its
-track lengths, scales or master settings -- never shifted by a step, never a
-fraction of a step off, and its first trig always wins. START SILENT and the Part's
+plays exactly where it would be had it been running since the LAST RESTART --
+START, or the last normal pattern change (V7.3) -- whatever its track lengths,
+scales or master settings -- never shifted by a step, never a fraction of a step
+off, and its first trig always wins. START SILENT and the Part's
 pattern-wide settings (scenes, the Part itself) change as on a stock pattern change; each
 track's own Part settings reach the engine with that track's first sounding trig of the new
 pattern (V7.2), so a sound still ringing from the old pattern never takes the new
-settings; trig conditions stand where the new pattern's would, had it played since START
-(V7.0.2), and the last MIDI
+settings; trig conditions stand where the new pattern's would, had it played since that
+restart (V7.0.2, V7.3), and the last MIDI
 Program Change sent always names the pattern that plays. The arranger and
 pattern chains are untouched. (The Analog Rytm's own DIRECT JUMP, by contrast,
 lands shifted or fractional whenever lengths or scales differ; that difference
@@ -22,6 +23,10 @@ countdown byte 0x80006687 in phase D of its tick handler. V7 therefore adds no
 new sequencer mechanism: it arms that countdown and prepares the snapshot on the
 landing tick (ACT<-PEND, master step, per-track step/counter), suppresses the
 MIDI START (0xFA) a jump must not send, and owns the [PTN]-held [YES] key.
+V7.3: stock's own pattern switch (a normal change with DIRECT JUMP off, a chain, the
+arranger) restarts the pattern; a fifth detour on that switch's `jsr COND_RESET`
+re-bases the jump's clock there and tail-jumps COND_RESET (RELOAD_FROM_PROJECT and
+Clyps count trig conditions from the same moment).
 The pattern-boundary body, the rebuild loops and every per-track counter are
 STOCK. Design: reference/handoffs/DIRECTJUMP_V7_DESIGN.md; the sequencer bugs
 found on the way: reference/OT_SEQUENCER_BUGS.md.
@@ -55,6 +60,8 @@ jump, each track's Part at its first trig with LFO AUTO CHANGE on. This octabam 
 not flashed. Emulator-verified only (ot_emu, real image bytes): Program Change on fast
 re-cues, MIDI tracks, START SILENT (identical to a stock pattern change in the emulator).
 Standalone image and version string: tools/build_direct_jump_kyoti.py -> 140C_KDJ7.
+V7.3 (the restart origin, 2026-11-16): emulator-verified only (REF-LOCK against references
+that changed pattern the stock way), not flashed.
 """
 
 import os
@@ -68,7 +75,7 @@ from remix.schema import Detour, Keep, Kind, Linked, Module, SymbolRef
 # one manifest serves both layouts.
 _HERE = os.path.relpath(os.path.dirname(os.path.realpath(__file__)))
 
-# ---- the four hook sites -----------------------------------------------------
+# ---- the five hook sites -----------------------------------------------------
 # Phase D of the tick handler: the countdown read this cave arms.
 LAND_HOOK = 0x400a1f72
 LAND_HOOK_STOCK = bytes.fromhex("103980006687")        # move.b (0x80006687).l,%d0
@@ -82,6 +89,11 @@ PTNREL_HOOK_STOCK = bytes.fromhex("4879400bf0f2")      # pea 0x400bf0f2
 # per-track part (each track's publish brings it at that track's first sounding trig).
 LFOQ_HOOK = 0x40009ebe
 LFOQ_HOOK_STOCK = bytes.fromhex("4a3980000050")        # tst.b (0x80000050).l
+# V7.3: stock's switch block (phase G, a real pattern change) calls COND_RESET(-1) here, right after
+# restarting the master: the jump's time origin moves to it. dj_swres tail-jumps COND_RESET, so the
+# callee (and any detour at its entry 0x400a539c) still sees return address 0x400a4856 and the -1.
+SWRES_HOOK = 0x400a4850
+SWRES_HOOK_STOCK = bytes.fromhex("4eb9400a539c")       # jsr 0x400a539c (COND_RESET)
 
 # The [PTN]-held keymap layer (0x400bf0f2): the 26-byte record for YES (key code
 # 0x31) is all-NULL in stock, so the press slot is a free function pointer.
@@ -100,8 +112,10 @@ PTN_LAYER_YES_PRESS = PTN_LAYER_YES + 2                # the u32 press handler
 # stock's wrap-change) and V7.2 (3808 B: each track's Part at its first sounding trig, with LFO AUTO
 # CHANGE on; a waiting track whose sequence has no sample trig publishes at once) came after it. V7.2.2
 # (3846 B: the tracks a jump's switch will silence are released with stock's note-off first) is the
-# code of the standalone image the author flashed on 2026-11-15 (140C_KDJ7, mainos 7c6131e7...).
-REFERENCE = (0x400d6d38, "688978daa1ed86c0a0874404e859ee781fbfbed7808be33c2f862beb3e373011")
+# code of the standalone image the author flashed on 2026-11-15 (140C_KDJ7, mainos 7c6131e7...); its reference
+# was 688978da.... V7.3 (3938 B, WIP 2026-11-16: dj_swres, the time origin moves to every stock pattern
+# switch) is not flashed.
+REFERENCE = (0x400d6d38, "51478a6773f5b987dc98c595f55a3dd88e9de514d1cedb8fbd35cffe4755e48d")
 
 MODULE = Module(
     name="direct-jump-kyoti",
@@ -139,6 +153,8 @@ MODULE = Module(
                "[PTN] release: keep the chooser shut after [PTN]+[YES]"),
         Detour(LFOQ_HOOK, LFOQ_HOOK_STOCK, "dj7", "dj_lfoq",
                "light Part apply: per-track part deferred to each track's first trig", kind="jsr"),
+        Detour(SWRES_HOOK, SWRES_HOOK_STOCK, "dj7", "dj_swres",
+               "stock pattern switch: the jump's time origin restarts there", kind="jsr"),
     ),
     symbol_refs=(
         SymbolRef(PTN_LAYER_YES_PRESS, 0, "dj7", "dj_toggle",

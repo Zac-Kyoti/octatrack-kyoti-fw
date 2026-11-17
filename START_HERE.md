@@ -158,6 +158,12 @@ are lowercase-hyphen, because octabam requires a module's name to equal its fold
 
 > Check this against the tree before trusting it; it has gone stale before.
 
+- **2026-11-16 (`dj-restart`, WIP, NOT flashed, not pushed): DIRECT JUMP V7.3** — the last restart (PLAY or any stock
+  pattern switch) is a jump's time origin, for its landing and its trig conditions (detour 0x400a4850 `dj_swres`).
+  Emulator: the restart REF-LOCK scenarios FAIL on V7.2.2 and PASS on V7.3; RELOAD / Clyps loads after a jump keep their
+  A:B counters in step; the existing DJ gates pass. WIP images `KY18 DJR1`, `KY18C DJR1`, `140C_DJR1`, `CLYPS DJR1`:
+  NOTES 2026-11-16 (`dj-restart`), FLASHING §4 "DIRECT JUMP V7.3". Promotion (DJ unit, KYOTI V1.8 / V1.8C, CLYPS, the
+  DJ feature image, the octabam pin) waits on the author's hardware check.
 - **2026-11-15: KYOTI V1.8 + V1.8C, DIRECT JUMP V7.2.2, CLYPS — all FINAL; every feature image carries the bug fixes.**
   - **KYOTI V1.8C** (`build_kyoti.py --clyps`, OS VERSION `KYOTI 1.8C`): the `KY+CL DJC9` code the author flashed ("all
     checks out well"), mainos `32108f95…`. **KYOTI V1.8** (default): RELOAD_FROM_PROJECT + DIRECT JUMP V7.2.2, not flashed

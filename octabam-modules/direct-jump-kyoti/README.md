@@ -4,7 +4,8 @@ An optional immediate pattern change for the Octatrack, toggled from the front
 panel with **`[PTN]` + `[YES]`**. A cued pattern takes over on the **next step**
 instead of waiting for the current one to finish, and the landing is **locked to
 the master clock**: the new pattern plays exactly where it would be had it been
-running since START, whatever its track lengths, scales or master settings —
+running since the **last restart** — START, or the last normal pattern change —
+whatever its track lengths, scales or master settings —
 never shifted by a step, never a fraction of a step off, and its first trig
 always wins.
 
@@ -16,7 +17,11 @@ it behaves exactly as stock.
   first sounding trig of the new pattern, so a sound still ringing from the old pattern
   never takes the new pattern's settings (V7.2; a stock change applies them at once).
 - Trig conditions do not start again: every A:B counter stands where the new pattern's
-  would, had it played since START (V7.0.2; a stock change restarts them).
+  would, had it played since that restart (V7.0.2; a stock change restarts them).
+- A normal pattern change (DIRECT JUMP off, a chain, the arranger) is a restart, as on
+  stock: after one, a jump lands in phase with the pattern that started there, and its
+  trig conditions count from there too (V7.3) — the moment RELOAD_FROM_PROJECT and Clyps
+  count from as well.
 - With SILENCE TRACKS on, a track the jump silences is released just before the step instead of
   being cut on it, so it does not pop (V7.2.2).
 - The last MIDI Program Change sent always names the pattern that plays.
@@ -30,7 +35,7 @@ build); V7 is the clock-locked landing that this module ships.
 
 | file | what it is |
 |---|---|
-| `manifest.py` | the octabam module declaration — one DRAM unit, four detours, the keymap slot |
+| `manifest.py` | the octabam module declaration — one DRAM unit, five detours, the keymap slot |
 | `patch_directjump_v7.s` | the m68k source; the only truth for the unit's bytes |
 
 The standalone image (this repo's own build, outside octabam) is
@@ -45,7 +50,7 @@ mechanism — it arms that countdown and prepares the snapshot on the landing ti
 (`0xFA`) that a jump must not send, and owns the `[PTN]`-held `[YES]` key. The
 pattern-boundary body, the rebuild loops and every per-track counter are stock.
 
-Four detours, six bytes each, plus one function pointer:
+Five detours, six bytes each, plus one function pointer:
 
 | site | symbol | what it displaces |
 |---|---|---|
@@ -53,6 +58,7 @@ Four detours, six bytes each, plus one function pointer:
 | `0x400a221c` | `dj_nofa` | `tst.b (0x8000002a).l` — the MIDI START gate |
 | `0x40043418` | `dj_ptnrel` | `pea 0x400bf0f2` — `[PTN]` release, so the chooser stays shut |
 | `0x40009ebe` | `dj_lfoq` | `tst.b (0x80000050).l` — the light Part apply's LFO AUTO CHANGE test: the one apply after a jump leaves each track's LFO setup to that track's first trig |
+| `0x400a4850` | `dj_swres` | `jsr 0x400a539c` — stock's pattern switch calling COND_RESET(-1): the jump's time origin restarts there (V7.3); `dj_swres` tail-jumps COND_RESET, which still sees the caller's return address and argument |
 | `0x400bf0c0` | `dj_toggle` | the `[PTN]`-layer YES press slot, all-NULL in stock |
 
 **State:** one word, `DJ_MODE` (0 = OFF/stock, 1 = ON), kept **inside the code unit**
@@ -102,15 +108,18 @@ AUTO CHANGE on a ringing sample keeps its LFO until its own track's first trig.
 **Emulator only** (`ot_emu`, Unicorn on real image bytes): Program Change on fast
 re-cues, MIDI tracks, and START SILENT (exactly as on a stock pattern change in the
 emulator, not exercised on the unit). The trig conditions also equal a never-switched
-reference run's at every tick after each jump (`tools/cmp_reflock.py --cond`).
+reference run's at every tick after each jump (`tools/cmp_reflock.py --cond`). **V7.3** (the
+restart origin, 2026-11-16) is emulator-verified only and has not been flashed: after a stock
+pattern change, a jump's positions and trig conditions equal a run that changed straight to the
+jump's pattern the stock way.
 
 Everything the emulators prove is control flow and image bytes, not how the unit
 sounds. Nothing here has been tested on an MKII.
 
 Reproduction: assembled with `m68k-elf-as -mcpu=5407` or `54455` (identical) and no
-symbols, linked at `0x400d6d38` → 3846 bytes, sha256 `688978daa1ed86c0…`: V7.2.2, the
-code of the standalone image above. octabam re-links it there on every build and
-compares.
+symbols, linked at `0x400d6d38` → 3938 bytes, sha256 `51478a6773f5b987…`: V7.3 (WIP, not
+flashed). V7.2.2, the code of the standalone image above, was 3846 bytes, `688978daa1ed86c0…`.
+octabam re-links it there on every build and compares.
 
 ## Required: the bugfix bundle
 
@@ -143,6 +152,7 @@ Either can be selected without the other; the sites are disjoint.
 - MKII is untested.
 - Hardware confirmation of Program Change on fast re-cues, MIDI tracks and START SILENT.
 - This octabam form of V7.2.2 on hardware.
+- V7.3 (the restart origin) on hardware.
 
 ## Design notes
 

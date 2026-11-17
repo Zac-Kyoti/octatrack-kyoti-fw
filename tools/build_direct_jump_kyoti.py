@@ -2,6 +2,10 @@
 # SPDX-License-Identifier: MIT
 # SPDX-FileCopyrightText: 2026 Zac Kyoti
 """
+DIRECT JUMP V7.3 (2026-11-16): the time origin is the last restart -- PLAY or any stock pattern switch
+(detour 0x400a4850, dj_swres, tail-jumps COND_RESET).  V7.2.2: SILENCE TRACKS release; V7.2: each track's
+Part at its first sounding trig (detour 0x40009ebe); V7.1.x: a tick before the boundary, dj_hide.
+
 DIRECT JUMP V7.0 -- Session 107/108: the CLOCK-LOCKED landing (see
 octabam-modules/direct-jump-kyoti/patch_directjump_v7.s header and
 reference/handoffs/DIRECTJUMP_V7_DESIGN.md).  Built on V6.4 (the frozen OT<->AR
@@ -92,7 +96,8 @@ PATCHES = [
      [(0x400a1f72, "dj_land", "103980006687", 6, "jsr"),   # move.b (0x80006687).l,%d0
       (0x400a221c, "dj_nofa", "4a398000002a", 6, "jsr"),   # tst.b (0x8000002a).l
       (0x40043418, "dj_ptnrel", "4879400bf0f2", 6, "jmp"),
-      (0x40009ebe, "dj_lfoq", "4a3980000050", 6, "jsr")]),   # V7.2: light Part apply's tst.b 0x80000050
+      (0x40009ebe, "dj_lfoq", "4a3980000050", 6, "jsr"),    # V7.2: light Part apply's tst.b 0x80000050
+      (0x400a4850, "dj_swres", "4eb9400a539c", 6, "jsr")]),  # V7.3: stock switch's jsr COND_RESET (a restart)
 ]
 
 # [PTN]-held keymap layer 0x400bf0f2, 26-byte record for YES (code 0x31): all-NULL in stock.

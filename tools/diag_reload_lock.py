@@ -25,6 +25,9 @@ grades it against DIRECT JUMP's position model; tools/check_reload_full.py the F
        WT = a FULL reload of audio T forced to land in the wrap body (diag_reload_quant.py's W; the model is off
        around it: the master length is cut for one cycle),
        yT = flip audio T's machine page 1 byte in the playing Part (a live slice edit), w = wait 1 s;
+       cP = cue pattern P (0-based, this bank) and wait until it plays: with DIRECT JUMP off, a STOCK pattern change
+       (a restart: COND_RESET(-1) from its switch block), with it on a jump; dV = DIRECT JUMP's DJ_MODE = V
+       (--dj-mode-at; with --dj-off the run starts with it off -- DIRECT JUMP V7.3's restart scenario, 2026-11-16);
        a suffix @mK waits for master step K first (0 = the cycle's last audible step), @kN waits N ms; without
        one, an irregular delay walks the press through every tick of a step.
 """
@@ -47,12 +50,14 @@ PTN, BANK = 0x2E, 0x2F
 def main(argv):
     ap = argparse.ArgumentParser()
     ap.add_argument("--image", required=True, type=lambda p: str(pathlib.Path(p).resolve()))
-    ap.add_argument("--elf", required=True, type=lambda p: str(pathlib.Path(p).resolve()))
+    ap.add_argument("--elf", required=True, type=lambda p: str(pathlib.Path(p).resolve()),
+                    help="RELOAD's unit ELF, or a combined image's map JSON (out/KYOTI/kyoti_v1.8_map.json)")
     ap.add_argument("--project", required=True, type=lambda p: str(pathlib.Path(p).expanduser().resolve()))
     ap.add_argument("--name", required=True)
     ap.add_argument("--out", required=True)
     ap.add_argument("--dj-mode-at", type=lambda x: int(x, 0), default=None,
                     help="DIRECT JUMP KYOTI's DJ_MODE (a KYOTI image): turned ON for the run")
+    ap.add_argument("--dj-off", action="store_true", help="with --dj-mode-at: start with DIRECT JUMP OFF (op dV turns it)")
     ap.add_argument("--cpoke", action="append", default=[])
     ap.add_argument("--lpoke", action="append", default=[])
     ap.add_argument("--ops", default="x0,s0")
@@ -61,8 +66,11 @@ def main(argv):
     ap.add_argument("--tail", type=int, default=800, help="ms after the last landing")
     ap.add_argument("--cond", action="store_true", help="also record the trig-condition counters per tick")
     a = ap.parse_args(argv)
-    nm = subprocess.run(["m68k-elf-nm", a.elf], capture_output=True, text=True, check=True).stdout
-    syms = {p[2]: int(p[0], 16) for p in (l.split() for l in nm.splitlines()) if len(p) == 3}
+    if a.elf.endswith(".json"):        # a combined image's map (tools/build_kyoti.py): RELOAD's unit symbols
+        syms = {k: int(v, 16) for k, v in json.loads(pathlib.Path(a.elf).read_text())["symbols"]["patch_reload3"].items()}
+    else:
+        nm = subprocess.run(["m68k-elf-nm", a.elf], capture_output=True, text=True, check=True).stdout
+        syms = {p[2]: int(p[0], 16) for p in (l.split() for l in nm.splitlines()) if len(p) == 3}
     out = pathlib.Path(a.out)
     if not out.is_absolute():
         out = ROOT / out
@@ -130,6 +138,7 @@ def main(argv):
 
     st = dict(tick=0, q=0)
     states, builds, lands, reqs, snaps, fires, pubs, restarts = [], [], [], [], [], [], [], []
+    switches = []        # op cP: (cue tick, the tick it plays from, P, DJ_MODE)
 
     def on_tick(uc, ad, sz, ud):
         st["tick"] += 1
@@ -140,7 +149,8 @@ def main(argv):
             raw = bytes(u.mem_read(0x46107918, 64))
             row += [[int.from_bytes(raw[i * 4:i * 4 + 4], "big") for i in range(16)],
                     list(u.mem_read(0x46107959, 16)), list(u.mem_read(0x46107969, 16)),
-                    list(u.mem_read(0x46107979, 16)), rd(ACT, 1)]
+                    list(u.mem_read(0x46107979, 16)), rd(ACT, 1),
+                    [rd(bb + rd(ACT, 1) * PATSTRIDE + k * TRAC_A + 0x50, 1) for k in range(8)]]   # the playing lengths
         states.append(row)
 
     def on_build(uc, ad, sz, ud):
@@ -253,7 +263,7 @@ def main(argv):
     u.hook_add(er.eb.UC_HOOK_CODE, on_pin, begin=syms["rl_tpurge"], end=syms["rl_tpurge"])
     u.hook_add(er.eb.UC_HOOK_CODE, on_pout, begin=syms["pu2_out"], end=syms["pu2_out"])
     if a.dj_mode_at is not None:
-        u.mem_write(a.dj_mode_at, (1).to_bytes(4, "big"))
+        u.mem_write(a.dj_mode_at, (0 if a.dj_off else 1).to_bytes(4, "big"))
     p0 = params(act)
     print(f"bank {bank + 1} pattern {act + 1}: {p0}", flush=True)
     snaps.append([0, p0])
@@ -283,6 +293,25 @@ def main(argv):
         nl = len(lands)
         if op == "w":
             settle(1000)
+            continue
+        if op[0] == "d":                       # DIRECT JUMP on / off (as [PTN]+[YES])
+            u.mem_write(a.dj_mode_at, int(op[1:]).to_bytes(4, "big"))
+            print(f"#{i} {opx}: DJ_MODE = {int(op[1:])} at tick {st['tick']}", flush=True)
+            continue
+        if op[0] == "c":                       # cue a pattern; a stock change (DJ off) or a jump (DJ on)
+            pnew = int(op[1:])
+            t_cue = st["tick"]
+            u.mem_write(0x800065BF, bytes([bank]))
+            u.mem_write(0x800065C0, bytes([pnew]))
+            g = 0
+            while rd(ACT, 1) != pnew and g < 6000:
+                rt.run(ms=2)
+                g += 1
+            slab_ad = bb + pnew * PATSTRIDE    # the playing pattern from now on (rec_mask, x / y edits)
+            switches.append([t_cue, st["tick"], pnew, rd(a.dj_mode_at, 4) if a.dj_mode_at is not None else 0])
+            print(f"#{i} {opx}: cued at tick {t_cue}, playing {rd(ACT, 1)} from tick {st['tick']}; COND_RESET calls "
+                  f"since: {[c[:3] for c in cresets if c[0] >= t_cue]}", flush=True)
+            settle(200)
             continue
         if op == "X":                          # STOP (stock's COND_RESET(-1) at 0x400a12b8), then PLAY again
             t_stop = st["tick"]                # (Clyps' diag_clyps_lock.py op x, CL33)
@@ -370,7 +399,7 @@ def main(argv):
                                              bank=bank),
                                    states=states, builds=builds, fires=fires, lands=lands, reqs=reqs, snaps=snaps,
                                    purges=purges, applies=applies, restarts=restarts,
-                                   cresets=cresets, conds=conds)))
+                                   cresets=cresets, conds=conds, switches=switches)))
     print(f"wrote {out}: ticks {st['tick']}, landings {len(lands)}", flush=True)
     return 0
 

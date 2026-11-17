@@ -38989,3 +38989,89 @@ unchanged. Still WIP (not promoted).
   and the other feature images.
 - **Left without the fixes, by earlier request:** DIRECT JUMP V6.4, SIDECHAIN_COMPRESSOR light, sysex/'s
   MIDI_PLAYS_FREE_FIX hunks -- asked the author.
+
+## 2026-11-16 (`dj-restart`) — DIRECT JUMP V7.3: the last restart (PLAY or a stock pattern switch) is the time origin (WIP, NOT flashed)
+
+The author's decision (2026-11-16, option (b) in full): DIRECT JUMP counts from the LAST RESTART -- PLAY, or any stock
+pattern switch (DJ off, a chain, the arranger: whatever runs stock's `jsr COND_RESET` at 0x400a4850) -- for the landing
+position AND the trig conditions, as RELOAD_FROM_PROJECT (rl_creset) and Clyps (cl_creset) already counted. Until V7.2.2
+dj_T ran from PLAY: PLAY on A01 (16) -> a normal change to A02 (12) -> a jump to A03 (12) 4 steps later landed A03 on
+step 9 (its PLAY phase) while A02 was on step 5, and set its A:B counters from PLAY.
+- **Change:** a fifth detour, 0x400a4850 (`jsr 0x400a539c`, 6 B) -> `jsr dj_swres`; dj_swres re-bases dj_T and TAIL-JUMPS
+  COND_RESET (no push), so COND_RESET -- and RELOAD's rl_creset / Clyps' cl_creset at its entry -- still see return
+  address 0x400a4856 at (sp) and the -1 at 4(sp). Uses d0 / a0 only.
+- **The frame, measured** (never-switched references with the stock switch straight to the pattern, out/djr f1-f4):
+  PLAY's first tick has dj_T = 1 (t' = 1; master step 1, tick 0 at phase G). Stock's switch (wrap body, phase G of tick
+  Ts) leaves master step 0, tick 0, and **the new pattern's first step still runs at the OUTGOING master rate**
+  (SCALE_IX follows a step later; f3x/f3y: 1x -> 2x / 3/4x, step 0 lasted 6 ticks in both). So the new cycle's t' = 0
+  is Ts + tps_old, whatever the incoming rate: dj_swres sets **dj_T = -tps_old** (LEN_TBL[SCALE_IX] at the switch) and
+  **dj_rsm = N** (MASTER_STEP after the switch, 0 unless the arranger), x = dj_T + dj_rsm * tps_M. The first build used
+  "dj_T = 0, x = dj_T - tps_M(incoming)" (the caller's PLAY-convention guess): PASS at equal master rates, FAIL by
+  -2 / +3 ticks when the rates differ (RS3) -- that is how the outgoing-rate step was found. Also measured: stock's switch
+  leaves every reload 0 until the new pattern's first master wrap, as after PLAY (dl_fixup unchanged; a "the switch is
+  itself a wrap" special case FAILED RS4 on `reload`). STOP -> dj_T = 0, dj_rsm = 0 (PLAY's frame).
+- **dj_T's readers:** dj_tprime / dl_commit add dj_rsm * tps_M (dj_tprime: u < 0 = before the restarted pattern's first
+  boundary, negative, no mod); dj_cond clamps a negative landing time to F(0) = 0 (COND_RESET zeroed every counter at
+  the switch and no pass starts before that boundary); dl_fixup compares dj_tland in the restart's frame. dj_hide,
+  dj_sparm / dj_spdo (publish timing), Program Change and DJ_DIAG do not read dj_T.
+- **A jump never runs 0x400a4850** (pc watch, diag_reflock --watch-pc): 0 hits over the 16 jumps of the five standalone
+  scenarios, the 10 of KYOTI V1.8 (k1/k2/k4) and the 7 of V1.8C (c1/c2); exactly one hit (the stock switch) in every
+  restart run. dj_hide's held cue makes stock's wrap a plain one (d6 = PEND != ACT is 0: no COND_RESET, no re-base).
+  **DJ_SELFHOOK self-jumps are unreachable in V1.8C:** Clyps' ORIG PTN+PRT has been an in-place landing since 2026-11-09
+  (cl_restorepat -> cl_togarm; nothing sets cl_self, so cl_sw6 / cl_scommit / dj_selfvec are inert); emulator: ORIG
+  PTN+PRT with DJ on (2x) and off (1x) made no DIRECT JUMP landing and no stock switch (out/djr/slf, slo). The
+  DJ_SELFHOOK blocks are kept and still assemble.
+- **New REF-LOCK scenarios** (tools/diag_reflock.py `--dj-at T:V`, `--poke-at`, `--watch-pc`; tools/cmp_reflock.py
+  `--ref-for P=REF`): RUN = PLAY on A, a stock change to X with DJ off, DJ on, jumps X -> Y -> X -> Y; REF = PLAY on A,
+  the same stock change straight to Y (or X), DJ on idle. Launcher out/djr/launch.sh; graded with --cond (positions,
+  pending events with content, A:B counters, latches). V7.2.2 (FINAL unit 7c6131e7) vs V7.3 (unit below):
+  | scenario | V7.2.2 | V7.3 |
+  |---|---|---|
+  | RS1 16 -> 12 -> 12 (NORMAL 1x; the author's case) | FAIL: Y +4 steps, counters 1 vs 0 | PASS (4 segments) |
+  | RS2 64 -> 7 -> 16 (A's CHAIN AFTER 16: a mid-pattern switch) | FAIL: counters, then +2 / -8 steps | PASS |
+  | RS3 1x -> 2x -> 3/4x (master rates differ) | FAIL: counters, X -2 steps | PASS |
+  | RS4 7 -> 16 -> PER-TRACK 3/4x + 3/2x + 1/4x (lcm grid 24) | FAIL: +7 steps, counters | PASS |
+  | RS5 = RS1 with a pattern chain doing the switch, cancelled before the jump | FAIL: +4 steps | PASS |
+  | RS6 = RS3, the jump cued the tick after the switch (lands on the new pattern's first boundary, x = -1) | FAIL: counters, X -2 steps | positions, pending events and counters identical at every tick; the master tick / SCALE_IX differ on the boundary tick only (t96: stock is still in its old-rate first step, 5 / 1x, the jump has loaded the new rate, 7 / 3/4x), state locked from t97 -- the grader's "locked from landing + 1" rule calls it FAIL |
+- **RELOAD / Clyps beside it** (tools/check_dj_restart_cond.py: after a one-track load following PLAY -> stock change ->
+  jump, the loaded track's A:B counter equals every untouched track's of the same length and rate, every tick; OT DEMO,
+  pattern 0's CHAIN AFTER 16, stock change to A05, jump to A06, then the load of T1 at t142): KYOTI V1.8 FINAL
+  (aa81ddfb) RELOAD [PTN]+[TRACK 1] -> 0 vs 1 on 149 ticks: FAIL; KY18 DJR1: 0 = 0, PASS. KYOTI V1.8C FINAL (32108f95)
+  Clyps SEQ load of slot 4 onto T1 -> 0 vs 1 on 148 ticks: FAIL; KY18C DJR1: PASS. (tools/diag_reload_lock.py ops
+  `cP` / `dV` + `--dj-off`, `--elf MAP.json`; tools/diag_dj_clyps_overlap.py ops `cP` / `dV` / `P`, `--cond`,
+  `--setb`, `--watch-pc`.)
+- **Existing gates on V7.3:** REF-LOCK --cond, the five standalone scenarios (16<->7, A07<->A08, DJMAST2, mixed
+  3/4x+3/2x+1/4x, INF; the dj-clyps references out/djc/r*.json): PASS; KYOTI V1.8 16<->7 / A07<->A08 / mixed: PASS;
+  V1.8C 16<->7 / A07<->A08: PASS. check_dj_full (OT DEMO, LFO AUTO CHANGE on): 21 on their first trig / 26 boundary /
+  1 next jump, PASS on the standalone, V1.8 and V1.8C. check_dj_part (a fresh V7.3 dump): LFO AUTO CHANGE off 12 B, on
+  111 B, BOTH == LIGHT: PASS. DJ-off and DJ-on-idle identity with stock (diff_stock_vs_patch, standalone unit):
+  IDENTICAL both (38 samples, 16/16 tracks moving). V1.8C overlap test (diag_dj_clyps_overlap a1/a2/b1/b2/b3 +
+  check_dj_clyps_overlap): 5 overlaps, 42 applies PASS on PART and TRIG, none dangling (one waiting legitimately at the
+  run's end), 0x400a4850 never run: as V7.2.2.
+- **Not exercised:** a switch the arranger starts at a later step (dj_rsm = N > 0: the formula, not a run -- the arranger
+  keeps DIRECT JUMP off while it runs); MIDI-track content; external sync; anything on hardware.
+- **octabam:** manifest.py has the fifth Detour (jsr, dj_swres) and REFERENCE (0x400d6d38, 3938 B, 51478a67…), 5407 and
+  54455 identical; re-linked from the manifest's own Linked entry with ~/Documents/octabam's schema: MATCH. README hook
+  table updated. Nothing in octabam changed. RELOAD's rl_creset comment no longer calls a jump a restart (comment only:
+  RELOAD's unit fc25a994 and image 188ec12c still match their pins). The same stale wording is in Clyps' cl_creset
+  comment (tools/clyps/patch_clyps.s, "a DIRECT JUMP jump") and build_clyps.py's DETOURS comment ("DIRECT JUMP's
+  hand-off") -- trkseq's files, not touched.
+- **Every other FINAL builder still matches its pin** (feature_image.py without the opt-in: MUTE_MODES 857d80d3,
+  QUANTIZE_LIVE_REC_TOGGLE df4a2498, SIDECHAIN_COMPRESSOR 4febe2e6, ERASE_EMPTY_TRIGLESS_LOCKS db348f68,
+  RELOAD_FROM_PROJECT 188ec12c, REC_TRIG_MUTE dac87abd, VARISPEED c3af514f, VARISPEED_EMUS 52823ea6, BATCH_BUGFIXES
+  0cf32835; BLACKPYRAMIDS_303 not rebuilt). feature_image.py: a standalone run honours KYOTI_VERSTR (WIP naming; the
+  OS VERSION is applied at the wrap, the mainos and its pin are the same).
+- **Builds (all WIP, NONE flashed; KYOTI_ALLOW_WIP=1):**
+  - DIRECT_JUMP_KYOTI feature image (`KYOTI_VERSTR=140C_DJR1 python3 tools/build_direct_jump_kyoti.py`):
+    out/DIRECT_JUMP_KYOTI/OCTATRACK_OS1.40C_DIRECT_JUMP_KYOTI.syx, OS VERSION `140C_DJR1`, mainos c58591c0…, syx
+    e2d663e3…; its unit (KYOTI_UNIT=1, the harnesses' image) out/mainos_direct_jump_kyoti.bin 7b48fdd6…, cave
+    0x400d6800..0x400d7761 (3938 B), dj_swres 0x400d7200.
+  - KYOTI V1.8 (`KYOTI_VERSTR="KY18 DJR1" python3 tools/build_kyoti.py`): out/KYOTI/OCTATRACK_OS1.40C_KYOTI_V1.8.syx,
+    `KY18 DJR1`, mainos 8807feee…, syx 8cbd7b24…; dj_swres in DRAM 0x40aa2980; 73 spans, B1/B2 OK.
+  - KYOTI V1.8C (`KYOTI_VERSTR="KY18C DJR1" python3 tools/build_kyoti.py --clyps`):
+    out/KYOTI/OCTATRACK_OS1.40C_KYOTI_V1.8C.syx, `KY18C DJR1`, mainos 9d1a29c9…, syx e50d8f5e…; dj_swres 0x40a96022,
+    COND_RESET's entry still Clyps' jmp; 105 spans, B1/B2 OK, Clyps owns 0x400a1f72 and chains dj_land.
+  - CLYPS (`KYOTI_VERSTR="CLYPS DJR1" python3 tools/build_clyps.py`): out/CLYPS/OCTATRACK_OS1.40C_CLYPS.syx,
+    `CLYPS DJR1`, mainos 94e41a22…, syx f8708adf….
+  - Evidence: out/djr/ (launch.sh, gate1.sh, gate1b.sh, gate3.sh; the runs; base_default / base_clyps = the FINAL
+    V1.8 / V1.8C rebuilt from 109f54c for the FAIL-before runs, aa81ddfb / 32108f95).

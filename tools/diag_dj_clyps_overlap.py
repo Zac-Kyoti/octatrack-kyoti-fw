@@ -23,6 +23,12 @@ dj_spd / dj_spn; and every TRK_APPLY / MIDI apply / publish / landing call with 
     sK / fK  a Clyps SEQ / FULL load of slot K on the active track; returns once Clyps lands it
     JP       a DIRECT JUMP cue to pattern P; returns as soon as it lands (no settle)
     w        wait 1 s
+  DIRECT JUMP V7.3 (2026-11-16, the restart origin): --dj-start 0 starts with DIRECT JUMP off, and
+    cP       cue pattern P and wait until it plays (DJ off: a STOCK pattern change -- a restart)
+    dV       DJ_MODE = V (as [PTN]+[YES])
+    P        ORIG PTN+PRT ([PTN]+[BANK]+[YES] in Clyps): DJ on, a self-jump (dj_selfvec); DJ off, stock's switch
+  --cond records the A:B pass counters + latches per tick; --watch-pc ADDR records every tick ADDR runs
+  (0x400a4850: stock's switch `jsr COND_RESET`, which a DIRECT JUMP jump must never run).
 """
 import argparse
 import json
@@ -52,6 +58,11 @@ def main(argv):
     ap.add_argument("--ops", required=True)
     ap.add_argument("--lfo", type=int, default=1, help="LFO AUTO CHANGE (0x80000050)")
     ap.add_argument("--tail", type=int, default=6000, help="ms after the last op")
+    ap.add_argument("--setb", action="append", default=[],
+                    help="P:OFF=VAL -- a pattern-blob byte after the load (e.g. 0:0x8e56=8, CHAIN AFTER 16)")
+    ap.add_argument("--dj-start", type=int, default=1, help="DJ_MODE at the start (V7.3 restart runs: 0)")
+    ap.add_argument("--cond", action="store_true", help="record the A:B pass counters + latches per tick")
+    ap.add_argument("--watch-pc", action="append", default=[], type=lambda v: int(v, 0))
     a = ap.parse_args(argv)
     syms = {k: int(v, 16) for k, v in (l.split() for l in pathlib.Path(a.syms).read_text().splitlines())}
     out = pathlib.Path(a.out)
@@ -70,6 +81,10 @@ def main(argv):
     u = rt.uc
     rd = lambda ad, n: int.from_bytes(bytes(u.mem_read(ad, n)), "big")
     bb = BLOB + bank * BANKSTRIDE
+    for spec in a.setb:
+        pp, rest = spec.split(":", 1)
+        off, val = rest.split("=")
+        u.mem_write(bb + int(pp) * PATSTRIDE + int(off, 0), bytes([int(val, 0) & 0xFF]))
 
     def main_call(addr, *args):
         rt.run(until=lambda x: x.pc == er.MAIN_SPIN)
@@ -115,6 +130,11 @@ def main(argv):
             emask=list(bytes(uc.mem_read(0x46C7FE44, 8))),
             cl_spd=[rd(syms["cl_spd"] + 2 * k, 2) for k in range(16)], cl_spn=rd(syms["cl_spn"], 1),
             dj_spd=[rd(syms["dj_spd"] + 2 * k, 2) for k in range(16)], dj_spn=rd(syms["dj_spn"], 1)))
+        if a.cond:
+            raw = bytes(uc.mem_read(0x46107918, 64))
+            states[-1].update(cond=[int.from_bytes(raw[i * 4:i * 4 + 4], "big") for i in range(16)],
+                              c59=list(uc.mem_read(0x46107959, 16)), c69=list(uc.mem_read(0x46107969, 16)),
+                              c79=list(uc.mem_read(0x46107979, 16)), djm=rd(syms["DJ_MODE"], 4))
 
     def mk(nm):
         def f(uc, ad, sz, ud):
@@ -131,7 +151,10 @@ def main(argv):
         if ad:
             u.hook_add(er.eb.UC_HOOK_CODE, mk(nm), begin=ad, end=ad)
     u.hook_add(er.eb.UC_HOOK_CODE, on_tick, begin=TICK_PC, end=TICK_PC)
-    u.mem_write(syms["DJ_MODE"], (1).to_bytes(4, "big"))
+    u.mem_write(syms["DJ_MODE"], a.dj_start.to_bytes(4, "big"))
+    watch, opslog = [], []
+    for w_ in a.watch_pc:
+        u.hook_add(er.eb.UC_HOOK_CODE, lambda uc, ad, sz, ud: watch.append([st["tick"], ad]), begin=w_, end=w_)
 
     rt.seq_select_live(bank, a.start)
     rt.internal_clock()
@@ -155,10 +178,37 @@ def main(argv):
             while rd(ACT, 1) != p and g < 3000:
                 rt.run(ms=2)
                 g += 1
+            opslog.append([st["tick"], opx])
             print(f"#{i} {opx}: landed, act {rd(ACT, 1)} at tick {st['tick']}", flush=True)
             continue
         if op == "w":
             settle(1000)
+            continue
+        if op[0] == "d":
+            u.mem_write(syms["DJ_MODE"], int(op[1:]).to_bytes(4, "big"))
+            opslog.append([st["tick"], opx])
+            print(f"#{i} {opx}: DJ_MODE = {int(op[1:])} at tick {st['tick']}", flush=True)
+            continue
+        if op[0] == "c":
+            p = int(op[1:])
+            t0 = st["tick"]
+            u.mem_write(0x800065BF, bytes([bank]))
+            u.mem_write(0x800065C0, bytes([p]))
+            g = 0
+            while rd(ACT, 1) != p and g < 6000:
+                rt.run(ms=2)
+                g += 1
+            opslog.append([t0, opx, st["tick"]])
+            print(f"#{i} {opx}: cued at tick {t0}, playing {rd(ACT, 1)} from tick {st['tick']}", flush=True)
+            settle(200)
+            continue
+        if op == "P":
+            t0 = st["tick"]
+            key(0x2E, 1); key(0x2F, 1); key(0x31, 1); key(0x31, 0); key(0x2F, 0); key(0x2E, 0)
+            settle(3000)
+            opslog.append([t0, opx, st["tick"]])
+            print(f"#{i} P: ORIG PTN+PRT at tick {t0}; DJ_MODE {rd(syms['DJ_MODE'], 4)}; watched since: "
+                  f"{[w for w in watch if w[0] >= t0]}", flush=True)
             continue
         nl = sum(1 for c in calls if c[1] == "cl_landone")
         if op[0] == "s":
@@ -169,11 +219,15 @@ def main(argv):
         while sum(1 for c in calls if c[1] == "cl_landone") == nl and g < 300:
             settle(34)
             g += 1
+        opslog.append([st["tick"], opx])
         print(f"#{i} {opx}: Clyps landed at tick {st['tick']}", flush=True)
     settle(a.tail)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(dict(meta=dict(name=a.name, ops=a.ops, track=a.track, start=a.start, bank=bank,
-                                             lfo=a.lfo, image=a.image), states=states, calls=calls)))
+                                             lfo=a.lfo, image=a.image, dj_start=a.dj_start),
+                                   states=states, calls=calls, watch=watch, opslog=opslog)))
+    if a.watch_pc:
+        print("watched PCs (tick, pc):", [(t, hex(w)) for t, w in watch], flush=True)
     print(f"wrote {out}: ticks {st['tick']}, calls {len(calls)}", flush=True)
     return 0
 
