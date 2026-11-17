@@ -603,6 +603,24 @@ void ot_oneshot(unsigned t) {
     ot_note(t);
 }
 
+#ifdef KYOTI_MM_GATE
+/* KYOTI V1.8BC only (tools/build_kyoti.py --clyps-bp passes -DKYOTI_MM_GATE and MUTE_MODES' KEYMASK address;
+ * every other build compiles none of this). MUTE_MODES drops a silenced track's new trigs in OTFX-T and DT-T at
+ * stock's voice binds (fresh_bind, dt_trig), but this voice starts its notes from the trigger flag, before a
+ * voice is bound, so in DT-T a muted track kept playing (ot_emu, BOTLI: T6 muted in DT-T at the unmuted level).
+ * The same question MUTE_MODES' Modwerk form answers for FM Synth (mm_trig_muted, Modwerk #777): GATE
+ * 0x800000dc is OTFX-T (1) or DT-T (2), and the track is muted, or something is soloed and it is not; a
+ * SIDE-CHAIN key track (KEYMASK) keeps its trigs, as there. */
+uint32_t ot_mm_drops = 0;
+static unsigned mm_drops(unsigned t) {
+    uint32_t g = U32(0x800000dcu), ms = U32(0x80000008u);
+    if (g != 1u && g != 2u) return 0;
+    unsigned sil = (ms >> 8) & 0xffu;
+    if (ms & 0xffu) sil |= ~ms & 0xffu;
+    return (sil & ~(unsigned)U8(KYOTI_MM_KEYMASK)) >> t & 1u;
+}
+#endif
+
 /* the trig's note: the oldest queued, or none */
 static unsigned take(unsigned track, struct ot_qn *out) {
     unsigned k = qn[track];
@@ -640,6 +658,9 @@ int ot_render(unsigned track, unsigned ping, unsigned start, unsigned end) {
         volatile uint32_t *record = (volatile uint32_t *)(uintptr_t)(0x80001c90u + (ping & 1) * 0xa80u + 336u * track);
         unsigned ev = 0; uint32_t gl = 0;
         unsigned flag = U8(0x46104d0cu + track);
+#ifdef KYOTI_MM_GATE
+        unsigned drop = mm_drops(track);
+#endif
         /* MT27: the ACC knob is the accent SCALE: its value in the Part (the knob writes it; a p-lock or an
          * LFO never does -- the live byte and the base word show a step's lock while it plays). A sequencer
          * note is accented only by its step's ACC p-lock, at lock x scale / 127; a live note by MIDI
@@ -655,7 +676,11 @@ int ot_render(unsigned track, unsigned ping, unsigned start, unsigned end) {
             live[track].armed = 1;                           /* its START came; the DSP's tables have not */
             struct ot_qn e;
             if (!(flag & 0x20)) (void)take(track, &e);
-        } else if (live[track].pending && (live[track].armed || (flag & 16)) && dsp_ready(track)) {
+        } else if (live[track].pending && (live[track].armed || (flag & 16)) && dsp_ready(track)
+#ifdef KYOTI_MM_GATE
+                   && !drop                                  /* a silenced track's live note lapses unplayed */
+#endif
+                   ) {
             /* a live note: the knobs (with the preview's or the chromatic key's locks in fp), held */
             struct ot_qn e;
             if ((flag & 16) && !(flag & 0x20)) (void)take(track, &e);   /* a sequencer START merged into this frame */
@@ -680,6 +705,11 @@ int ot_render(unsigned track, unsigned ping, unsigned start, unsigned end) {
              * a second). Notes played live (track keys, MIDI) do not sound yet. */
             struct ot_qn e;
             unsigned qd = qn[track];
+#ifdef KYOTI_MM_GATE
+            if (drop) {
+                if (take(track, &e)) ++ot_mm_drops;          /* consumed unplayed: trigs and notes stay paired */
+            } else
+#endif
             if (take(track, &e)) {
                 ++ot_trigs;
                 ev = OT_EV_NOTE | (e.slide ? OT_EV_SLIDE : 0);

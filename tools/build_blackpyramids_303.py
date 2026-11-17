@@ -32,7 +32,7 @@ Usage:   python3 tools/build_blackpyramids_303.py      (WIP: KYOTI_ALLOW_WIP=1)
 Outputs: out/mainos_blackpyramids_303.bin, out/OCTATRACK_OS1.40C_BLACKPYRAMIDS_303.syx,
          out/OCTATRACK_BLACKPYRAMIDS_303.bin (CF card: PROJECT > OS UPGRADE)
 """
-import os, pathlib, subprocess, sys
+import json, os, pathlib, subprocess, sys
 from kyoti_status import gate, seal
 
 gate(__file__)
@@ -40,6 +40,27 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "ot303"))
 import dsp_patch
 import dram
+import hwprobe_image
+import kyoti_place                   # combined-image placement (build_kyoti.py); no-op standalone
+
+# KYOTI V1.8BC (tools/build_kyoti.py --clyps-bp) places this machine beside SIDECHAIN_COMPRESSOR; every
+# value below is the standalone one when KYOTI_PLACE is unset, and the image is then byte-identical.
+#   bp_dsp_org_A/B   the DSP code's first P word, inside SPRING REV's module (default: SPRING's init);
+#                    DARK REV's helper still goes to the module's last 35 words
+#   bp_donor_ids     the effects given up (default SPRING REV, 0x15; the combined image adds PLATE REV, 0x14)
+#   bp_runtime       the runtime's link address (default: this build's own reserve, dram.RESERVE)
+#   bp_runtime_dram  True: the runtime is one unit of the combined image's DRAM payload (tools/dram/, linked
+#                    at bp_runtime, carried by that image's loader): no reserve, boot poke or loader here
+DSP_ORGS = {t: kyoti_place.at(f"bp_dsp_org_{t}", None) for t in ("A", "B")}
+DONOR_IDS = list(kyoti_place.at("bp_donor_ids", [0x15]))
+RT_AT = kyoti_place.at("bp_runtime", dram.RESERVE)
+RT_IN_KYOTI = bool(kyoti_place.at("bp_runtime_dram", False))
+#   bp_mm_keymask    MUTE_MODES' KEYMASK byte in the combined image: the renderer then drops a silenced track's
+#                    notes as MUTE_MODES drops its trigs (control.c KYOTI_MM_GATE); unset = none of it is compiled
+MM_KEYMASK = kyoti_place.at("bp_mm_keymask", None)
+# PLATE REV (id 0x14): its dispatch entries per payload (X:$215 / X:$235, read off our image) and its
+# descriptor pointer as the FX tables store it (E 0x400d5594 + 0x38)
+PLATE = dict(fx_id=0x14, p=0x400d5594 + 0x38, A=(0x01000, 0x01055), B=(0x00dc0, 0x00e15))
 
 BASE = 0x40000400
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -139,10 +160,11 @@ def build_cf():
     objs = []
     for src in (CF / "control.c", CF / "record.c", CF / "params.c", WORK / "ytab.c"):
         objs.append(str(WORK / (src.stem + ".o")))
-        run("m68k-elf-gcc", *CFLAGS, f"-I{CF}", "-c", str(src), "-o", objs[-1])
+        mm = [] if MM_KEYMASK is None else ["-DKYOTI_MM_GATE=1", f"-DKYOTI_MM_KEYMASK=0x{MM_KEYMASK:x}u"]
+        run("m68k-elf-gcc", *CFLAGS, *mm, f"-I{CF}", "-c", str(src), "-o", objs[-1])
     run("m68k-elf-as", "-mcpu=5407", "-o", str(WORK / "machine.o"), str(CF / "machine.s"))
     (WORK / "runtime.ld").write_text(f"""SECTIONS {{
-  . = 0x{dram.RESERVE:x};
+  . = 0x{RT_AT:x};
   .text : {{ *(.text) *(.text.*) }}
   .rodata : {{ *(.rodata) *(.rodata.*) }}
   .data : ALIGN(4) {{ *(.data) *(.data.*) }}
@@ -184,6 +206,47 @@ def build_loader(blob):
     return app
 
 
+def give_up_plate(img, mm):
+    """PLATE REV out as SPRING REV is (dsp_patch.patch_dsp / remove_spring): its DSP dispatch -> the
+    passthrough stub on both payloads, its rows off both FX choosers, id2e -> the NONE page, so a project
+    naming it loads NONE. The combined image puts SIDECHAIN_COMPRESSOR's DSP section over its P words."""
+    print("\n=== PLATE REV given up as well (combined image) ===")
+    for tag, d in dsp_patch.DSP.items():
+        xt = dsp_patch.x_off(mm, img, d["va"], d["ln"], 0x215)
+        si, sp = xt + PLATE["fx_id"] * 3, xt + (0x20 + PLATE["fx_id"]) * 3
+        assert (dsp_patch.rd3(img, si), dsp_patch.rd3(img, sp)) == PLATE[tag], f"payload {tag}: PLATE dispatch"
+        img[si:si + 3] = dsp_patch.w3(d["stub_init"])
+        img[sp:sp + 3] = dsp_patch.w3(d["stub_proc"])
+        print(f"  payload {tag}: X:$215[$14] -> passthrough stub")
+
+    def u32(a):
+        return int.from_bytes(img[a - BASE:a - BASE + 4], "big")
+
+    def wr32(a, v):
+        img[a - BASE:a - BASE + 4] = v.to_bytes(4, "big")
+    for bus in dsp_patch.FX_BUSES:
+        entries = []
+        while (v := u32(bus["lst"] + 4 * len(entries))):
+            entries.append(v)
+            assert len(entries) < 0x20
+        if PLATE["p"] in entries:
+            pos = entries.index(PLATE["p"])
+            del entries[pos]
+            for i, v in enumerate(entries):
+                wr32(bus["lst"] + 4 * i, v)
+            wr32(bus["lst"] + 4 * len(entries), 0)
+            wr32(bus["id2pos"] + PLATE["fx_id"] * 4, 0)
+            for idv in range(0x20):
+                p = u32(bus["id2pos"] + idv * 4)
+                if idv != PLATE["fx_id"] and p > pos:
+                    wr32(bus["id2pos"] + idv * 4, p - 1)
+            print(f"  {bus['tag']}: dropped row {pos}; {len(entries)} entries")
+        else:
+            print(f"  {bus['tag']}: PLATE not offered on this bus")
+        assert u32(bus["id2e"] + PLATE["fx_id"] * 4) in (PLATE["p"], dsp_patch.NONE_P)
+        wr32(bus["id2e"] + PLATE["fx_id"] * 4, dsp_patch.NONE_P)
+
+
 def main():
     if not STOCK_SECT.exists():
         sys.exit(f"missing {STOCK_SECT}")
@@ -197,16 +260,29 @@ def main():
     def u32(a):
         return int.from_bytes(img[o(a):o(a) + 4], "big")
 
-    dsp_patch.patch_dsp(img, mm, host=True)
+    bs = dsp_patch.patch_dsp(img, mm, host=True, orgs={t: v for t, v in DSP_ORGS.items() if v is not None})
     print()
+    assert 0x15 in DONOR_IDS and set(DONOR_IDS) <= {0x14, 0x15}, f"donors {DONOR_IDS}: SPRING, or SPRING + PLATE"
     dsp_patch.remove_spring(img)
+    if 0x14 in DONOR_IDS:
+        give_up_plate(img, mm)
+    if kyoti_place.active():                       # the composer reads the DSP layout back
+        (ROOT / "out/bp_dsp_layout.json").write_text(json.dumps(
+            {t: dict(org=b["org"], words=len(b["words"]),
+                     helper=dsp_patch.DSP[t]["spring_init"] + hwprobe_image.SPRING_N - hwprobe_image.DARK_N)
+             for t, b in zip(dsp_patch.DSP, bs)}))
 
     print("\n=== ColdFire: the OT-303 runtime (registration + renderer) in DRAM ===")
     blob, syms, sizes = build_cf()
-    end = dram.RESERVE + len(blob)
-    assert end <= dram.RESERVE_END, f"the runtime ends at 0x{end:08x}, past its reserve's end 0x{dram.RESERVE_END:08x}"
-    print(f"  runtime {len(blob)} B at 0x{dram.RESERVE:08x}..0x{end:08x} (reserve {dram.RESERVE_PAGES} pages, "
-          f"{dram.RESERVE_END - end} B left); " + ", ".join(f"{k} {v[0]} B" for k, v in sizes.items() if v[0]))
+    end = RT_AT + len(blob)
+    if RT_IN_KYOTI:
+        print(f"  runtime {len(blob)} B linked at 0x{RT_AT:08x}..0x{end:08x}: a unit of the combined image's DRAM "
+              f"payload; " + ", ".join(f"{k} {v[0]} B" for k, v in sizes.items() if v[0]))
+    else:
+        assert RT_AT == dram.RESERVE, "the runtime's own reserve starts at dram.RESERVE"
+        assert end <= dram.RESERVE_END, f"the runtime ends at 0x{end:08x}, past its reserve's end 0x{dram.RESERVE_END:08x}"
+        print(f"  runtime {len(blob)} B at 0x{dram.RESERVE:08x}..0x{end:08x} (reserve {dram.RESERVE_PAGES} pages, "
+              f"{dram.RESERVE_END - end} B left); " + ", ".join(f"{k} {v[0]} B" for k, v in sizes.items() if v[0]))
     written = []
     for site, expect, sym, kind, n in DETOURS:
         assert stock[o(site):o(site) + len(expect)] == expect, f"detour 0x{site:08x}: not the stock bytes"
@@ -231,19 +307,23 @@ def main():
     print(f"    0x{FLEX_SLOT:08x} FLEX renderer 0x{FLEX_RENDER:08x} -> ot_render 0x{syms['ot_render']:08x}")
 
     print("\n=== the DRAM runtime: arena reserve, boot site, loader appended ===")
-    for site, expect, new, note in dram.arena_pokes() + [dram.boot_poke()]:
+    for site, expect, new, note in ([] if RT_IN_KYOTI else dram.arena_pokes() + [dram.boot_poke()]):
         assert stock[o(site):o(site) + 4] == expect, f"0x{site:08x} ({note}): not the stock bytes {stock[o(site):o(site) + 4].hex()}"
         img[o(site):o(site) + 4] = new
         written.append((site, site + 4, note))
-    print(f"  arena base 0x{dram.BASE:08x} -> 0x{dram.RESERVE_END:08x} at {len(dram.BASE_SITES) + len(dram.DERIVED_SITES)} sites; "
-          f"page count {dram.PAGES} -> {(dram.END - dram.RESERVE_END) // dram.PAGE - 1}; boot site 0x{dram.BOOT_SITE:08x} -> 0x{dram.IMAGE_END:08x}")
+    if RT_IN_KYOTI:
+        print("  none here: the combined image's loader (tools/dram/) carries the runtime")
+    else:
+        print(f"  arena base 0x{dram.BASE:08x} -> 0x{dram.RESERVE_END:08x} at {len(dram.BASE_SITES) + len(dram.DERIVED_SITES)} sites; "
+              f"page count {dram.PAGES} -> {(dram.END - dram.RESERVE_END) // dram.PAGE - 1}; boot site 0x{dram.BOOT_SITE:08x} -> 0x{dram.IMAGE_END:08x}")
     written.sort()
     for (a0, a1, n0), (b0, b1, n1) in zip(written, written[1:]):
         assert a1 <= b0, f"{n0} and {n1} overlap"
     assert len(img) == dram.IMAGE_END - BASE, "the OS image does not end where the loader goes"
-    app = build_loader(blob)
-    img += app
-    print(f"  loader + runtime {len(app)} B appended at 0x{dram.IMAGE_END:08x} (runtime hash 0x{dram.x33(blob):08x})")
+    if not RT_IN_KYOTI:
+        app = build_loader(blob)
+        img += app
+        print(f"  loader + runtime {len(app)} B appended at 0x{dram.IMAGE_END:08x} (runtime hash 0x{dram.x33(blob):08x})")
 
     OUT.write_bytes(bytes(img))
     seal(__file__, OUT)
