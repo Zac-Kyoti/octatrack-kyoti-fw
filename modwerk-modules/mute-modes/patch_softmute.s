@@ -1243,35 +1243,34 @@ mm_bind_drop:
 
 | ev_trig_muted (Modwerk #777): unsigned mm_trig_muted(void). A machine that starts its own
 | note from a trig, before stock binds the voice, asks which tracks' new trigs are dropped
-| now: bit t for track t+1. The answer is mm_voice_bind's own, asked for each track in turn,
-| so the two cannot disagree (KEYMASK included). OT and OTFX never drop a trig: 0 at once,
-| the same gate as fresh_bind's. C convention: %d2/%d3 are restored, mm_voice_bind keeps
-| %a2 and clobbers only %d0/%d1.
+| now: bit t for track t+1. It is fresh_bind's per-track test as one mask, so a machine that
+| asks once per trig costs a few instructions: in OTFX-T and DT-T a muted track, or with any
+| track soloed a track that is not, less a SIDE-CHAIN key track (KEYMASK, as fb_silence).
+| SOLO_BYTE is MUTE_STATE's low byte, so "anything soloed" and the solo set are one read.
+| OT and OTFX never drop a trig: 0. Modwerk's loader_mute_keep_fixture checks the answer
+| against the resets mm_voice_bind drops in every frame. C convention: %d0/%d1 only.
     .global mm_trig_muted
 mm_trig_muted:
     .ifndef ALWAYS_ON
     move.l  GATE,%d0
     subq.l  #1,%d0
-    cmpi.l  #1,%d0                      | OTFX-T (1) / DT-T (2) only
+    cmpi.l  #1,%d0                      | OTFX-T (1) / DT-T (2) only, fresh_bind's gate
     bhi.s   tm_none
     .endif
-    lea     (-8,%sp),%sp
-    movem.l %d2-%d3,(%sp)
-    moveq   #0,%d3                      | the answer
-    moveq   #7,%d2                      | track 7..0
-tm_loop:
-    move.l  %d2,-(%sp)
-    bsr.w   mm_voice_bind               | 1: this track's reset would be dropped
-    addq.l  #4,%sp
-    tst.l   %d0
-    beq.s   tm_next
-    bset    %d2,%d3
-tm_next:
-    subq.l  #1,%d2
-    bpl.s   tm_loop
-    move.l  %d3,%d0
-    movem.l (%sp),%d2-%d3
-    lea     (8,%sp),%sp
+    move.l  MUTE_STATE,%d1
+    move.l  %d1,%d0
+    lsr.l   #8,%d0                      | muted tracks -> bits 0..7 (CUE above, masked below)
+    andi.l  #0xff,%d1                   | soloed tracks
+    beq.s   tm_key                      | none soloed: the mutes alone
+    not.l   %d1
+    or.l    %d1,%d0                     | + every track not soloed
+tm_key:
+    .ifdef SC_KEY
+    mvz.b   KEYMASK,%d1
+    not.l   %d1
+    and.l   %d1,%d0                     | less the SIDE-CHAIN key tracks
+    .endif
+    andi.l  #0xff,%d0
     rts
 tm_none:
     moveq   #0,%d0
