@@ -486,7 +486,11 @@ def standalone(builder):
     if not STOCK_SECT.exists():
         sys.exit(f"missing {STOCK_SECT} -- run ./fetch-os.sh and ./analyze.sh first")
     WORK.mkdir(parents=True, exist_ok=True)
-    compose(name, *FEATURES[name], STOCK_SECT.read_bytes())
+    builder_, basepath, verstr, blurb = FEATURES[name]
+    # a WIP test image may name itself (KYOTI_VERSTR, as build_kyoti.py; 2026-11-16): the OS VERSION is applied at
+    # the wrap only, so the mainos -- and its pin -- are the same either way
+    verstr = os.environ.get("KYOTI_VERSTR") or verstr
+    compose(name, builder_, basepath, verstr, blurb, STOCK_SECT.read_bytes())
     sys.exit(0)
 
 
