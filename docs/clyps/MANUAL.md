@@ -185,7 +185,7 @@ Every load is one of four kinds, set apart by where the material comes from:
 | **Temp reload** | hold TRACK, press [NO] | the track as you temp-saved it, sequence and sound | legato |
 | **Card reload** | [PTN] + TRACK | the track's sequence as saved | legato |
 | | [BANK] + TRACK | the track's sequence and sound as saved | legato |
-| | [PTN] + [BANK] + trig | that pattern and its Part as saved | yours: legato, all tracks together; another: a pattern change to it |
+| | [PTN] + [BANK] + trig | that pattern and its Part as saved | the active pattern: legato, all tracks together; a different (non active) pattern: cued; legato with Direct Jump Kyoti |
 
 ### 5.1 When you hear it: cued or legato
 
