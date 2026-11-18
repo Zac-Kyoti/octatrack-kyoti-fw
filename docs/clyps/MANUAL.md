@@ -130,7 +130,7 @@ The same chords pressed again once Clyps is open do the same things, and Clyps s
 
 *T1 on pattern A01, rendered from the firmware.* (1) What [YES] would load. (2) The shown bank. (3) The active pattern:
 highlighted, changed (x), its sequence loaded from A05. (4) Slot 3, named BASS1, with the arrows on it.
-(5) The box: where T1's sequence came from. (6) A summary: pattern A16 has trigs on 5 steps.
+(5) The box: where T1's sequence came from. (6) Default track sequence name if user hasn't entered one yet (a summary): track 1 on pattern A16 has 5 trigs.
 
 - **The header** shows the track, what [YES] would do, and the shown bank:
   - `T6 LOAD: TRK SEQ   BNK A`: an audio track (`M6` on the MIDI side).
