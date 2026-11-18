@@ -170,6 +170,18 @@ are lowercase-hyphen, because octabam requires a module's name to equal its fold
   FLASHING §4 "VARISPEED_EMUS VEMG2"; NOTES 2026-11-18/19 (`emus-guard`). Open: the plain-VARISPEED port (branch
   `emus-guard`, images VRG1, WIP, not flashed). No octabam VARISPEED_EMUS module exists; octabam's varispeed module
   shares the source (its pin moves with the port).
+- **2026-11-17: one BLKPYRAMD per DSP core, on every path (WIP, NOT flashed)** — the author's design: TRACK PASTE
+  (stock's wrapper 0x4002b988) and, in KYOTI V1.8BC, every Clyps FULL load (single, `[CUE]` group, ORIG, temp
+  reload, card) are refused whole with `ONE 303 PER CORE!` when they would put a second BLKPYRAMD on a core; a
+  UI-task net (the loop tail 0x40062d1c; Clyps' cl_uitail calls it in V1.8BC, SUPERSEDE) repairs whatever else
+  gets there (a load, an undo, a stale signature revived by a machine-byte writer): the previous holder, else the
+  lowest track, keeps it, the others go back to Flex with their pre-303 values, the toast once. The standalone
+  BLACKPYRAMIDS_303 unit + feature image (`KYOTI_ALLOW_WIP=1 KYOTI_VERSTR=140C_BP1PC python3
+  tools/build_blackpyramids_303.py`) are WIP again until the author flashes and promotes them; KYOTI V1.8BC
+  rebuilt. Gates `tools/ot303/verify_one_per_core.py` (both images), `tools/kyoti_bc_check_onepercore.py`
+  (Clyps). octabam / Modwerk forms NOT changed (their own stopgaps; NOTES has the survey). Next: the author
+  flashes `140C_BP1PC` and V1.8BC, FLASHING §4 (BLACKPYRAMIDS_303 "One per core", V1.8BC item 10). NOTES
+  2026-11-17 cont. (`kyoti-bp`).
 - **2026-11-17: KYOTI V1.8BC (WIP test image, NOT flashed)** — `KYOTI_ALLOW_WIP=1 python3 tools/build_kyoti.py
   --clyps-bp` (alias `--bc`): KYOTI V1.8C + BLACKPYRAMIDS_303, OS VERSION `KYOTI1.8BC` (`BC_VERSTR`), out/KYOTI_WIP/
   KYOTI_V1.8BC/. SPRING REV and PLATE REV given up (SIDE-CHAIN's DSP from PLATE's first word, the voice after it);

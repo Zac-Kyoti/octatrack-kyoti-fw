@@ -119,6 +119,7 @@ unit that boots; if it doesn't, use §3b.
 | DIRECT_JUMP_KYOTI | `140C_KDJ7` |
 | REC_TRIG_MUTE | `140C_RTM` |
 | BLACKPYRAMIDS_303 | `140C_BP303` |
+| BLACKPYRAMIDS_303, one-per-core WIP test image (2026-11-17) | `140C_BP1PC` |
 | VARISPEED | `140C_VARI1` |
 | VARISPEED_EMUS | `140C_VEM10` |
 | VARISPEED_EMUS VEM11 (WIP, the Part-switch guard) | `140C_VEMG2` |
@@ -154,14 +155,27 @@ quick check for each:
      holds**. The same on a Flex/Static track: the emptied trigless lock **disappears** from the trig row, as before.
   7. **Clyps with a BLKPYRAMD track:** a FULL load ([FUNC] + trig) of a slot whose track is BLKPYRAMD onto a Flex
      track, and a FULL load of a Flex slot onto the BLKPYRAMD track: the machine changes with the load (BLKPYRAMD ↔
-     Flex) and plays at the landing; a plain (sequence-only) load leaves the machine alone; ORIG restores. Not
-     tested anywhere yet: a FULL load that would put a second BLKPYRAMD on one core (the voice is one per core;
-     stock's own TRACK PASTE can do the same) -- note what you hear, nothing should crash.
+     Flex) and plays at the landing; a plain (sequence-only) load leaves the machine alone; ORIG restores. A FULL
+     load that would put a second BLKPYRAMD on one core is refused: item 10.
   8. **DIRECT JUMP with a BLKPYRAMD track:** BLKPYRAMD on T2 in Part 1 only; jump (DIRECT JUMP ON) between a
      pattern on Part 1 and one on Part 2 and back: T2 changes machine at its first sounding trig after the jump,
      the voice stops / starts cleanly, in time.
   9. **Project round trip:** SAVE PROJECT, power cycle, LOAD PROJECT: the BLKPYRAMD tracks and their knobs come
      back; a jump, a Clyps load and a MUTE MODE change still behave.
+  10. **One BLKPYRAMD per core on every path** (2026-11-17 rebuild). The BLACKPYRAMIDS_303 checks below
+     (`140C_BP1PC`: TRACK PASTE T1->T3 refused and T1->T5 allowed, the stale signature, a project with two on a
+     core) on this image too, then Clyps (every refusal shows `ONE 303 PER CORE!` once, and nothing changes):
+     - BLKPYRAMD on T1 of the playing pattern's Part. Another pattern on another Part with a BLKPYRAMD on T2 and
+       on T5. In Clyps on T2, `[FUNC]` + that pattern's trig (TRK FULL): refused; T2 keeps its sequence and its
+       machine, no load flash. Without `[FUNC]` (TRK SEQ): the sequence loads as always.
+     - A `[CUE]` group T2 + T5, then hold `[CUE]`, hold `[FUNC]`, press that trig: refused **whole** -- T5 does not
+       load either, although alone it would.
+     - T5 alone, `[FUNC]` + that trig: it **lands** (core 0 has none): T5 becomes a BLKPYRAMD and plays.
+     - Temp reload: TRACK 5 + `[YES]` with T5 a BLKPYRAMD; set T5 to Flex and make T6 a BLKPYRAMD; TRACK 5 +
+       `[NO]`: refused, no `TEMP TRK RELOADED`, T5 stays Flex.
+     - Not tried in the emulator, check here: ORIG TRK FULL / ORIG PTN+PART and a card reload (`[BANK]` +
+       `[TRACK]`, `[PTN]` + `[BANK]` + trig) that would bring a second one back onto a core: refused the same way.
+     - Playing: a FULL load cued while running that would clash is refused at the press, not at the landing.
 
 - **KYOTI V1.7 walk-through** (FINAL 2026-11-02, flashed: all of it passed; `out/KYOTI/OCTATRACK_OS1.40C_KYOTI_V1.7.syx`).
   V1.6's features unchanged; only addresses move (NOTES 2026-11-01).
@@ -288,6 +302,24 @@ quick check for each:
   0, brighter all the way, one octave more above 100; at CUT 127 with RES 127 the resonance stays below
   piercing. Turn VOL across 64 / 65 and back while a note holds: no click or pop. Turn RES and ACC
   through their range: every part of the knob changes the sound.
+  **One per core on every path** (WIP test image `140C_BP1PC`, 2026-11-17, NOT flashed yet:
+  `out/BLACKPYRAMIDS_303/OCTATRACK_OS1.40C_BLACKPYRAMIDS_303.syx`, built with
+  `KYOTI_ALLOW_WIP=1 KYOTI_VERSTR=140C_BP1PC python3 tools/build_blackpyramids_303.py`). Each refusal shows
+  `ONE 303 PER CORE!` exactly once:
+  - BLKPYRAMD on T1. TRACK COPY T1, select T3, TRACK PASTE: refused -- T3 keeps what it had (no `PASTE TRACK`
+    toast); PASTE again on T3 is refused again (there is nothing to undo). Select T5, TRACK PASTE: allowed -- T5 is a BLKPYRAMD
+    with T1's knobs, both play.
+  - Stale signature: BLKPYRAMD on T2. Copy a STATIC track's SRC page and paste it onto T2 (SRC page paste): T2
+    is Static. Make T1 a BLKPYRAMD (allowed). Copy a FLEX SRC page and paste it onto T2: T2 is a **Flex** track
+    (it shows `FLEX` and its sample, not BLKPYRAMD, with the pasted page's values); T1 still plays the voice. No
+    toast. (Before this build T2 came back as a second BLKPYRAMD on core 1.)
+  - TRACK PASTE then undo: T3 a BLKPYRAMD; paste a Flex track onto T3; make T1 a BLKPYRAMD; PASTE again on T3:
+    if stock offers the undo (`UNDO TRACK`) and it brings T3's BLKPYRAMD back, T3 turns back to Flex at once with
+    the toast and T1 keeps the voice; if stock pastes again instead, T3 just stays Flex.
+  - A project with two on a core (from a build with another allocation, or any older save that has two): on
+    LOAD PROJECT the lower-numbered track of the core keeps BLKPYRAMD, the other is Flex with its old Flex
+    values, the toast once, the Part marked edited. Part / pattern changes between Parts with BLKPYRAMD on
+    different tracks of the same core: nothing refused, no toast.
 - **VARISPEED** — a FLEX loop whose ATTR TEMPO matches it, TSTR on `VARI` (SRC SETUP, the
   fifth position): PTCH reads `QUAN`. Change the project tempo: the loop speeds up and slows
   down with its pitch and stays in time. QUAN `2/1` plays it an octave up at double speed.
