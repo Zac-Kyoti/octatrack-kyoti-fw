@@ -39433,3 +39433,44 @@ LOAD PROJECT from the card (the validator was called directly; whether the UI ta
 not known -- the two-identical-passes wait is the guard); stock's own undo bringing a second one back (the net's
 holder rule was driven by RAM, not by the undo key); the repair pass's cost (interrupts land inside its timing).
 FLASHING §4: BLACKPYRAMIDS_303 "One per core" and KYOTI V1.8BC item 10.
+
+## 2026-11-18 (`kyoti-bp`) — the one-per-core net made cheap when idle (WIP, NOT flashed)
+
+**The author's request (2026-11-17):** the net ran a full 4-Part scan after every UI message (525 instructions, the
+60 Hz tick included); make the idle pass well under 100 with every path still covered.
+
+**Design (machine.s `bp_uitail`, control.c `bp_fp` / `fp_take` / `net_cause`):** an assembly fast path at the UI loop's
+tail returns at once when everything the net reads is as its last full pass left it: the bank pointer, the wake flag,
+a periodic count (a full pass every 60 passes, about a second at the 60 Hz tick), the UI Part (0x100b14cf) and the
+engine Part (0x80000003), the playing / pending pattern (the long at 0x800065bc = PLAY_BANK, ACT_PAT, PEND_BANK; and
+PEND_PAT 0x800065c0), and the active Part's fingerprint: its 8 machine bytes (two longs) and each track's first two
+signature bytes ('O','T'; four longs, two tracks a long). Any difference -> `bp_net`, the full scan of all four Parts,
+exactly as before (holder rule, FLEX with pre-303 values, stale cleared without a toast, one toast, the two-stable-
+passes rule after loads), which then takes the new fingerprint. The wake flag is set by the writers that can reach a
+Part the fingerprint does not watch: the Part validator (every load), the TRACK PASTE hook, an allowed Clyps FULL load
+(bp_refuse_load, V1.8BC: no Clyps edit needed). Writers of the active Part (SRC page paste, the file browser's
+assigns, an undo, the chooser) change its fingerprint. A non-active Part is scanned when it is cued (PEND_PAT: before
+it plays a step), when it becomes active, after any wake, and once a second regardless. Only a change to a track's
+third signature byte alone in the active Part waits for the periodic pass. `bp_net_why` / `bp_net_fixpart` record
+why a repairing pass ran and which Part the engine played then (gate only).
+
+**Cost (ot_emu watch-pc instruction-count timestamps):**
+| | before | after |
+|---|---|---|
+| idle pass | 525 | **54** (min = median, 738 standalone / 759 V1.8BC passes timed) |
+| full pass | 525 (every pass) | 506-603 in bp_net + 5-7 for the checks before it |
+| worst pass timed | ~91,000 (an interrupt inside) | 8,500 (the repairing pass: ot_assign x2 copies, the republish, the toast; or an interrupt) |
+| a second at 60 passes | 31,500 | ~3,700 (59 idle + 1 full) |
+
+**Gates (out/bp1pc/):** `verify_one_per_core.py` ALL GOOD on both images with two new scenarios: two BLKPYRAMD written
+into Part 2 (not active) and pattern 1 (-> Part 2) cued while running -> repaired at the cue (why 8) while Part 1 still
+played; the same with no cue -> repaired by the periodic pass (why 16), Part 1 playing. Every earlier scenario as
+before. `kyoti_bc_check_onepercore.py` ALL GOOD; Clyps UI ABCDY PASS (50); BP verify, MUTE matrix, SC levels (0.00 dB,
+10 scenarios) as before (verify: only the pre-existing core-1 DARK REV line, and PLATE on V1.8BC); DJ REF-LOCK c1 / RS1 n1:
+every recorded field identical to the passing V1.8BC run; every other FINAL rebuilds to its pin without the opt-in
+(KYOTI V1.8 / V1.8C / CLYPS and the ten feature images: 13 of 13).
+
+**Images (WIP, NOT flashed):** standalone unit mainos `62ac6e44…`; feature image `140C_BP1PC` mainos `dfde2b50…`, syx
+`0e10e65a…`, .bin `c97ff3a3…`; KYOTI V1.8BC mainos `b3df2058…`, syx `48d10402…`, .bin `87e40e6d…`.
+**Not verified:** hardware (the fast path's misses would show only as a late repair: within a second at worst); the
+real UI message rate on the unit (the amortised figure assumes the 60 Hz tick alone).

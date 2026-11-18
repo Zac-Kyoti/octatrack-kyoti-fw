@@ -320,6 +320,9 @@ quick check for each:
     LOAD PROJECT the lower-numbered track of the core keeps BLKPYRAMD, the other is Flex with its old Flex
     values, the toast once, the Part marked edited. Part / pattern changes between Parts with BLKPYRAMD on
     different tracks of the same core: nothing refused, no toast.
+  - Idle cost (2026-11-18 rebuild): with a BLKPYRAMD on each core playing and the UI idle, nothing sounds or
+    reacts differently from `140C_BP303`; turning encoders and switching pages stays as responsive. The net still
+    acts within about a second when nothing else wakes it (the cases above all show the toast at once).
 - **VARISPEED** — a FLEX loop whose ATTR TEMPO matches it, TSTR on `VARI` (SRC SETUP, the
   fifth position): PTCH reads `QUAN`. Change the project tempo: the loop speeds up and slows
   down with its pitch and stays in time. QUAN `2/1` plays it an octave up at double speed.

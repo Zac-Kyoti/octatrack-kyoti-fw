@@ -175,7 +175,10 @@ are lowercase-hyphen, because octabam requires a module's name to equal its fold
   reload, card) are refused whole with `ONE 303 PER CORE!` when they would put a second BLKPYRAMD on a core; a
   UI-task net (the loop tail 0x40062d1c; Clyps' cl_uitail calls it in V1.8BC, SUPERSEDE) repairs whatever else
   gets there (a load, an undo, a stale signature revived by a machine-byte writer): the previous holder, else the
-  lowest track, keeps it, the others go back to Flex with their pre-303 values, the toast once. The standalone
+  lowest track, keeps it, the others go back to Flex with their pre-303 values, the toast once. The net's idle pass is
+  an assembly fast path (54 instructions, was 525): a full scan only on a change of the active Part's machine /
+  signature bytes, the bank, the UI or engine Part, the playing or pending pattern, a flag (load, paste, Clyps
+  load), or once every 60 passes (2026-11-18). The standalone
   BLACKPYRAMIDS_303 unit + feature image (`KYOTI_ALLOW_WIP=1 KYOTI_VERSTR=140C_BP1PC python3
   tools/build_blackpyramids_303.py`) are WIP again until the author flashes and promotes them; KYOTI V1.8BC
   rebuilt. Gates `tools/ot303/verify_one_per_core.py` (both images), `tools/kyoti_bc_check_onepercore.py`
