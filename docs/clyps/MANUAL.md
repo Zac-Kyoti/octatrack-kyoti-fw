@@ -179,7 +179,7 @@ Every load is one of four kinds, set apart by where the material comes from:
 
 | Kind | Gesture | Brings | Lands |
 |---|---|---|---|
-| **Slot load** | trig, or [YES] | the slot's sequence (SEQ), plus its sound with [FUNC] (FULL) | cued; legato with Direct Jump Kyoti |
+| **Slot load** | trig, or [YES] | the slot's track sequence (SEQ), plus its sound with [FUNC] (FULL) | cued; legato with Direct Jump Kyoti |
 | **Original** | the active pattern's trig | the track as originally loaded (SEQ; FULL with [FUNC]) | legato |
 | | [PTN] + [BANK] + [YES] | the whole pattern and its Part as originally loaded | legato, all tracks together |
 | **Temp reload** | hold TRACK, press [NO] | the track as you temp-saved it, sequence and sound | legato |
