@@ -150,7 +150,8 @@ highlighted, changed (x), its sequence loaded from A05. (4) Slot 3, named BASS1,
   - **box**: the slot the active track's sequence was loaded from. There's no box when the track plays its own
     pattern's sequence; the highlight stands for it;
   - **arrows**: your aim (§6). Arrows on a cued slot blink until it lands;
-  - **x**: that slot's sequence differs from its original. Only the sequence counts, never the sound.
+  - **x**: that slot's sequence differs from its original (edited). An "x" only indicates the sequence is
+    different; editing its Part does not create an edit "x".
 - **Flashes:** a loaded slot flashes briefly. An ORIG flashes the highlight, and ORIG PTN+PRT flashes the header.
 
 ### The grid
