@@ -95,6 +95,10 @@ KYOTI = kyoti_place.active()
 DRAM_AT = kyoti_place.at("patch_clyps_dram", dram.ARENA_BASE) if KYOTI else dram.ARENA_BASE
 DJ_SYMS = {"DJ_LAND": "dj_land", "DJ_TOGGLE": "dj_toggle", "DJ_STATE": "dj_state", "DJ_MODE": "dj_mode",
            "DJ_SELFVEC": "dj_selfvec"}
+# KYOTI V1.8BC (build_kyoti.py --clyps-bp) only: BLACKPYRAMIDS_303's one-per-core question for FULL loads and its
+# UI-tail net (Clyps owns the tail site there and calls it first; SUPERSEDE). Unset everywhere else: the source
+# assembles byte for byte as without them.
+BP_SYMS = {"BP_CLASH": "bp_refuse_load", "BP_UITAIL": "bp_uitail"}
 FREE_END = 0x400d7c3c
 DETOURS = [  # (site, symbol, stock bytes, length[, opcode: jmp unless given])
     (0x4005a044, "cl_ptn", "202f00087201", 6),
@@ -165,7 +169,7 @@ def assemble():
     defs = ["--defsym", f"{VARIANT}=1"] if VARIANT else []
     if KYOTI:
         defs += ["--defsym", "CLYPS_ALLDRAM=1"]
-        for sym, key in DJ_SYMS.items():            # DIRECT JUMP's entries, when it is in the image
+        for sym, key in {**DJ_SYMS, **BP_SYMS}.items():   # DIRECT JUMP's / BLACKPYRAMIDS_303's entries, when in the image
             v = kyoti_place.at(key, None)
             if v is not None:
                 defs += ["--defsym", f"{sym}=0x{int(v):x}"]
@@ -241,7 +245,8 @@ def main():
         OUT.write_bytes(bytes(img))
         (ROOT / "out/clyps_syms.txt").write_text("".join(f"{k} 0x{v:08x}\n" for k, v in sorted(syms.items())))
         print(f"  KYOTI: all DRAM, {len(dblob):,} B linked at 0x{DRAM_AT:08x} + {bss:,} B buffers; "
-              f"DIRECT JUMP: " + (", ".join(f"{k} 0x{syms[k]:08x}" for k in DJ_SYMS if k in syms) or "none"))
+              f"DIRECT JUMP: " + (", ".join(f"{k} 0x{syms[k]:08x}" for k in DJ_SYMS if k in syms) or "none")
+              + "; BLACKPYRAMIDS_303: " + (", ".join(f"{k} 0x{syms[k]:08x}" for k in BP_SYMS if k in syms) or "none"))
         return
     append, rep = dram.build(dblob, (OUT.parent / "_dram") if VARIANT else ROOT / "out/_dram_clyps", img, bss=bss)
     print(f"  DRAM: {rep['raw']:,} B linked at 0x{rep['base']:08x} + {bss:,} B buffers "

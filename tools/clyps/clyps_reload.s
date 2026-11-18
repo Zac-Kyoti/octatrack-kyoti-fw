@@ -911,12 +911,38 @@ cl_rqarm:
     move.b  rq_pat,%d0
     cmp.b   ACT_PAT,%d0
     bne.w   qa_out                      | no longer the pattern you are on (a stock change landed): drop it
+.ifdef BP_CLASH
+    move.l  #0xff,%d0                   | KYOTI V1.8BC: refused whole when a core would hold two BLKPYRAMD
+    move.l  #0x10000+(SRC_CARD<<8),%d1  | (cl_bpgate)
+    jsr     cl_bpgate
+    tst.l   %d0
+    bne.b   qa_bpg
+    clr.b   rq_msg                      | refused: no card toast either
+    bra.b   qa_bpp
+qa_bpg:
+.endif
     pea     SRC_CARD
     jsr     cl_togarm
     addq.l  #4,%sp
+.ifdef BP_CLASH
+qa_bpp:
+.endif
     clr.b   rq_ptnr
     bra.w   qa_out
 qa_trk:
+.ifdef BP_CLASH
+    moveq   #0,%d0                      | KYOTI V1.8BC: the FULL ones, refused whole -- every track of the
+    move.w  rq_fullm,%d0                | generation, its sequences too -- when a core would get a second
+    move.l  #0x10000+(SRC_CARD<<8),%d1  | BLKPYRAMD (cl_bpgate)
+    jsr     cl_bpgate
+    tst.l   %d0
+    bne.b   qa_bpok
+    clr.w   rq_seqm
+    clr.w   rq_fullm
+    clr.b   rq_msg                      | refused: no card toast either
+    bra.w   qa_out
+qa_bpok:
+.endif
     move.l  %d2,-(%sp)
     jsr     cl_bbeg
     moveq   #0,%d2
@@ -952,6 +978,23 @@ qa_out:
 cl_rqarm1:
     move.l  %d2,-(%sp)
     move.l  %d0,%d2                     | d2 = t
+.ifdef BP_CLASH
+    tst.l   %d1                         | KYOTI V1.8BC: a FULL one on its own (in cl_rqarm's batch the whole
+    beq.b   q1_bpok                     | generation was asked), refused when its core would get a second
+    tst.b   cl_bat                      | BLKPYRAMD (cl_bpgate)
+    bne.b   q1_bpok
+    move.l  %d1,-(%sp)
+    moveq   #1,%d0
+    lsl.l   %d2,%d0
+    move.l  #0x10000+(SRC_CARD<<8),%d1
+    jsr     cl_bpgate
+    move.l  (%sp)+,%d1
+    tst.l   %d0
+    bne.b   q1_bpok
+    clr.b   rq_msg                      | refused: no card toast either
+    bra.w   q1_out
+q1_bpok:
+.endif
     pea     1                           | now
     move.l  #SRC_CARD<<8,%d0
     tst.l   %d1
