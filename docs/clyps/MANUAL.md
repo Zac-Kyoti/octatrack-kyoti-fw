@@ -273,7 +273,8 @@ These read the project as last saved with SAVE PROJECT or SAVE BANK.
 - **[PTN] + TRACK:** that track's sequence (`TRK SEQ` / `RELOADED FROM PROJ`).
 - **[BANK] + TRACK:** that track's sequence and sound (`TRK FULL` / `RELOADED FROM PROJ`).
 - **[PTN] + [BANK] + trig:** that pattern of the playing bank, with its Part (`PATTERN A05` / `RELOADED FROM PROJ`).
-  The active pattern lands legato, all tracks together; another pattern becomes a pattern change to it.
+  The active pattern lands legato, all tracks together; a different pattern is cued according to stock's
+  CHAIN AFTER settings or lands legato, if Direct Jump Kyoti is on.
 
 Notes:
 - They are available inside Clyps only. The TRACK you press is reloaded, whichever track is active.
