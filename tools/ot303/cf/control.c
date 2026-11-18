@@ -321,7 +321,8 @@ unsigned ot_track_is(unsigned t) {
  *                    load or a bank change: the lowest-numbered), every other one goes back to FLEX with its pre-303
  *                    settings (ot_assign(part, t, 0): FLEX's stash, the knobs parked), the Part marked edited as
  *                    stock's TRACK PASTE does, the current Part's track republished (0x400972fc, as SRC paste), the
- *                    toast. A stale signature is cleared the same way (no toast: nothing was refused).
+ *                    toast. A stale signature is cleared the same way (no toast: nothing was refused). An idle pass
+ *                    is machine.s's fast path (bp_fp below): a full pass only when something can have changed.
  * Every toast here comes from the UI task (a key handler or the loop's tail), never the frame path (CLAUDE.md). */
 #define NOTIFY 0x4005a2b8u          /* stock's toast (text, duration), legal from the UI task */
 #define TOAST_DUR 0x30u
@@ -338,6 +339,45 @@ extern const char ot_reject_name[];
 /* for the firmware checks: toasts shown, loads / pastes refused, net passes, tracks demoted, stale signatures cleared */
 uint32_t bp_toasts = 0, bp_refusals = 0, bp_net_passes = 0, bp_net_demoted = 0, bp_net_stale = 0;
 uint32_t bp_pend = 0;               /* ot_validate_part saw a Part with two on a core or a stale signature (a load) */
+/* The net's fast path (2026-11-17, the author: cheap when idle, every path still covered). machine.s bp_uitail runs
+ * after every UI message and returns at once when nothing the net reads can have changed since its last full pass:
+ * the same bank, no flag, the periodic count not run out, the same UI Part (0x100b14cf) and engine Part (0x80000003),
+ * the same playing / pending pattern (the long at 0x800065bc: PLAY_BANK, ACT_PAT, PEND_BANK; and PEND_PAT
+ * 0x800065c0: a cued pattern change wakes the net BEFORE it lands), and the active Part's eight machine bytes and
+ * the first two signature bytes of each track as they were. Else bp_net: the full scan of all four Parts, as before.
+ * bp_fp is that state, read by machine.s at fixed offsets (BP_FP_* there):
+ *   0 bank  1 count  2 UI Part  3 engine Part  4 pattern long  5 PEND_PAT  6 the active Part
+ *   7-8 its machine bytes as two longs (0x22.. 0x29)  9-12 the signature words, two tracks a long  13 the flag
+ * The flag (bp_wake) is set by every writer that can reach a Part the fingerprint does not watch: a load (the Part
+ * validator), an allowed TRACK PASTE, an allowed Clyps FULL load (KYOTI V1.8BC: bp_refuse_load). Writers of the
+ * active Part (SRC page paste, the file browser's assigns, an undo, the chooser) change its fingerprint. The count
+ * (NET_EVERY passes, about a second at the UI's 60 Hz tick) runs a full pass anyway: a writer nobody knows of, to a
+ * Part that is not active, is caught within it -- and in any case when that Part becomes active (its index or the
+ * pattern changes), before it plays a step. */
+#define NET_EVERY 60u
+uint32_t bp_fp[14] = {0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1};
+#define bp_wake bp_fp[13]
+uint32_t bp_net_full = 0, bp_net_why = 0, bp_net_fixpart = 0xff;   /* full passes; why the repairing ones ran; and
+                                                       the engine Part when the last one repaired (the gate's check) */
+static void fp_take(uint32_t bank) {
+    unsigned cur = U8(PART_IDX);
+    const volatile uint16_t *w = (const volatile uint16_t *)(uintptr_t)(bank + PART_OFF + (cur & 3u) * PART_STRIDE);
+    bp_fp[0] = bank; bp_fp[1] = NET_EVERY; bp_fp[2] = cur; bp_fp[3] = U8(0x80000003u);
+    bp_fp[4] = U32(0x800065bcu); bp_fp[5] = U8(0x800065c0u); bp_fp[6] = (uint32_t)(uintptr_t)w;
+    bp_fp[7] = (uint32_t)w[0x22 / 2] << 16 | w[0x24 / 2];
+    bp_fp[8] = (uint32_t)w[0x26 / 2] << 16 | w[0x28 / 2];
+    for (unsigned i = 0; i < 4; ++i) bp_fp[9 + i] = (uint32_t)w[(SIG + 60 * i) / 2] << 16 | w[(SIG + 30 + 60 * i) / 2];
+    bp_wake = 0;
+}
+/* why this pass is not the fast one (the bits of bp_net_why) */
+static unsigned net_cause(uint32_t bank) {
+    if (bp_wake) return 1;
+    if (bank != bp_fp[0]) return 2;
+    if (!bp_fp[1]) return 16;
+    if (U8(PART_IDX) != bp_fp[2] || U8(0x80000003u) != bp_fp[3]) return 4;
+    if (U32(0x800065bcu) != bp_fp[4] || U8(0x800065c0u) != bp_fp[5]) return 8;
+    return 32;                                           /* the active Part's fingerprint */
+}
 static void bp_toast(void) {
     ++bp_toasts;
     ((void (*)(const char *, unsigned))NOTIFY)(ot_reject_name, TOAST_DUR);
@@ -353,6 +393,7 @@ static unsigned lowest(unsigned m) { unsigned t = 0; while (t < 7 && !(m >> t & 
  * track). 0 = refused: the clipboard's track is a BLKPYRAMD and another track on the target's core in the pattern's
  * Part is one (the toast here). The track keeps what it had. */
 unsigned ot_paste_ok(const volatile uint8_t *clip, unsigned pattern, unsigned t) {
+    bp_wake = 1;                                         /* a paste writes a Part: the net's next pass is a full one */
     if (U32(CLIP_KIND) != 4 || t >= 8 || pattern >= 16) return 1;
     const volatile uint8_t *s = clip + 0x91a;            /* FX1, FX2, the levels (2), the machine, page 1 */
     if (!(s[4] == 1 && s[5 + 18] == 'O' && s[5 + 19] == 'T' && s[5 + 20] == 1)) return 1;
@@ -377,7 +418,7 @@ unsigned bp_refuse_load(const volatile uint8_t *dst, const uint32_t *src, unsign
             if (src[t] && (mask >> t & 1u)) inc |= 1u << t;
         }
     }
-    if (!((inc & 0x0fu) && two(fin & 0x0fu)) && !((inc & 0xf0u) && two(fin & 0xf0u))) return 0;
+    if (!((inc & 0x0fu) && two(fin & 0x0fu)) && !((inc & 0xf0u) && two(fin & 0xf0u))) { bp_wake = 1; return 0; }
     ++bp_refusals;
     bp_toast();
     return 1;
@@ -385,10 +426,11 @@ unsigned bp_refuse_load(const volatile uint8_t *dst, const uint32_t *src, unsign
 /* the net's state: the track (1-8) that alone held each core of each Part at the last pass (0: none), for this bank */
 static uint8_t net_hold[4][2] = {{0, 0}, {0, 0}, {0, 0}, {0, 0}};
 static uint32_t net_bank = 0, net_sig = 0;
-void bp_net(void) {
+void bp_net(void) {                                     /* machine.s bp_uitail's slow path: a full pass */
     uint32_t bank = U32(BANK);
     if (!bank) return;                                   /* no bank yet (early boot) */
-    ++bp_net_passes;
+    ++bp_net_passes; ++bp_net_full;
+    unsigned why = net_cause(bank);
     uint8_t sgn[4], stl[4];
     unsigned work = 0;
     uint32_t sig = bank;
@@ -409,7 +451,8 @@ void bp_net(void) {
         net_bank = bank;
     }
     if (bp_pend) {                                       /* a load: act on a state seen twice in a row (the load may */
-        if (sig != net_sig) { net_sig = sig; return; }  /* still be writing), keeping the lowest-numbered */
+        if (sig != net_sig) { net_sig = sig; bp_wake = 1; return; }   /* still be writing), keeping the lowest-numbered;
+                                                       the next pass is a full one again */
         bp_pend = 0;
         for (unsigned p = 0; p < 4; ++p) net_hold[p][0] = net_hold[p][1] = 0;
     }
@@ -442,12 +485,14 @@ void bp_net(void) {
         }
         U32(RDRAW) = 1;
         if (demoted) bp_toast();
+        bp_net_why |= why; bp_net_fixpart = U8(0x80000003u);
     }
     for (unsigned p = 0; p < 4; ++p)                     /* who holds each core now */
         for (unsigned c = 0; c < 2; ++c) {
             unsigned m = sgn[p] & (c ? 0x0fu : 0xf0u);
             net_hold[p][c] = (uint8_t)(m && !two(m) ? lowest(m) + 1 : 0);
         }
+    fp_take(bank);                                       /* the state the fast path compares against */
 }
 /* The stock validator sees FLEX defaults for every OT-303 track; the twelve bytes come back after.
  * Every other Part byte is checked by stock's real validator (machine.s skips our own detour). A Part with two
@@ -457,6 +502,7 @@ extern int ot_stock_validate(void *part);
 int ot_validate_part(uint8_t *part) {
     uint8_t saved[8][12]; unsigned mask = 0;
     const volatile uint8_t *stock = (const volatile uint8_t *)0x400d320cu;
+    bp_wake = 1;                                         /* a load: the net's next pass is a full one */
     for (unsigned t = 0; t < 8; ++t)
         if (has_sig(part, t) && part[0x22 + t] != 1) bp_pend = 1;
     for (unsigned t = 0; t < 8; ++t) if (signed_track(part, t)) {

@@ -569,15 +569,72 @@ ot_paste_hook:
         jmp     (0x4002b990).l          | its beq follows on these flags
 
 | The UI task's message loop, common tail 0x40062d1c (`tst.l 0x46c7c72c`, then stock's beq.w on its flags): the
-| standalone image's jsr from there; KYOTI V1.8BC's Clyps owns the site (cl_uitail) and calls this first. The net
-| (control.c bp_net), then the displaced test: rts keeps its flags for the beq.w. d0/d1/a0/a1 are free here
-| (VARISPEED_EMUS's vg_tick uses the same site so), kept anyway.
+| standalone image's jsr from there; KYOTI V1.8BC's Clyps owns the site (cl_uitail) and calls this first. The fast
+| path (control.c bp_fp): back at once -- the displaced test, rts keeps its flags for the beq.w -- when the bank,
+| the flag, the periodic count, the UI and engine Parts, the playing / pending pattern and the active Part's
+| machine bytes and signature words are as the net's last full pass left them; else that full pass (bp_net).
+| About 55 instructions idle. d0/d1/a0/a1 are free here (VARISPEED_EMUS's vg_tick uses the same site so; Clyps
+| calls it at cl_uitail's entry): used without saving.
+        .equ    BP_FP_CNT, 4
+        .equ    BP_FP_WAKE, 52
 bp_uitail:
-        lea     -16(%sp),%sp
-        movem.l %d0-%d1/%a0-%a1,(%sp)
+        lea     (bp_fp).l,%a1
+        move.l  (BANK_PTR).l,%d0
+        beq.w   bp_ut_idle                      | no bank yet
+        cmp.l   (%a1),%d0
+        bne.w   bp_ut_full                      | another bank
+        tst.l   BP_FP_WAKE(%a1)
+        bne.w   bp_ut_full                      | a load, a paste, a Clyps load
+        subq.l  #1,BP_FP_CNT(%a1)
+        beq.w   bp_ut_full                      | the periodic full pass
+        mvz.b   (0x100b14cf).l,%d0
+        cmp.l   8(%a1),%d0
+        bne.w   bp_ut_full                      | the UI's Part
+        mvz.b   (0x80000003).l,%d0
+        cmp.l   12(%a1),%d0
+        bne.w   bp_ut_full                      | the engine's Part
+        move.l  (0x800065bc).l,%d0
+        cmp.l   16(%a1),%d0
+        bne.w   bp_ut_full                      | PLAY_BANK, ACT_PAT, PEND_BANK
+        mvz.b   (0x800065c0).l,%d0
+        cmp.l   20(%a1),%d0
+        bne.w   bp_ut_full                      | PEND_PAT: a cued change, before it lands
+        movea.l 24(%a1),%a0             | the active Part: its machine bytes, two longs
+        move.w  0x22(%a0),%d0
+        swap    %d0
+        move.w  0x24(%a0),%d0
+        cmp.l   28(%a1),%d0
+        bne.w   bp_ut_full
+        move.w  0x26(%a0),%d0
+        swap    %d0
+        move.w  0x28(%a0),%d0
+        cmp.l   32(%a1),%d0
+        bne.w   bp_ut_full
+        move.w  60(%a0),%d0             | ... the signature words ('O','T'), two tracks a long
+        swap    %d0
+        move.w  90(%a0),%d0
+        cmp.l   36(%a1),%d0
+        bne.w   bp_ut_full
+        move.w  120(%a0),%d0
+        swap    %d0
+        move.w  150(%a0),%d0
+        cmp.l   40(%a1),%d0
+        bne.w   bp_ut_full
+        move.w  180(%a0),%d0
+        swap    %d0
+        move.w  210(%a0),%d0
+        cmp.l   44(%a1),%d0
+        bne.w   bp_ut_full
+        move.w  240(%a0),%d0
+        swap    %d0
+        move.w  270(%a0),%d0
+        cmp.l   48(%a1),%d0
+        bne.w   bp_ut_full
+bp_ut_idle:
+        tst.l   (0x46c7c72c).l
+        rts
+bp_ut_full:
         jsr     bp_net
-        movem.l (%sp),%d0-%d1/%a0-%a1
-        lea     16(%sp),%sp
         tst.l   (0x46c7c72c).l
         rts
 

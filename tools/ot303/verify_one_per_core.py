@@ -23,8 +23,15 @@ copies (SRC page paste 0x40027e4c and the file browser's 0x40093e9c write only t
              (it held the core at the previous pass), T1 goes back to FLEX, ONE toast
   partswitch Part 1's T2 and Part 2's T3 BLKPYRAMD (the same core, different Parts); pattern 1 linked to Part 2 and
              cued, then pattern 0 again: two Part switches -- nothing refused, nothing demoted, no toast
-  cost       watch-pc on bp_net's entry and the instruction after its call: instructions per pass (the minimum = an
-             idle pass), from the instruction-count timestamps
+  inactive_cue  T2 and T3 BLKPYRAMD written into Part 2 (NOT the active Part: the fast path's fingerprint does not see
+             it), pattern 1 linked to Part 2 and cued at once: the net repairs Part 2 when the cue is made (the pending
+             pattern woke it: bp_net_why bit 8), while Part 1 still plays -- before Part 2 sounds (the switch lands
+             ~7,000 frames later); T2 kept, one toast. (Both made at frame 50, transport running: a cue while stopped
+             switches at once, and the Part-change wake (bit 4) catches it then, before the transport starts.)
+  inactive_periodic  the same with no cue: the periodic full pass repairs it (why bit 16), Part 1 playing throughout
+  cost       watch-pc on bp_uitail's entry, its fast exit (bp_ut_idle) and its full pass (bp_ut_full and after the
+             call): instructions per idle pass and per full pass, from the instruction-count timestamps; the amortised
+             cost a second at the UI's 60 Hz tick with a full pass every NET_EVERY = 60
 
     python3 tools/ot303/verify_one_per_core.py [--image out/BLACKPYRAMIDS_303/mainos_blackpyramids_303.bin]
         [--elf out/ot303/cf/ot303_runtime.elf] [--only a,b] [--control]   (--control: the scenarios that need no new
@@ -40,7 +47,8 @@ import verify_ot303 as V  # noqa: E402
 PART, SHADOW, STRIDE = V.PART, V.SHADOW, 0x18b2
 BANK0 = V.BANK0
 COPY, UNDO_SAVE, PASTE, VALIDATE, CUE, NOTIFY = 0x4002993c, 0x400298d0, 0x4002b988, 0x40002318, 0x400a1030, 0x4005a2b8
-CTRS = ["net_sig", "net_bank", "hold0", "hold1", "bp_pend", "stale", "demoted", "passes", "refusals", "toasts"]
+CTRS = {"bp_pend": "bp_pend", "stale": "bp_net_stale", "demoted": "bp_net_demoted", "passes": "bp_net_passes",
+        "refusals": "bp_refusals", "toasts": "bp_toasts", "full": "bp_net_full", "why": "bp_net_why", "fixpart": "bp_net_fixpart"}
 
 
 def mk(S, t, p=0):
@@ -62,6 +70,9 @@ def scenarios(S):
         'stale': (900, [('-', ['dump:pre'] + mk(S, 1)), (100, machine(1, 0)), (300, mk(S, 0)), (500, machine(1, 1))]),
         'load_two': (900, [('-', ['dump:pre'] + mk(S, 1) + mk(S, 2) + [f'call:{VALIDATE:#x},{PART:#x}'])]),
         'held': (900, [('-', ['dump:pre'] + mk(S, 1)), (300, mk(S, 0))]),
+        'inactive_cue': (2000, [('-', [f'poke:{BANK0 + 0x8ed8 + 0x8e57:#x}=1']),
+                                (50, ['dump:pre'] + mk(S, 1, 1) + mk(S, 2, 1) + [f'call:{CUE:#x},0,1'])]),
+        'inactive_periodic': (2000, [('-', ['dump:pre'] + mk(S, 1, 1) + mk(S, 2, 1))]),
         'partswitch': (24000, [('-', mk(S, 1, 0) + mk(S, 2, 1) + [f'poke:{BANK0 + 0x8ed8 + 0x8e57:#x}=1']),
                                (50, [f'call:{CUE:#x},0,1']), (9000, [f'call:{CUE:#x},0,0'])]),
     }
@@ -69,7 +80,6 @@ def scenarios(S):
 
 def run(image, S, name, frames, steps, watch=None, dumps_at=()):
     with tempfile.TemporaryDirectory() as td:
-        lo = S['net_sig']
         args = ['--sequencer', '--internal-clock', '--frames', str(frames), '--main-level', '64']
         for fr, acts in steps:
             pk = []
@@ -89,12 +99,13 @@ def run(image, S, name, frames, steps, watch=None, dumps_at=()):
             args += ['--step', f'{fr}:dump:0x80000003,1={td}/part_{fr}.bin']
         args += ['--watch-pc', watch or f'{NOTIFY:#x}']
         args += ['--mem-dump', f'{PART:#x},{2 * STRIDE}={td}/post.bin;{SHADOW:#x},{2 * STRIDE}={td}/shadow.bin;'
-                 f'{lo:#x},{4 * len(CTRS)}={td}/ctr.bin;0x460c80f0,8={td}/undo.bin;{BANK0 + 0x95048:#x},1={td}/edited.bin;'
+                 + ''.join(f'{S[sym]:#x},4={td}/ctr_{k}.bin;' for k, sym in CTRS.items()) +
+                 f'0x460c80f0,8={td}/undo.bin;{BANK0 + 0x95048:#x},1={td}/edited.bin;'
                  f'0x80000003,1={td}/part.bin']
         p = V.emu(image, args, td)
         got = {f[:-4]: open(os.path.join(td, f), 'rb').read() for f in os.listdir(td) if f.endswith('.bin')}
     calls = re.findall(r'call\s+: (0x[0-9a-f]+)\(\d+ args\) returned, d0 = (0x[0-9a-f]+|\d+)', p.stdout)
-    hits = re.findall(r'\[\s*(\d+)\] at (0x[0-9a-f]+) .*?\[sp 0x[0-9a-f]+: (0x[0-9a-f]+) (0x[0-9a-f]+)', p.stdout)
+    hits = re.findall(r'\[\s*(\d+)\] at (0x[0-9a-f]+) .*?\[sp 0x[0-9a-f]+: (\S+) (\S+)', p.stdout)
     return p, got, calls, hits
 
 
@@ -127,7 +138,7 @@ def main(argv):
     with cf.ThreadPoolExecutor(len(jobs)) as ex:
         fut = {}
         for k, (name, fr, st) in jobs.items():
-            w = f'{S["bp_net"]:#x},{S["bp_uitail"] + 14:#x}' if k == 'cost' else None
+            w = f'{S["bp_uitail"]:#x},{S["bp_ut_idle"]:#x},{S["bp_ut_full"]:#x},{S["bp_ut_full"] + 6:#x}' if k == 'cost' else None
             fut[k] = ex.submit(run, a.image, S, name, fr, st, w, (8500, 23500) if k == 'partswitch' else ())
         res = {k: f.result() for k, f in fut.items()}
     ok = True
@@ -139,14 +150,14 @@ def main(argv):
     for k, (p, got, calls, hits) in res.items():
         print(f'{k}: rc {p.returncode}')
         check(p.returncode == 0 and 'ILLEGAL' not in p.stdout, 'the run ends cleanly')
-        c = dict(zip(CTRS, struct.unpack(f'>{len(CTRS)}I', got.get('ctr', bytes(4 * len(CTRS))))))
+        c = {k: int.from_bytes(got.get(f'ctr_{k}', bytes(4)), 'big') for k in CTRS}
         post, pre = got.get('post', b''), got.get('pre', b'')
-        ours = [h for h in hits if int(h[3], 16) == reject]
+        ours = [h for h in hits if int(h[3], 0) == reject]
         if k != 'cost':
-            print(f'      counters {{passes {c["passes"]}, refusals {c["refusals"]}, toasts {c["toasts"]}, demoted {c["demoted"]}, '
-                  f'stale {c["stale"]}, pend {c["bp_pend"]}}}; NOTIFY calls {len(hits)} (with our text {len(ours)}); '
-                  f'calls {calls}')
-            check(c['passes'] > 10, f'the net ran on the UI task ({c["passes"]} passes)')
+            print(f'      counters {{full passes {c["full"]}, refusals {c["refusals"]}, toasts {c["toasts"]}, demoted {c["demoted"]}, '
+                  f'stale {c["stale"]}, pend {c["bp_pend"]}, why 0x{c["why"]:x}, fixpart {c["fixpart"]}}}; NOTIFY calls {len(hits)} '
+                  f'(with our text {len(ours)}); calls {calls}')
+            check(c['full'] >= 3, f'the net ran on the UI task ({c["full"]} full passes)')
         if k == 'paste_t3':
             check(calls and calls[-1][0] == f'{PASTE:#x}' and int(calls[-1][1], 0) == 0, 'the paste wrapper returned 0 (no PASTE TRACK toast)')
             check(pre[:STRIDE] == post[:STRIDE], 'the whole Part is as before the paste (T3 kept what it had)')
@@ -173,6 +184,14 @@ def main(argv):
             check(got.get('edited', b'\0')[0] & 1, f'Part 1 marked edited (0x{got.get("edited", b"")[:1].hex()})')
             check(c['demoted'] == 1 and c['toasts'] == 1 and len(ours) == 1 and c['bp_pend'] == 0,
                   'one track demoted, exactly one toast, nothing left pending')
+        elif k in ('inactive_cue', 'inactive_periodic'):
+            pre1, post1 = pre[STRIDE:], post[STRIDE:]
+            check(sig(post, 1, 1) and not sig(post, 2, 1), 'Part 2: T2 kept, T3 no longer a BLKPYRAMD')
+            check(post1[0x22 + 2] == 1 and flexrow(post, 2, 1) == flexrow(pre, 2, 1), 'Part 2 T3: FLEX with its pre-303 values')
+            check(c['demoted'] == 1 and c['toasts'] == 1 and len(ours) == 1, 'one track demoted, one toast')
+            bit = 8 if k == 'inactive_cue' else 16
+            check(c['why'] == bit, f'repaired by the {"pending pattern" if bit == 8 else "periodic full pass"} (why 0x{c["why"]:x})')
+            check(c['fixpart'] == 0, f'... while Part 1 still played (the engine Part at the repair: {c["fixpart"]})')
         elif k == 'partswitch':
             seen = {fr: got.get(f'part_{fr}', b'?')[0] for fr in (8500, 23500)}
             print(f'      the playing Part (0x80000003) at frame 8500 / 23500: {seen} (0 = Part 1, 1 = Part 2)')
@@ -180,12 +199,24 @@ def main(argv):
             check(sig(post, 1, 0) and sig(post, 2, 1), 'Part 1 T2 and Part 2 T3 still BLKPYRAMD')
             check(c['refusals'] == 0 and c['toasts'] == 0 and c['demoted'] == 0 and not ours, 'nothing refused, nothing demoted, no toast')
         elif k == 'cost':
-            ent = [int(h[0]) for h in hits if int(h[1], 16) == S['bp_net']]
-            ret = [int(h[0]) for h in hits if int(h[1], 16) == S['bp_uitail'] + 14]
-            d = sorted(r - e for e, r in zip(ent, ret) if 0 < r - e < 100000)
-            print(f'      bp_net: {len(d)} passes timed; instructions per pass min {d[0] if d else None}, median '
-                  f'{d[len(d) // 2] if d else None}, max {d[-1] if d else None} (the max: the repair pass, or an interrupt inside)')
-            check(d and d[0] < 1000, 'an idle pass under 1,000 instructions')
+            ev = sorted((int(h[0]), int(h[1], 16)) for h in hits)
+            idle, full = [], []
+            for (t0, a0), (t1, a1) in zip(ev, ev[1:]):
+                if a0 == S['bp_uitail'] and a1 == S['bp_ut_idle']:
+                    idle.append(t1 - t0 + 2)                     # + the exit's tst.l and rts
+                if a0 == S['bp_uitail'] and a1 == S['bp_ut_full']:
+                    full.append(t1 - t0)
+            fulls = [t1 - t0 + 2 for (t0, a0), (t1, a1) in zip(ev, ev[1:]) if a0 == S['bp_ut_full'] and a1 == S['bp_ut_full'] + 6]
+            st = lambda v: (min(v), sorted(v)[len(v) // 2], max(v)) if v else (None, None, None)
+            ia = st(idle)
+            print(f'      idle passes timed {len(idle)}: instructions min / median / max {st(idle)}')
+            print(f'      full passes timed {len(fulls)}: bp_net alone min / median / max {st(fulls)}; the fast checks before it '
+                  f'{st(full)}  (a max: an interrupt inside, or the repair pass)')
+            if idle and fulls and full:
+                per_s = 59 * ia[1] + min(full) + min(fulls)
+                print(f'      amortised at 60 passes a second, one full every 60: {per_s} instructions a second '
+                      f'(was 60 x 525 = 31,500)')
+            check(idle and ia[1] < 100, 'an idle pass under 100 instructions (median)')
     print('ALL GOOD' if ok else 'FAILED')
     return 0 if ok else 1
 
