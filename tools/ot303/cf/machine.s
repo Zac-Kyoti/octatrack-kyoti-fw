@@ -17,6 +17,7 @@
         .global ot_live_req_hook, ot_live_midi_hook, ot_live_chrom_hook, ot_live_rel_hook, ot_oneshot_hook
         .global ot_rec_chrom_hook, ot_rec_midi_hook, ot_idle_hook
         .global ot_plock_hook
+        .global ot_paste_hook, bp_uitail, ot_reject_name
         .global ot_led_hook, ot_slices_hook, ot_slots_hook, ot_oct_hook, ot_chrom_key_hook, ot_chrom_limit_hook, ot_chrom_img_hook, ot_page_key_hook
 
         .equ    OT_ROW, 5
@@ -544,6 +545,41 @@ ot_glyph:
         jmp     (0x4004013c).l
 1:      pea     ot_glyph3
         jmp     (0x4004013c).l
+
+| One BLKPYRAMD per DSP core (control.c, "One BLKPYRAMD per DSP core, on every path"). TRACK PASTE: stock's paste
+| wrapper 0x4002b988(pattern, track) -- the paste key's handler calls it (0x4005eb50) after saving the undo copy;
+| it pastes the clipboard 0x460c8122 with 0x4002b654 when the clipboard holds an audio track -- asks
+| control.c ot_paste_ok first. Refused: nothing pasted (the toast is ot_paste_ok's), the undo state cleared as
+| stock's own undo leaves it (0x460c80f4 / 0x460c80f0), 0 returned: the handler then shows no PASTE TRACK.
+| (Its entry, not 0x4002b654's: VARISPEED owns that one, and stock's undo calls it too -- an undo that brings a
+| second one back is the net's.) Replays the 8 displaced bytes.
+ot_paste_hook:
+        move.l  8(%sp),-(%sp)           | the track
+        move.l  8(%sp),-(%sp)           | the pattern
+        pea     (0x460c8122).l          | the clipboard
+        jsr     ot_paste_ok
+        lea     12(%sp),%sp
+        tst.l   %d0
+        bne.s   1f
+        clr.l   (0x460c80f4).l
+        clr.l   (0x460c80f0).l
+        rts                             | d0 = 0: nothing pasted
+1:      moveq   #4,%d0
+        cmp.l   (0x460d0ffa).l,%d0
+        jmp     (0x4002b990).l          | its beq follows on these flags
+
+| The UI task's message loop, common tail 0x40062d1c (`tst.l 0x46c7c72c`, then stock's beq.w on its flags): the
+| standalone image's jsr from there; KYOTI V1.8BC's Clyps owns the site (cl_uitail) and calls this first. The net
+| (control.c bp_net), then the displaced test: rts keeps its flags for the beq.w. d0/d1/a0/a1 are free here
+| (VARISPEED_EMUS's vg_tick uses the same site so), kept anyway.
+bp_uitail:
+        lea     -16(%sp),%sp
+        movem.l %d0-%d1/%a0-%a1,(%sp)
+        jsr     bp_net
+        movem.l (%sp),%d0-%d1/%a0-%a1
+        lea     16(%sp),%sp
+        tst.l   (0x46c7c72c).l
+        rts
 
 ot_name:                                | MT17: the machine's display name (BlackPyramids_303; 9 characters fit
         .asciz  "BLKPYRAMD"             | the chooser, SRC SETUP, the track box and PLAYBACK>name, ot_emu)

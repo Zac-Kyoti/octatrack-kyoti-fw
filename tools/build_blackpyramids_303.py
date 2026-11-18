@@ -24,9 +24,10 @@ Stock 1.40C plus exactly this:
     (A P:$39c / B P:$1a2) -> jsr the host; SPRING's dispatch -> the passthrough stub.
   * ColdFire: SPRING REV out of the FX choosers; tools/ot303/cf/{machine.s,control.c} as a DRAM runtime
     (the arena's bottom 16 pages; base literal at 24 sites + 4 geometry words; the boot site's jsr ->
-    the appended loader); 43 detours (ANALOG BD's seams, the glyph, the step handler's entry and its
-    note write, the machine window's focus, the SETUP preview's value read, three SLIC reads), 7 pokes
-    and the FLEX renderer slot, each asserted against stock.
+    the appended loader); 45 detours (ANALOG BD's seams, the glyph, the step handler's entry and its
+    note write, the machine window's focus, the SETUP preview's value read, three SLIC reads; since
+    2026-11-17 TRACK PASTE's wrapper and the UI loop's tail: one BLKPYRAMD per DSP core on every path,
+    control.c), 7 pokes and the FLEX renderer slot, each asserted against stock.
 
 Usage:   python3 tools/build_blackpyramids_303.py      (WIP: KYOTI_ALLOW_WIP=1)
 Outputs: out/mainos_blackpyramids_303.bin, out/OCTATRACK_OS1.40C_BLACKPYRAMIDS_303.syx,
@@ -129,6 +130,9 @@ DETOURS = (
     (0x40044968, H("7201b2b9460d16fc6616"), "ot_chrom_img_hook", "jmp", 10),  # MT23: the full keyboard image
     (0x4004FDE4, H("4ab9460d16fc660001aa"), "ot_page_key_hook", "jmp", 10),  # the PAGE key: a 17th note on every octave
     (0x40050CE2, H("72ffb280660000a6"), "ot_plock_hook", "jmp", 8),     # MT31: held trigs' PTCH locks
+    # one BLKPYRAMD per DSP core on every path (2026-11-17): TRACK PASTE refused, the UI task's net
+    (0x4002B988, H("7004b0b9460d0ffa"), "ot_paste_hook", "jmp", 8),      # the TRACK PASTE wrapper's entry
+    (0x40062D1C, H("4ab946c7c72c"), "bp_uitail", "jsr", 6),             # the UI loop's tail (V1.8BC: Clyps' site, SUPERSEDE)
 )
 POKES = (
     (0x40079248, H("48780005"), H("48780006"), "machine chooser has six rows, OT-303 the last"),

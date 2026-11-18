@@ -309,12 +309,156 @@ const uint32_t ot_glyph3[5] = {3, 4, 1, (uint32_t)(uintptr_t)ot_glyph3_ink, (uin
 unsigned ot_track_is(unsigned t) {
     return signed_track(part_base(), t);
 }
+/* ---- One BLKPYRAMD per DSP core, on every path (the author, 2026-11-17) ----------------------------------
+ * The chooser and SRC SETUP refuse a second one on a core (ot_admit_track, machine.s's commits). The other ways in:
+ *   TRACK PASTE      stock's paste wrapper 0x4002b988 (machine.s ot_paste_hook): refused whole (ot_paste_ok).
+ *   Clyps' FULL loads (KYOTI V1.8BC only: tools/clyps/patch_clyps.s cl_bpgate): refused whole (bp_refuse_load).
+ *   anything else    a project or bank load (ot_validate_part notes it), an undo of a paste, a stock writer that
+ *                    sets only the machine byte under a STALE signature (a signature on a track that is no longer
+ *                    FLEX: SRC page paste 0x40027e4c, the file browser's assigns 0x40093e9c..): the net (bp_net),
+ *                    on the UI task after every UI message. Per core of each of the current bank's four Parts, two
+ *                    or more signed tracks: the one that held the core at the net's previous pass stays (after a
+ *                    load or a bank change: the lowest-numbered), every other one goes back to FLEX with its pre-303
+ *                    settings (ot_assign(part, t, 0): FLEX's stash, the knobs parked), the Part marked edited as
+ *                    stock's TRACK PASTE does, the current Part's track republished (0x400972fc, as SRC paste), the
+ *                    toast. A stale signature is cleared the same way (no toast: nothing was refused).
+ * Every toast here comes from the UI task (a key handler or the loop's tail), never the frame path (CLAUDE.md). */
+#define NOTIFY 0x4005a2b8u          /* stock's toast (text, duration), legal from the UI task */
+#define TOAST_DUR 0x30u
+#define CLIP 0x460c8122u            /* stock's track clipboard: the pattern track (0x91a B), then the Part slice */
+#define CLIP_KIND 0x460d0ffau       /* 4: the clipboard holds an audio track */
+#define PAT_STRIDE 0x8ed8u
+#define EDITED 0x95048u             /* bank + : the Parts' edited bits (a byte); 0x100b145e its other copy */
+#define EDITED2 0x100b145eu
+#define BANK_DIRTY 0x9b332u         /* bank + : a long, 1 = the bank changed; 0x100f8598 its other copy */
+#define BANK_DIRTY2 0x100f8598u
+#define RDRAW 0x46c7c72cu           /* the UI tail redraws the screen when non-zero */
+#define TRK_REFRESH 0x400972fcu     /* (part, track, 1): the track's machine republished (SRC paste, 0x40027fbc) */
+extern const char ot_reject_name[];
+/* for the firmware checks: toasts shown, loads / pastes refused, net passes, tracks demoted, stale signatures cleared */
+uint32_t bp_toasts = 0, bp_refusals = 0, bp_net_passes = 0, bp_net_demoted = 0, bp_net_stale = 0;
+uint32_t bp_pend = 0;               /* ot_validate_part saw a Part with two on a core or a stale signature (a load) */
+static void bp_toast(void) {
+    ++bp_toasts;
+    ((void (*)(const char *, unsigned))NOTIFY)(ot_reject_name, TOAST_DUR);
+}
+static unsigned has_sig(const volatile uint8_t *part, unsigned t) {
+    const volatile uint8_t *s = part + SIG + 30 * t;
+    return s[0] == 'O' && s[1] == 'T' && s[2] == 1;
+}
+static unsigned two(unsigned m) { return (m & (m - 1)) != 0; }
+static unsigned lowest(unsigned m) { unsigned t = 0; while (t < 7 && !(m >> t & 1u)) ++t; return t; }
+/* TRACK PASTE: machine.s ot_paste_hook, at the paste wrapper's entry (0x4002b988(pattern, track), the [FUNC]+[STOP]
+ * handler's: it pastes the clipboard into that track of the pattern and its Part when the clipboard holds an audio
+ * track). 0 = refused: the clipboard's track is a BLKPYRAMD and another track on the target's core in the pattern's
+ * Part is one (the toast here). The track keeps what it had. */
+unsigned ot_paste_ok(const volatile uint8_t *clip, unsigned pattern, unsigned t) {
+    if (U32(CLIP_KIND) != 4 || t >= 8 || pattern >= 16) return 1;
+    const volatile uint8_t *s = clip + 0x91a;            /* FX1, FX2, the levels (2), the machine, page 1 */
+    if (!(s[4] == 1 && s[5 + 18] == 'O' && s[5 + 19] == 'T' && s[5 + 20] == 1)) return 1;
+    uint32_t bank = U32(BANK);
+    const volatile uint8_t *part = (const volatile uint8_t *)(uintptr_t)(bank + PART_OFF
+        + (U8(bank + pattern * PAT_STRIDE + 0x8e57) & 3u) * PART_STRIDE);
+    if (ot_admit_track(part, t)) return 1;
+    ++bp_refusals;
+    bp_toast();
+    return 0;
+}
+/* KYOTI V1.8BC: Clyps' FULL loads (patch_clyps.s cl_bpgate, before anything is loaded or cued). dst = the Part the
+ * loads land in; src[t] = the Part track t's slice will come from (this load's, or a FULL load still cued for t),
+ * 0 = t keeps its own; mask = the tracks of this load. 1 = refused (the toast here): after it a core would hold two
+ * BLKPYRAMD tracks, one of them brought by this load. */
+unsigned bp_refuse_load(const volatile uint8_t *dst, const uint32_t *src, unsigned mask) {
+    unsigned fin = 0, inc = 0;
+    for (unsigned t = 0; t < 8; ++t) {
+        const volatile uint8_t *p = src[t] ? (const volatile uint8_t *)(uintptr_t)src[t] : dst;
+        if (signed_track(p, t)) {
+            fin |= 1u << t;
+            if (src[t] && (mask >> t & 1u)) inc |= 1u << t;
+        }
+    }
+    if (!((inc & 0x0fu) && two(fin & 0x0fu)) && !((inc & 0xf0u) && two(fin & 0xf0u))) return 0;
+    ++bp_refusals;
+    bp_toast();
+    return 1;
+}
+/* the net's state: the track (1-8) that alone held each core of each Part at the last pass (0: none), for this bank */
+static uint8_t net_hold[4][2] = {{0, 0}, {0, 0}, {0, 0}, {0, 0}};
+static uint32_t net_bank = 0, net_sig = 0;
+void bp_net(void) {
+    uint32_t bank = U32(BANK);
+    if (!bank) return;                                   /* no bank yet (early boot) */
+    ++bp_net_passes;
+    uint8_t sgn[4], stl[4];
+    unsigned work = 0;
+    uint32_t sig = bank;
+    for (unsigned p = 0; p < 4; ++p) {                   /* the scan: a byte or two a track */
+        const volatile uint8_t *part = (const volatile uint8_t *)(uintptr_t)(bank + PART_OFF + p * PART_STRIDE);
+        unsigned m = 0, st = 0;
+        for (unsigned t = 0; t < 8; ++t)
+            if (part[SIG + 30 * t] == 'O' && has_sig(part, t)) {
+                if (part[0x22 + t] == 1) m |= 1u << t;
+                else st |= 1u << t;
+            }
+        sgn[p] = (uint8_t)m; stl[p] = (uint8_t)st;
+        work |= st | (two(m & 0x0fu) || two(m & 0xf0u));
+        sig = sig * 33u + (m | st << 8);
+    }
+    if (bank != net_bank) {                              /* another bank: nothing held there yet */
+        for (unsigned p = 0; p < 4; ++p) net_hold[p][0] = net_hold[p][1] = 0;
+        net_bank = bank;
+    }
+    if (bp_pend) {                                       /* a load: act on a state seen twice in a row (the load may */
+        if (sig != net_sig) { net_sig = sig; return; }  /* still be writing), keeping the lowest-numbered */
+        bp_pend = 0;
+        for (unsigned p = 0; p < 4; ++p) net_hold[p][0] = net_hold[p][1] = 0;
+    }
+    net_sig = sig;
+    if (work) {
+        unsigned demoted = 0, cur = U8(PART_IDX) & 3u;
+        for (unsigned p = 0; p < 4; ++p) {
+            volatile uint8_t *part = (volatile uint8_t *)(uintptr_t)(bank + PART_OFF + p * PART_STRIDE);
+            unsigned fixed = 0;
+            for (unsigned c = 0; c < 2; ++c) {
+                unsigned cm = c ? 0x0fu : 0xf0u, m = sgn[p] & cm;   /* c = 1: core 1 (T1-4), c = 0: core 0 (T5-8) */
+                if (!two(m)) continue;
+                unsigned h = net_hold[p][c], keep = h && (m >> (h - 1) & 1u) ? h - 1 : lowest(m);
+                for (unsigned t = 0; t < 8; ++t)
+                    if ((m >> t & 1u) && t != keep) {
+                        ot_assign(part, t, 0);
+                        if (p == cur) ((void (*)(unsigned, unsigned, unsigned))TRK_REFRESH)(p, t, 1);
+                        ++bp_net_demoted; ++demoted; fixed = 1;
+                    }
+                sgn[p] = (uint8_t)((sgn[p] & ~cm) | 1u << keep);
+            }
+            for (unsigned t = 0; t < 8; ++t)
+                if (stl[p] >> t & 1u) { ot_assign(part, t, 0); ++bp_net_stale; fixed = 1; }
+            if (fixed) {                                 /* as stock's TRACK PASTE marks its Part (0x4002b8b6..) */
+                U8(bank + EDITED) |= (uint8_t)(1u << p);
+                U8(EDITED2) |= (uint8_t)(1u << p);
+                U32(bank + BANK_DIRTY) = 1;
+                U32(BANK_DIRTY2) = 1;
+            }
+        }
+        U32(RDRAW) = 1;
+        if (demoted) bp_toast();
+    }
+    for (unsigned p = 0; p < 4; ++p)                     /* who holds each core now */
+        for (unsigned c = 0; c < 2; ++c) {
+            unsigned m = sgn[p] & (c ? 0x0fu : 0xf0u);
+            net_hold[p][c] = (uint8_t)(m && !two(m) ? lowest(m) + 1 : 0);
+        }
+}
 /* The stock validator sees FLEX defaults for every OT-303 track; the twelve bytes come back after.
- * Every other Part byte is checked by stock's real validator (machine.s skips our own detour). */
+ * Every other Part byte is checked by stock's real validator (machine.s skips our own detour). A Part with two
+ * BLKPYRAMD tracks on a core, or a stale signature, is only noted here (bp_pend: this runs inside the load; the net
+ * repairs it on the UI task). */
 extern int ot_stock_validate(void *part);
 int ot_validate_part(uint8_t *part) {
     uint8_t saved[8][12]; unsigned mask = 0;
     const volatile uint8_t *stock = (const volatile uint8_t *)0x400d320cu;
+    for (unsigned t = 0; t < 8; ++t)
+        if (has_sig(part, t) && part[0x22 + t] != 1) bp_pend = 1;
     for (unsigned t = 0; t < 8; ++t) if (signed_track(part, t)) {
         mask |= 1u << t;
         for (unsigned k = 0; k < 12; ++k) {
@@ -322,6 +466,7 @@ int ot_validate_part(uint8_t *part) {
             saved[t][k] = part[at]; part[at] = stock[k];
         }
     }
+    if (two(mask & 0x0fu) || two(mask & 0xf0u)) bp_pend = 1;
     int result = ot_stock_validate(part);
     for (unsigned t = 0; t < 8; ++t) if (mask & (1u << t))
         for (unsigned k = 0; k < 12; ++k) {
