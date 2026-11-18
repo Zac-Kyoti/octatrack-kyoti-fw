@@ -111,6 +111,7 @@ unit that boots; if it doesn't, use §3b.
 |---|---|
 | MUTE_MODES, SIDECHAIN_COMPRESSOR, RELOAD_FROM_PROJECT, QUANTIZE_LIVE_REC_TOGGLE | `140C_KYOTI` |
 | SIDECHAIN_COMPRESSOR light (the earlier version, WIP) | `140C_SCLT` |
+| KYOTI V1.8BC (WIP test image: V1.8C + BLACKPYRAMIDS_303) | `KYOTI1.8BC` |
 | KYOTI V1.7 (the features in one image) | `KYOTI V1.7` |
 | KYOTI V1.6 (the previous one) | `KYOTI V1.6` |
 | KYOTI V1.5 (the previous one) | `KYOTI V1.5` |
@@ -126,6 +127,41 @@ unit that boots; if it doesn't, use §3b.
 
 PERSONALIZE is reset by every flash, so features are off until you re-enable them. A
 quick check for each:
+
+- **KYOTI V1.8BC walk-through** (WIP test image, NOT flashed yet; `out/KYOTI_WIP/KYOTI_V1.8BC/OCTATRACK_OS1.40C_KYOTI_V1.8BC.syx`,
+  built with `KYOTI_ALLOW_WIP=1 python3 tools/build_kyoti.py --clyps-bp`). KYOTI V1.8C plus BLACKPYRAMIDS_303;
+  SPRING REV **and PLATE REV** are given up for the voice and SIDE-CHAIN's DSP code. Run V1.8C's own checks
+  (Clyps, DIRECT JUMP, MUTE MODE, SIDE-CHAIN, QUANTIZE LIVE REC, REC TRIG MUTE, VARISPEED) as usual, then:
+  1. **Boot + version:** OS VERSION `KYOTI1.8BC`. Power-cycle once, then again at the end of the session.
+  2. **The voice on each core:** BLKPYRAMD on T2 (core 1) and on T6 (core 0), a line with notes, an ACC p-lock
+     (accent), a slide trig, a trigless lock and a trigless trig after a note (both tie): each sounds as on
+     `140C_BP303`. A second BLKPYRAMD on T1–T4 is refused (`ONE 303 PER CORE!`). Turn every knob of both pages.
+  3. **The FX2 chooser:** no PLATE REV and no SPRING REV (13 entries: NONE … DELAY, DARK REV). DARK REV on T1 and
+     on T5 FX2 rings as on stock (long DECAY), also with a BLKPYRAMD and a keyed COMPRESSOR playing. A project
+     saved with PLATE REV or SPRING REV on a track loads that FX2 as NONE (no knobs, NONE in the name field).
+  4. **SIDE-CHAIN:** COMPRESSOR keyed from the same core and from the other core (e.g. T2 keyed by T1 and by T5;
+     T6 keyed by T5 and by T1): it ducks; MON lets you hear the key; KBAS / KWID sweep. Key a COMPRESSOR **from a
+     BLKPYRAMD track** (KEY = T6 with T6 a BLKPYRAMD) and put a COMPRESSOR **on** a BLKPYRAMD track keyed by a
+     kick: both duck. No crackle with a BLKPYRAMD on each core and keyed COMPRESSORs running (core 0: a square
+     voice, WAVE 127, under a heavy FX stack is the risky case; see NOTES 2026-11-17).
+  5. **MUTE MODE on a BLKPYRAMD track, each mode** (PERSONALIZE → MUTE MODE): mute the BLKPYRAMD track while its
+     line plays. OT: silent at once. OTFX: dry cut, FX tail rings. OTFX-T: the note fades with the AMP release, FX
+     tail rings, no new notes. **DT-T: the sounding note finishes, then no new note sounds while muted** (this
+     image's fix; before it, a muted BLKPYRAMD track kept playing in DT-T). Unmute: the line comes back on its next
+     note. Also SOLO another track (the BLKPYRAMD track silenced) in DT-T: no notes.
+  6. **ERASE_EMPTY_TRIGLESS_LOCKS:** on a BLKPYRAMD track, a trigless lock with a CUT lock after a note (a tie):
+     LIVE-erase the CUT lock ([NO] + CUT while live recording): the trigless lock **stays lit and the tie still
+     holds**. The same on a Flex/Static track: the emptied trigless lock **disappears** from the trig row, as before.
+  7. **Clyps with a BLKPYRAMD track:** a FULL load ([FUNC] + trig) of a slot whose track is BLKPYRAMD onto a Flex
+     track, and a FULL load of a Flex slot onto the BLKPYRAMD track: the machine changes with the load (BLKPYRAMD ↔
+     Flex) and plays at the landing; a plain (sequence-only) load leaves the machine alone; ORIG restores. Not
+     tested anywhere yet: a FULL load that would put a second BLKPYRAMD on one core (the voice is one per core;
+     stock's own TRACK PASTE can do the same) -- note what you hear, nothing should crash.
+  8. **DIRECT JUMP with a BLKPYRAMD track:** BLKPYRAMD on T2 in Part 1 only; jump (DIRECT JUMP ON) between a
+     pattern on Part 1 and one on Part 2 and back: T2 changes machine at its first sounding trig after the jump,
+     the voice stops / starts cleanly, in time.
+  9. **Project round trip:** SAVE PROJECT, power cycle, LOAD PROJECT: the BLKPYRAMD tracks and their knobs come
+     back; a jump, a Clyps load and a MUTE MODE change still behave.
 
 - **KYOTI V1.7 walk-through** (FINAL 2026-11-02, flashed: all of it passed; `out/KYOTI/OCTATRACK_OS1.40C_KYOTI_V1.7.syx`).
   V1.6's features unchanged; only addresses move (NOTES 2026-11-01).

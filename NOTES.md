@@ -39269,3 +39269,76 @@ VEMG1 (`d782ea56…`) is superseded.
   mainos_varispeed_emus.bin 52823ea6 -> e2faf75d (rebuilt without the opt-in: identical), OS VERSION 140C_VEM10 ->
   140C_VEM11 (wrap only). README: the Part-switch behaviour + Hardware confirmed (this image); BUILD_KYOTI OS VERSION.
   Every other FINAL rebuilds to its pin. No octabam VARISPEED_EMUS module exists.
+## 2026-11-17 (`kyoti-bp`) — KYOTI V1.8BC: KYOTI V1.8C + BLACKPYRAMIDS_303 (WIP test image, NOT flashed)
+
+**The author's decisions (2026-11-17):** V1.8C's content + BLACKPYRAMIDS_303; SPRING REV **and PLATE REV** given up;
+ERASE_EMPTY_TRIGLESS_LOCKS skips BLKPYRAMD tracks; name "KYOTI 1.8BC" -> OS VERSION `KYOTI1.8BC` (10 chars; one
+constant, `BC_VERSTR` in build_kyoti.py), TAG `KYOTI_V1.8BC`. Not in it: RELOAD_FROM_PROJECT, VARISPEED_EMUS.
+
+**Build:** `KYOTI_ALLOW_WIP=1 python3 tools/build_kyoti.py --clyps-bp` (alias `--bc`; refused without the opt-in,
+never sealed: not in FINAL) -> out/KYOTI_WIP/KYOTI_V1.8BC/. The V1.8 / V1.8C / CLYPS FINALs rebuild to their pins
+without the opt-in (8807feee, 9d1a29c9, 94e41a22), as do the BP unit 5b7dfb2f and feature image ca3089ca, the SC
+unit 44465569 / image 4febe2e6, the ERASE unit 83690ffb / image db348f68 and MUTE_MODES' image 857d80d3.
+
+**DSP layout (both payloads, measured off our image):** PLATE REV's P module (594 w) ends where SPRING REV's
+(1,063 w) begins: 1,657 contiguous words; nothing outside reaches PLATE's words but its two dispatch entries
+(X:$215/$235[$14]; a full disassembly scan of every P module, and every X/Y data word).
+| | payload A (core 0, T5-T8) | payload B (core 1, T1-T4) |
+|---|---|---|
+| SIDE-CHAIN (677 w) | P:$1000..$12a5 (straddles PLATE/SPRING's record boundary, mapped word by word) | P:$0dc0..$1065 |
+| BLACKPYRAMIDS_303 voice | P:$12a5..$164d (936 w) | P:$1065..$1409 (932 w) |
+| spare | 9 w | 13 w |
+| DARK REV's helper (moved by the voice's build, as standalone) | P:$1656..$1679 | P:$1416..$1439 |
+| voice X | SPRING's five X records; run 1 at X:$7b04..$7bfb | same |
+| voice Y | $7a5..$feb | same |
+| SIDE-CHAIN Y | keybus $7e00..$7fff, MON $7df0..$7dff; window $33e00 | same; window $3be00 |
+Y/X disjoint. The moved voice = the standalone words up to relocated addresses (55 / 54 instructions; X and Y
+images identical); SC is assembled at its org by its own builder (dsp_asm + dsp_xasm cross-check).
+
+**Builders (placement only; every default = the standalone value):** SC `sc_dsp_org_*`, `sc_dsp_end_*`,
+`sc_donor_ids`; BP `bp_dsp_org_*`, `bp_donor_ids`, `bp_runtime` + `bp_runtime_dram`, `bp_mm_keymask`
+(tools/ot303/dsp_patch.py / hwprobe_image.py take an org; commit 3b7a580, `Thread: ot303`); ERASE
+`patch_triglock_bp` (tools/patch_triglock_bp.s, 122 B in SPRING's reclaimed record: ENC had 40 B left). Both SC and
+BP give up PLATE + SPRING with identical bytes (33, SHARED_OK); PLATE's ColdFire descriptor record stays stock
+(asserted), SPRING's record keeps patch_qlrec + patch_triglock_bp (82 B left).
+
+**DRAM:** the voice's loader only copies + hash-checks (no boot-time work), so its runtime is a unit of KYOTI's one
+DRAM image: DJ 4,012 B @0x40a955e0, BP 39,916 B @0x40a9658c, Clyps 28,576 B @0x40aa0178 (still last; its 10.4 MB
+of buffers follow). 72,504 B raw, 43,744 B packed, loader + payload 43,976 B; 1,719 arena pages (V1.8C: 1,709).
+
+**Found and fixed (WIP, this image only): MUTE MODE DT-T did not mute a BLKPYRAMD track.** The voice starts notes
+from the trigger flag (0x46104d0c, the frame builder's copy of 0x46104d15) before stock binds a voice, so
+MUTE_MODES' trig drop (fresh_bind / dt_trig) missed it (Modwerk #777's FM Synth case). ot_emu (octabam bc144523
+build from out/sc-leak, BOTLI, both tracks muted, main mix): DT-T -9.9 dBFS = unmuted level; OT / OTFX / OTFX-T
+-35.4 (AMP / post-FX cuts). Fix: control.c `KYOTI_MM_GATE` (only when build_kyoti passes MUTE_MODES' KEYMASK) asks
+mm_trig_muted's question (GATE 1/2, muted or unsoloed, less KEYMASK) and drops the note (consumed: queue stays
+paired) and a silenced track's live note. After: DT-T -35.4; muted tracks start 0 DSP notes in OTFX-T / DT-T.
+
+**Gates (all on mainos 7df332c7):**
+- composer: zones, disjoint deltas (SC x BP: 33 identical bytes, SHARED_OK), every byte owned, 160 code spans no
+  branch inside, B1/B2, reclaim, descriptor table, PLATE/SPRING off both choosers + id2e NONE + DSP stub, PLATE's
+  record stock; the FX2 list = stock minus PLATE and SPRING, order and id2pos consistent.
+- BP's verify (tools/kyoti_bc_check_voice.py = verify_ot303 pointed at this image): every line as standalone (ui,
+  flex round trip, park, renderer, line order on both cores, Y images, STG 2, the DRAM unit equal after the run,
+  KYOTI's loader once); PLATE REV = the stub (expected); DARK REV core 1 track 4 3267 vs stock 3252 = V1.8C
+  FINAL's own value (and bp-reclaim's known emulator effect).
+- every offered FX2 effect on both cores (tools/kyoti_bc_check_fx2.py) vs stock: same, but COMPRESSOR +22 (SC's
+  hook; identical to V1.8C FINAL) and PHASER / DARK jitter (V1.8C FINAL jitters the same way).
+- SC: emu_sc_dsp3 / _xcore / emu_sc_sctap at payload B's new org: ALL GOOD. ot_emu SCT1 tone fixture, keyed same
+  core, cross core, MON on core 1 and core 0 (both directions): per-track tone levels equal to V1.8C FINAL, 0.00 dB.
+- ERASE (tools/kyoti_bc_check_erase.py, Unicorn on the image): Flex last lock -> cleared; BLKPYRAMD -> kept; Static
+  with a stale signature -> cleared; other lock left / never-locked param -> kept; registers preserved.
+- DIRECT JUMP REF-LOCK (--cond): 16 <-> 7 standalone (gate1 S1, refs dj-clyps r1_0/r1_2) PASS, 5 segments, no
+  stock switch run; RS1 restart (16 -> 12 -> 12, refs dj-restart f1x/f1y) PASS, 4 segments.
+- Clyps UI (diag_clyps_ui.py --only ABCDY, OT DEMO): PASS (50 checks).
+
+**Cycle budget (estimate, not measured as a whole core):** the voice 591 / 636 emulator cycles a sample (square,
+mean / worst; ~738 on the chip); SIDE-CHAIN always-on ~30 instr (~39 cycles) a sample a core; a keyed COMPRESSOR
+stays cheaper than a DJ EQ, so it never makes a new worst case. Against BLACKPYRAMIDS_303.md §4's heaviest legal
+stack: core 1 square ~140-200 cycles spare, saw ~320-370; core 0 saw ~10-55, square ~-115..-170 (overrun, as
+before plus SC's fixed cost). Lighter stacks fit.
+
+**Not verified:** a Clyps FULL load onto/from a BLKPYRAMD track and a DIRECT JUMP across Parts with a BLKPYRAMD
+track (static only: the 136 B slice and Part bytes carry machine + signature; a FULL load can put a second
+BLKPYRAMD on a core, as stock TRACK PASTE can); SIDE-CHAIN keyed from/onto a BLKPYRAMD track (only tone tracks);
+anything on hardware. FLASHING §4 "KYOTI V1.8BC walk-through" lists the checks.

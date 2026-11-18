@@ -170,6 +170,12 @@ are lowercase-hyphen, because octabam requires a module's name to equal its fold
   FLASHING §4 "VARISPEED_EMUS VEMG2"; NOTES 2026-11-18/19 (`emus-guard`). Open: the plain-VARISPEED port (branch
   `emus-guard`, images VRG1, WIP, not flashed). No octabam VARISPEED_EMUS module exists; octabam's varispeed module
   shares the source (its pin moves with the port).
+- **2026-11-17: KYOTI V1.8BC (WIP test image, NOT flashed)** — `KYOTI_ALLOW_WIP=1 python3 tools/build_kyoti.py
+  --clyps-bp` (alias `--bc`): KYOTI V1.8C + BLACKPYRAMIDS_303, OS VERSION `KYOTI1.8BC` (`BC_VERSTR`), out/KYOTI_WIP/
+  KYOTI_V1.8BC/. SPRING REV and PLATE REV given up (SIDE-CHAIN's DSP from PLATE's first word, the voice after it);
+  the voice's runtime is a unit of KYOTI's DRAM payload; ERASE skips BLKPYRAMD tracks; the voice drops a silenced
+  track's notes in OTFX-T / DT-T (it kept playing in DT-T). Gates `tools/kyoti_bc_check_*.py`. Next: the author
+  flashes it and runs FLASHING §4 "KYOTI V1.8BC walk-through". NOTES 2026-11-17 (`kyoti-bp`).
 
 - **2026-11-16: DIRECT JUMP V7.3 FINAL** (the author flashed `KY18C DJR1`: the three by-ear checks pass) — the last restart (PLAY or any stock
   pattern switch) is a jump's time origin, for its landing and its trig conditions (detour 0x400a4850 `dj_swres`).

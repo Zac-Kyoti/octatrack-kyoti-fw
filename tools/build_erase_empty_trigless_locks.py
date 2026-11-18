@@ -34,6 +34,11 @@ STOCK_SECT = ROOT / "out/raw/section_3_MAIN_OS.bin"
 OUT = ROOT / "out/mainos_erase_empty_trigless_locks.bin"
 import kyoti_place                   # combined-image placement (build_kyoti.py); no-op standalone
 CAVE_AT = kyoti_place.at("patch_triglock", 0x400d7200)
+# KYOTI V1.8BC (build_kyoti.py --clyps-bp): BLACKPYRAMIDS_303 shares the image, and on its tracks an empty
+# trigless lock is a tie. tools/patch_triglock_bp.s, placed here, is then the detour's target: it leaves
+# a BLKPYRAMD track's step alone and jumps to the cave on every other track. Unset (every other build):
+# nothing of it is assembled, and the unit and image are unchanged.
+BP_AT = kyoti_place.at("patch_triglock_bp", None)
 # FUN_40038874's one commit point for "is this step's p-lock row now empty" -- the real
 # LIVE erase worker, identified from a hardware trace (ARTLTEST8), not inferred.
 DETOUR_AT = 0x40038a5c
@@ -55,6 +60,17 @@ def assemble():
     subprocess.run(["m68k-elf-objcopy", "-O", "binary", "out/patch_triglock.elf",
                     "out/patch_triglock.bin"], check=True, cwd=ROOT)
     return (ROOT / "out/patch_triglock.bin").read_bytes()
+
+
+def assemble_bp():
+    """tools/patch_triglock_bp.s at BP_AT, jumping to the cave at CAVE_AT"""
+    subprocess.run(["m68k-elf-as", "-mcpu=5407", f"--defsym=CAVE=0x{CAVE_AT:x}", "-o", "out/patch_triglock_bp.o",
+                    "tools/patch_triglock_bp.s"], check=True, cwd=ROOT)
+    subprocess.run(["m68k-elf-ld", f"-Ttext=0x{BP_AT:x}", "-o", "out/patch_triglock_bp.elf",
+                    "out/patch_triglock_bp.o"], check=True, cwd=ROOT, capture_output=True)
+    subprocess.run(["m68k-elf-objcopy", "-O", "binary", "out/patch_triglock_bp.elf",
+                    "out/patch_triglock_bp.bin"], check=True, cwd=ROOT)
+    return (ROOT / "out/patch_triglock_bp.bin").read_bytes()
 
 
 def assert_no_branch_into(img, site, n, window=0x600):
@@ -111,6 +127,15 @@ def main():
     # cave replays both itself before its own rts, which lands on 0x40038afe)
     img[do:do + 6] = b"\x4e\xb9" + CAVE_AT.to_bytes(4, "big")
     img[co:co + len(cave)] = cave
+    if BP_AT is not None:
+        bp = assemble_bp()
+        bo = BP_AT - BASE
+        if any(img[bo:bo + len(bp)]) or (bo < co + len(cave) and co < bo + len(bp)):
+            sys.exit(f"patch_triglock_bp at 0x{BP_AT:08x} is not free")
+        img[bo:bo + len(bp)] = bp
+        img[do:do + 6] = b"\x4e\xb9" + BP_AT.to_bytes(4, "big")
+        print(f"  BLACKPYRAMIDS_303 beside it: detour -> patch_triglock_bp 0x{BP_AT:08x} ({len(bp)} B), "
+              f"which skips a BLKPYRAMD track and jumps to the cave on every other")
 
     OUT.write_bytes(bytes(img))
 
