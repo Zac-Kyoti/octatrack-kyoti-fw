@@ -31,7 +31,11 @@ Both builders take the placement (sc_dsp_org_*, bp_dsp_org_*) and give up both e
 bytes (SHARED_OK); PLATE's ColdFire descriptor record stays stock (only its chooser rows and id2e go).
 The voice's ColdFire runtime is a unit of this image's one DRAM payload (before Clyps, which stays last),
 not its own loader + reserve. ERASE_EMPTY_TRIGLESS_LOCKS skips BLKPYRAMD tracks (patch_triglock_bp: an
-empty trigless lock is a tie there). out/KYOTI_WIP/KYOTI_V1.8BC/, OS VERSION BC_VERSTR, never sealed.
+empty trigless lock is a tie there). One BLKPYRAMD per DSP core on every path (2026-11-17): Clyps is
+assembled with the voice runtime's bp_refuse_load (BP_CLASH: a FULL load that would put a second one on a
+core is refused whole) and bp_uitail (BP_UITAIL: the UI-tail net); Clyps owns the tail site 0x40062d1c and
+calls the net first (SUPERSEDE), so the voice is built before Clyps here. out/KYOTI_WIP/KYOTI_V1.8BC/,
+OS VERSION BC_VERSTR, never sealed.
 
 --clyps-standalone: the standalone CLYPS image (out/CLYPS/, OS VERSION "CLYPS V1.0"), what
 `python3 tools/build_clyps.py` builds. Clyps never ships without DIRECT JUMP (the author, 2026-11-15),
@@ -307,7 +311,12 @@ WIP_FEATURES = {}
 # Detour sites one feature takes over from another that it calls itself: (owner, other, site, n).
 # The other's bytes there must be exactly `jsr <its entry>`, and the owner must have been built
 # with that entry (asserted before the composition; never a silent overwrite).
-SUPERSEDE = [("CLYPS", "DIRECT_JUMP_KYOTI", 0x400a1f72, 6, "dj_land", "DJ_LAND")]
+SUPERSEDE = [("CLYPS", "DIRECT_JUMP_KYOTI", 0x400a1f72, 6, "dj_land", "DJ_LAND"),
+             # V1.8BC: the UI loop's tail is Clyps' (cl_uitail); it calls BLACKPYRAMIDS_303's net first
+             ("CLYPS", "BLACKPYRAMIDS_303", 0x40062d1c, 6, "bp_uitail", "BP_UITAIL")]
+# V1.8BC: BLACKPYRAMIDS_303's entries Clyps calls (FULL loads' one-per-core question, the UI-tail net): stand-ins
+# while sizing (an absolute jsr's size does not depend on them); pass 2 gives the runtime's own
+BP_SIZING = {"bp_refuse_load": 0x40a95000, "bp_uitail": 0x40a95004}
 DJ_SIZING = {"dj_land": 0x400d6eda, "dj_toggle": 0x400d6e54, "dj_state": 0x400d7600, "dj_mode": 0x400d7606,
              "dj_selfvec": 0x400d7608}
 # REC_TRIG_MUTE's code regions: three dead stock routines (build_rec_trig_mute.py REGIONS),
@@ -333,6 +342,8 @@ def flags_for(feat):
         f["clyps_kyoti"] = True
         if "DIRECT_JUMP_KYOTI" in FEATURES:      # pass 1 sizes with these; pass 2 gives DJ's real ones
             f.update(DJ_SIZING)
+        if "BLACKPYRAMIDS_303" in FEATURES:      # V1.8BC: pass 1 sizes with these; pass 2 gives the runtime's
+            f.update(BP_SIZING)
     if "BLACKPYRAMIDS_303" in FEATURES:          # V1.8BC: PLATE REV is given up as well
         if feat == "SIDECHAIN_COMPRESSOR":
             f["sc_donor_ids"] = [0x14, 0x15]
@@ -597,8 +608,8 @@ def apply_bp():
     global VERSTR, TAG, OUTDIR, SANDBOX
     wip_variant("--clyps-bp")
     FEATURES.pop("RELOAD_FROM_PROJECT")
-    FEATURES.update(CLYPS_FEATURE)
-    FEATURES.update(BP_FEATURE)
+    FEATURES.update(BP_FEATURE)                  # before CLYPS: Clyps is built with the voice runtime's entries
+    FEATURES.update(CLYPS_FEATURE)               # (bp_refuse_load, bp_uitail; SUPERSEDE at the UI tail)
     builder, img, base, keys = FEATURES["ERASE_EMPTY_TRIGLESS_LOCKS"]
     FEATURES["ERASE_EMPTY_TRIGLESS_LOCKS"] = (builder, img, base, dict(keys, patch_triglock_bp="patch_triglock_bp.bin"))
     SIZING["ERASE_EMPTY_TRIGLESS_LOCKS"] = {"patch_triglock_bp": 0x400d7400}   # zero in stock, past ERASE's own cave
@@ -776,6 +787,9 @@ def main():
             dj = syms["patch_directjump_v7"]
             p.update(dj_land=dj["dj_land"], dj_toggle=dj["dj_toggle"], dj_state=dj["dj_state"],
                      dj_mode=dj["DJ_MODE"], dj_selfvec=dj["dj_selfvec"])
+        if feat == "CLYPS" and "BLACKPYRAMIDS_303" in FEATURES:     # V1.8BC: built after it (apply_bp's order)
+            bp = syms["ot303/cf/ot303_runtime"]
+            p.update(bp_refuse_load=bp["bp_refuse_load"], bp_uitail=bp["bp_uitail"])
         for k in keys:
             if zone_of.get(k) == "DRAM":
                 p[k + "_dram"] = True
