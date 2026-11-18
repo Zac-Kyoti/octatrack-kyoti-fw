@@ -4,7 +4,10 @@
 """
 Session 107/108 -- the V7 REFERENCE-LOCK oracle, comparer half (see diag_reflock.py).
 
-  python3 tools/cmp_reflock.py [--cond] RUN.json REF_A.json [REF_B.json ...]
+  python3 tools/cmp_reflock.py [--cond] RUN.json REF_A.json [REF_B.json ...] [--ref-for P=REF.json ...]
+
+A reference is keyed by the pattern it starts on; --ref-for P=REF.json keys it by P instead (a RESTART
+reference: PLAY on A, a stock change straight to P -- RUN's P segment is compared tick by tick with it).
 
 For every segment of RUN during which ACT_PAT == P and a reference for P was given:
   * CLOCK   : metronome counters (beat-in-bar, tick-in-beat) must equal the reference's at
@@ -111,11 +114,19 @@ def main(argv):
     cond = "--cond" in argv or "--cond-cnt" in argv
     cond_latch = "--cond" in argv
     argv = [x for x in argv if x not in ("--cond", "--cond-cnt")]
+    ref_for = []
+    while "--ref-for" in argv:
+        i = argv.index("--ref-for")
+        pat, path = argv[i + 1].split("=", 1)
+        ref_for.append((int(pat), path))
+        del argv[i:i + 2]
     run = load(argv[0])
     refs = {}
     for p in argv[1:]:
         r = load(p)
         refs[r["meta"]["start"]] = r
+    for pat, path in ref_for:
+        refs[pat] = load(path)
     print(f"RUN {argv[0]}: start={run['meta']['start']} dj={run['meta']['dj']} "
           f"cues={run['cues']} commits={run['commits']}")
     # segments by ACT_PAT

@@ -107,7 +107,7 @@ octamax's feature code is in a build, only its concepts and a few setup scripts 
 | VARISPEED_EMUS DSP kernel gate | `tools/varispeed_emus_dsp_*` (bit-exact against the reference engine) |
 | DSP assembly | `tools/dsp_xasm.py` over `vendor/dsp56300`'s `dsp_asm` |
 | a final build | `tools/build_<feature>.py` → `out/<FEATURE>/` `.syx` (MIDI) + `.bin` (CF card), always with the three BATCH_BUGFIXES (composed by `tools/feature_image.py`; `KYOTI_UNIT=1` builds the bare unit for the harnesses); see `BUILD_KYOTI.md` |
-| the combined images | `tools/build_kyoti.py` — **KYOTI V1.8** (RELOAD + DIRECT JUMP V7.2.2) and, with `--clyps`, **KYOTI V1.8C** (CLYPS in RELOAD's place; flashed as `KY+CL DJC9`), both FINAL 2026-11-15; `--clyps-standalone` is what `build_clyps.py` builds; V1.7 builds from tag `ref/kyoti-v1.7-2026-11-09`, V1.6 from `ref/kyoti-v1.6-2026-10-29`, V1.5 from `ref/kyoti-v1.5-2026-10-22` (see §6) |
+| the combined images | `tools/build_kyoti.py` — **KYOTI V1.8** (RELOAD + DIRECT JUMP V7.3) and, with `--clyps`, **KYOTI V1.8C** (CLYPS in RELOAD's place; flashed as `KY18C DJR1`), both FINAL (re-pinned 2026-11-16 with DIRECT JUMP V7.3); `--clyps-standalone` is what `build_clyps.py` builds; V1.7 builds from tag `ref/kyoti-v1.7-2026-11-09`, V1.6 from `ref/kyoti-v1.6-2026-10-29`, V1.5 from `ref/kyoti-v1.5-2026-10-22` (see §6) |
 | octabam's remixer (`make remix`) | `sh tools/octabam_remixer.sh` — its own clone at `~/Documents/octabam`, fast-forwarded to octabam's `main` on every launch; `refs/octabam` stays the pinned research harness |
 | every feature image in one run | `tools/feature_image.py` (`--only NAME,...`); was `build_bugbuilds.py` until 2026-11-15 |
 | DIRECT JUMP V6.4, the OT↔AR parity build | `tools/build_direct_jump_v6_4.py` — WIP **by design**: kept buildable at the user's request (hardware-confirmed image `4a6c1b5e…`), never to be promoted |
@@ -158,6 +158,13 @@ are lowercase-hyphen, because octabam requires a module's name to equal its fold
 
 > Check this against the tree before trusting it; it has gone stale before.
 
+- **2026-11-16: DIRECT JUMP V7.3 FINAL** (the author flashed `KY18C DJR1`: the three by-ear checks pass) — the last restart (PLAY or any stock
+  pattern switch) is a jump's time origin, for its landing and its trig conditions (detour 0x400a4850 `dj_swres`).
+  Emulator: the restart REF-LOCK scenarios FAIL on V7.2.2 and PASS on V7.3; RELOAD / Clyps loads after a jump keep their
+  A:B counters in step; the existing DJ gates pass. WIP images `KY18 DJR1`, `KY18C DJR1`, `140C_DJR1`, `CLYPS DJR1`:
+  NOTES 2026-11-16 (`dj-restart`), FLASHING §4 "DIRECT JUMP V7.3". Pins: DJ unit `7b48fdd6…`, its image `c58591c0…`,
+  KYOTI V1.8 `8807feee…` (RELOAD after a jump: emulator only), V1.8C `9d1a29c9…`, CLYPS `94e41a22…`. Next: octabam #1146
+  moves to this pin; the Modwerk 0.2.0 test image is rebuilt with V7.3.
 - **2026-11-15: KYOTI V1.8 + V1.8C, DIRECT JUMP V7.2.2, CLYPS — all FINAL; every feature image carries the bug fixes.**
   - **KYOTI V1.8C** (`build_kyoti.py --clyps`, OS VERSION `KYOTI 1.8C`): the `KY+CL DJC9` code the author flashed ("all
     checks out well"), mainos `32108f95…`. **KYOTI V1.8** (default): RELOAD_FROM_PROJECT + DIRECT JUMP V7.2.2, not flashed

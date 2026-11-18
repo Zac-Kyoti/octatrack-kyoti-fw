@@ -5,22 +5,23 @@
 KYOTI V1.8 / V1.8C -- every FINAL feature in one image except BLACKPYRAMIDS_303 and VARISPEED_EMUS.
 Two images (the author, 2026-11-15):
 
-  KYOTI V1.8   (default)  RELOAD_FROM_PROJECT + DIRECT JUMP V7.2.2, no Clyps     OS VERSION "KYOTI V1.8"
-  KYOTI V1.8C  (--clyps)  CLYPS with DIRECT JUMP V7.2.2 built in, no RELOAD       OS VERSION "KYOTI 1.8C"
+  KYOTI V1.8   (default)  RELOAD_FROM_PROJECT + DIRECT JUMP V7.3, no Clyps       OS VERSION "KYOTI V1.8"
+  KYOTI V1.8C  (--clyps)  CLYPS with DIRECT JUMP V7.3 built in, no RELOAD         OS VERSION "KYOTI 1.8C"
 
     MUTE MODE (OT / OTFX / OTFX-T / DT-T)      QUANTIZE LIVE REC toggle
     SIDE-CHAIN COMPRESSOR (cross-core)         TRIGLESS-LOCK AUTO-REMOVE
-    RELOAD FROM PROJECT | CLYPS                DIRECT JUMP V7.2.2
+    RELOAD FROM PROJECT | CLYPS                DIRECT JUMP V7.3
     REC TRIG MUTE ([TRACK]+[REC], CC 80)       VARISPEED (TSTR VARI + QUAN)
     the bug fixes: MIDI_PLAYS_FREE_FIX, PATTERN LED, PART_CHANGE_CARRYOVER_FIX
 
 V1.8 vs V1.7 (FINAL 2026-11-15; V1.7 builds from tag ref/kyoti-v1.7-2026-11-09): RELOAD_FROM_PROJECT with
-Clyps' landing rules (FINAL 2026-11-14) and DIRECT JUMP V7.2.2 (FINAL 2026-11-15). Not flashed as this
-image; each feature is confirmed on its own.
+Clyps' landing rules (FINAL 2026-11-14) and DIRECT JUMP V7.3 (FINAL 2026-11-16: the last restart, PLAY or a
+stock pattern switch, is a jump's time origin). Not flashed as this image; each feature is confirmed on its own,
+RELOAD after a jump in the emulator.
 V1.8C: CLYPS joins and RELOAD_FROM_PROJECT leaves (they share hook sites; Clyps' card reloads replace
 it). Clyps owns the phase-D site 0x400a1f72 and chains dj_land (SUPERSEDE). Both live in DRAM; Clyps'
 buffers follow its unit (about 10 MB of the sample/recorder pool). Flashed and checked by the author as
-"KY+CL DJC9" (the same mainos, 32108f95...).
+"KY+CL DJC9" (DIRECT JUMP V7.2.2) and, with V7.3, as "KY18C DJR1" (the same mainos as the FINAL, 9d1a29c9...).
 
 --clyps-standalone: the standalone CLYPS image (out/CLYPS/, OS VERSION "CLYPS V1.0"), what
 `python3 tools/build_clyps.py` builds. Clyps never ships without DIRECT JUMP (the author, 2026-11-15),

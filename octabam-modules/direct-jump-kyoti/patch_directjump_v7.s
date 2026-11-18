@@ -31,6 +31,10 @@
 | V7.1.1 (2026-11-13): stock's wrap-change never takes a cue DIRECT JUMP has armed (dj_hide).
 | V7.2 (2026-11-13, WIP): each track's own Part reaches the engine with its first sounding trig of
 | the incoming pattern (dj_sparm .. dj_mapply); the jump keeps the Part-wide items.
+| V7.3 (2026-11-16, WIP; the author's decision, option (b)): the time origin is the LAST RESTART -- PLAY, or
+| any stock pattern switch (DJ off, a chain, the arranger: whatever runs stock's `jsr COND_RESET` at
+| 0x400a4850).  dj_swres re-bases dj_T there, so a jump lands -- and sets its trig conditions -- as if the
+| incoming pattern had started at that switch.  RELOAD_FROM_PROJECT and Clyps count from the same moment.
 | =========================================================================================
 | SPDX-License-Identifier: MIT
 | SPDX-FileCopyrightText: 2026 Zac Kyoti
@@ -152,6 +156,7 @@
     .equ ENG_MBANK,   0x46c7a850
     .equ ENG_MPART,   0x46c7a934
     .equ COND_RESET,  0x400a539c        | FUN_400a539c(track | -1): reset A:B cycle counters / pending FILL
+|                                         (V7.3: stock's switch calls it at 0x400a4850 -> dj_swres)
     .equ P_CHAINQ,    0x8e56            | pattern blob: CHAIN AFTER index (signed; < 0 = the project's)
     .equ PROJ_QUANT,  0x8000004e        | byte: the project's CHAIN AFTER index
     .equ QUANT_TBL,   0x400d80dc        | long[]: CHAIN AFTER length in master steps (<= 0 = off)
@@ -302,10 +307,12 @@ dj_land:
     .endif
 |   V7: dj_T counts EVERY running tick, DJ on or off (cave RAM only -- stock-invisible), so
 |   a DIRECT JUMP turned on mid-song still knows where START was.  0 while stopped.
+|   V7.3: ... where the LAST RESTART was: PLAY, or stock's last pattern switch (dj_swres re-bases it).
     moveq   #1,%d0
     cmp.l   TRANSPORT_L,%d0
     beq.b   dt_run
     clr.l   dj_T
+    clr.l   dj_rsm                     | V7.3: stopped -> the next origin is PLAY
     bra.b   dt_done
 dt_run:
     addq.l  #1,dj_T
@@ -444,6 +451,7 @@ dl_arm:
 |   V7.0: the incoming pattern's parameters, then the first tick t_L >= this one whose
 |   master-cycle time t' is a multiple of L = lcm(tps_M, every track's tps): every track at
 |   a window start, the master on a step boundary -> stock's landing is exact there.
+|   V7.3: t' is counted from the last restart (dj_T; dj_tprime adds dj_rsm master steps).
     moveq   #0,%d0
     move.b  PEND_BANK,%d0
     moveq   #0,%d1
@@ -658,8 +666,11 @@ dc_nself:
     bsr.w   dj_bparams                 | a2 = ACT blob (set above) -> tps/len/C/L tables
     move.l  dj_T,%d7
     addi.l  #DJ_TOFS,%d7               | d7 = t_L
-    move.l  %d7,dj_tland
     move.l  dj_tpsM,%d3
+    move.l  dj_rsm,%d0                 | V7.3: in the last restart's frame (dj_swres): + dj_rsm master
+    muls.l  %d3,%d0                    | steps (0 unless the arranger started the pattern later); t_L may
+    add.l   %d0,%d7                    | be < 0 (just before the restarted pattern's first boundary); u >= 0 (dl_arm)
+    move.l  %d7,dj_tland
     move.l  %d7,%d0
     add.l   %d3,%d0
     subq.l  #1,%d0                     | u = t + tps_M - 1
@@ -900,14 +911,20 @@ ho_mt3:
 |   V7.0.2 (2026-11-13, the user's rule from Clyps, scope §1.29 C): the trig conditions stand where
 |   a never-switched incoming pattern would have them -- stock's switch (and V7.0.1) restarted them
 |   with COND_RESET(-1) 0x400a539c here.  dj_cond (below) sets every track's A:B pass counter.
+|   (V7.3: "never switched" = since the last restart; a jump itself is not a restart and never runs
+|   stock's switch block, so dj_swres never fires for it.)
     bsr.w   dj_sparm                   | V7.2: every track's Part publish waits for its first trig
     bra.w   dj_cond
 
 | dj_cond: every track's trig-condition state at the landing tick t_L (dj_tland), as a reference run
 | that had played the incoming pattern since START holds it (REF-LOCK: tools/cmp_reflock.py --cond).
-|   A:B pass counter 0x46107918[t] = F(t_L): the passes track t would have begun since PLAY, in the
-|     incoming pattern's model (dj_bparams' tps_M / C / tps_t / len_t; time = dj_T, PLAY = 0, the
-|     master cycle starting at 0 mod C -- dj_tprime).  The measured stock facts (Clyps M1-M3,
+|   A:B pass counter 0x46107918[t] = F(t_L): the passes track t would have begun since the last
+|     restart, in the incoming pattern's model (dj_bparams' tps_M / C / tps_t / len_t; time = dj_tland,
+|     the restart's frame: PLAY = 0, the master cycle starting at 0 mod C -- dj_tprime).  V7.3: after a
+|     stock switch the frame's 0 is the switch's audible boundary, one OUTGOING master step after it
+|     (dj_swres); COND_RESET(-1) zeroed every counter at the switch and no pass starts before that
+|     boundary, so a landing before it (t_L < 0: a jump cued just after the switch) is F(0) = 0.
+|     The measured stock facts (Clyps M1-M3,
 |     reference/handoffs/RELOAD_CLYPS_PORT.md rule 3): a pass starts at each own wrap (0x400a536c,
 |     t' = j*c - tps, c = len*tps) and at the master's restart (the wrap body, t' = C - tps_M), once
 |     when they coincide.  Per master cycle K = J + (rem != 0), J = (C - tps_M + tps) / c (rem its
@@ -919,8 +936,10 @@ ho_mt3:
 |     which a reference run would hold as well; COND_RESET(-1) used to drop a latched FILL.
 |   Every register is free (dl_commit's caller, dj_land, saved them all); a2 is no longer needed.
 dj_cond:
-    move.l  dj_tland,%d7               | x = t_L (>= 0)
-    tst.l   dj_C
+    move.l  dj_tland,%d7               | x = t_L
+    bpl.b   1f
+    moveq   #0,%d7                     | V7.3: before the restarted pattern's first boundary -> F(0) = 0
+1:  tst.l   dj_C
     beq.b   cn_init                    | INF: no master cycle
     move.l  dj_C,%d6
     move.l  %d6,%d0
@@ -1161,11 +1180,18 @@ bp_gcdok:
     move.l  %d5,dj_L
     rts
 
-| dj_tprime: d0 = tick t -> d0 = t' = ((t + tps_M - 1) mod C) - (tps_M - 1)  (signed)
+| dj_tprime: d0 = tick t (dj_T's count) -> d0 = t' = ((x + tps_M - 1) mod C) - (tps_M - 1)  (signed), with
+| x = t + dj_rsm * tps_M, the tick in the last restart's frame (V7.3; dj_rsm = 0 but after an arranger
+| start).  Right after a stock switch x can be as low as 1 - tps_old: u = x + tps_M - 1 < 0 is a t' before the
+| restarted pattern's first boundary -- negative, no mod.  Uses d1-d3.
 dj_tprime:
     move.l  dj_tpsM,%d3
+    move.l  dj_rsm,%d1
+    muls.l  %d3,%d1
+    add.l   %d1,%d0                    | x
     add.l   %d3,%d0
-    subq.l  #1,%d0
+    subq.l  #1,%d0                     | u
+    bmi.b   tp_noc                     | V7.3: before the first boundary since the restart
     move.l  dj_C,%d1
     beq.b   tp_noc
     move.l  %d0,%d2
@@ -1262,9 +1288,47 @@ rs_l:
     bne.b   rs_l
     rts
 
+| ================= V7.3: dj_swres @ 0x400a4850 -- stock's switch is a RESTART =================
+| The author's decision (2026-11-16, option (b)): DIRECT JUMP's time origin is the last restart -- PLAY or
+| any stock pattern switch -- for the landing position and the trig conditions alike, as RELOAD_FROM_PROJECT
+| (rl_creset) and Clyps (cl_creset) already count.  Until V7.2.2 dj_T ran from PLAY: after PLAY on A, a
+| normal change to X and a jump to Y, Y landed at its PLAY phase and its A:B counters counted from PLAY.
+| The site: stock's switch block (phase G, the wrap body with d6 = PEND != ACT) `pea -1 ; jsr COND_RESET`
+| (0x400a484c / 0x400a4850), right after it restarted the master: MASTER_STEP = 0x8000662a (0x400a483a; 0
+| unless the arranger starts the pattern later), tick 0 (0x400a4842).  Only that block runs it: a plain wrap
+| (d6 = 0, also dj_hide's held cue) skips it, and a DIRECT JUMP jump never runs the switch block at all
+| (its landing is phase D's re-landing; COND_RESET is not called since V7.0.2).
+| The frame (measured, tools/diag_reflock.py: a stock switch straight to the pattern, out/djr f1-f4): the
+| wrap body runs one master step before the cycle's audible boundary, and that first step of the new pattern
+| still runs at the OUTGOING master rate (SCALE_IX follows a step later) -- so the new pattern's cycle starts
+| (t' = 0, PLAY's t = 0) tps_old ticks after the switch, whatever the incoming pattern's own rate.  Hence
+| dj_T = -tps_old now (the next tick counts 1 - tps_old; the boundary tick 0), and dj_rsm = N, the step stock
+| started the pattern on (MASTER_STEP, 0 unless the arranger), so x = dj_T + dj_rsm * tps_M (dj_tprime,
+| dl_commit).  A reload stays 0 until the new pattern's first master wrap, as after PLAY (dl_fixup).  Then the
+| TAIL JUMP: COND_RESET -- and RELOAD's / Clyps' detour at its entry -- sees the caller's return address
+| 0x400a4856 at (sp) and the -1 at 4(sp), as stock.  Uses d0 / a0 only (COND_RESET is a C function: d0-d1 /
+| a0-a1 are the caller's scratch).
+    .global dj_swres
+dj_swres:
+    moveq   #0,%d0
+    move.b  SCALE_IX,%d0               | the master rate still in force (the outgoing pattern's)
+    cmpi.l  #SCALE_MAX,%d0
+    bls.b   1f
+    moveq   #SCALE_1X,%d0              | out of range: 1x (as everywhere here)
+1:  lea     LEN_TBL,%a0
+    move.l  (%a0,%d0.l*4),%d0
+    neg.l   %d0
+    move.l  %d0,dj_T                   | -tps_old: the new cycle starts tps_old ticks from now
+    moveq   #0,%d0
+    move.w  MASTER_STEP,%d0            | N: where stock just started the pattern (0x400a483a)
+    move.l  %d0,dj_rsm
+    jmp     COND_RESET                 | (sp) = 0x400a4856, 4(sp) = -1: stock's own call
+
 | dl_fixup: the tick after a landing.  Stock's landing leaves reload = tps_t - 1 (it drives
 | the landing's immediate first fire); the reference holds 0 until the first master wrap
-| since START, then the wrap-change catch-up max(0, tps_t - tps_M).  Nothing reads reload
+| since START, then the wrap-change catch-up max(0, tps_t - tps_M).  V7.3: the same since a stock
+| switch (measured: stock's switch leaves every reload 0 until the new pattern's first wrap), with
+| dj_tland in the restart's frame.  Nothing reads reload
 | between here and the next wrap (cntdn idle, first-fire mask consumed), so this is for the
 | state-equality proof -- and it makes the next wrap start from the reference's value.
 dl_fixup:
@@ -1757,8 +1821,12 @@ dj_sptm:   .space 64                   | V7.2: per track (long) the clock a new-
 | the same guarantee the stock re-image gives the standalone build.
 DJ_MODE:   .long 0                     | 0 = OFF/stock, 1 = ON
     .endif
-dj_T:      .long 0                     | V7: running clock ticks since START (0 while stopped)
-dj_tland:  .long 0                     | V7: t of the last landing
+dj_T:      .long 0                     | V7: running clock ticks since START (0 while stopped); V7.3: since the
+                                       |     last restart (PLAY, or a stock switch: dj_swres; < 0 until its boundary)
+dj_rsm:    .long 0                     | V7.3: the last restart's start step N (PLAY 0; a stock switch: the step
+                                       |     it started the pattern on), x = dj_T + dj_rsm * tps_M
+dj_tland:  .long 0                     | V7: t of the last landing (V7.3: x, the restart's frame; < 0 before its
+                                       |     first boundary)
 dj_tpsM:   .long 0                     | V7: incoming pattern's master ticks/step
 dj_C:      .long 0                     |     master cycle in ticks (0 = INF)
 dj_L:      .long 0                     |     lcm of every tps (landing grid)

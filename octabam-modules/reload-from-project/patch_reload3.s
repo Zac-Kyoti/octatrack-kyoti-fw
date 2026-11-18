@@ -2601,9 +2601,11 @@ cd2_i:
 
 | ================= rl_creset: detour at COND_RESET 0x400a539c =================
 | Replaces `lea -12(%sp),%sp ; movem.l %d2/%a2-%a3,(%sp)` (8 B; Clyps' cl_creset). A reset of every track (an
-| argument above 15: -1) is the moment the pattern's A:B passes start again -- PLAY, stock's pattern switch, a
-| DIRECT JUMP jump: its running tick. Stock's switch (phase G, after its tick's passes) counts from the next
-| tick. d0-d1 are the caller's scratch. Then stock's body.
+| argument above 15: -1) is the moment the pattern's A:B passes start again -- PLAY, stock's pattern switch: its
+| running tick. Stock's switch (phase G, after its tick's passes) counts from the next tick. (A DIRECT JUMP jump
+| is no restart: since V7.0.2 it never calls COND_RESET, and since V7.3 it re-bases its own clock at every stock
+| switch -- dj_swres at 0x400a4850 tail-jumps here with the switch's own return address -- so a jump and this
+| count share the origin.) d0-d1 are the caller's scratch. Then stock's body.
     .global rl_creset
 rl_creset:
     move.l  4(%sp),%d0

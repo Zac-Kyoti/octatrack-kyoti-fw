@@ -1027,6 +1027,37 @@ quick check for each:
     not reported separately. Correctly named pair for further tests: out/ab/KDJC8/ (syx 5a906055…) and out/ab/KDJC9/
     (syx eb2436c0…).
 
+- **DIRECT JUMP V7.3 -- the last restart is the time origin** (FINAL 2026-11-16). Images (all
+  WIP, OS VERSION in brackets): `out/KYOTI/OCTATRACK_OS1.40C_KYOTI_V1.8C.syx` (`KY18C DJR1`, Clyps + DIRECT JUMP),
+  `out/KYOTI/OCTATRACK_OS1.40C_KYOTI_V1.8.syx` (`KY18 DJR1`, RELOAD + DIRECT JUMP),
+  `out/DIRECT_JUMP_KYOTI/OCTATRACK_OS1.40C_DIRECT_JUMP_KYOTI.syx` (`140C_DJR1`), `out/CLYPS/OCTATRACK_OS1.40C_CLYPS.syx`
+  (`CLYPS DJR1`) -- hashes in NOTES 2026-11-16 (`dj-restart`). What changed: after a NORMAL pattern change (DIRECT JUMP
+  off, a chain, the arranger) a jump lands in phase with the pattern that started at that change, not with PLAY; its
+  trig conditions count from that change too, as RELOAD's and Clyps' loads already did. Setup: a project with A01 =
+  16 steps, A02 = 12 steps, A03 = 12 steps (all 1x), a `1:2` hi-hat trig on step 1 of a track in A02 and A03 (and a
+  plain kick on every 4th step, to hear the bar).
+  1. **The restart case (by ear):** DIRECT JUMP **off**, PLAY on A01. Cue A02 the normal way: it starts at A01's end.
+     Now `[PTN]` + `[YES]` (`DIRECT JUMP ON`) and, about 4 steps into A02, jump to A03 (`[PTN]` + trig 3). A03 must
+     land **in phase with A02** -- on A02's next step, at the step A02 was about to play (step 5 here), not on step 9
+     (where V1.8 / V1.8C land: A03's phase counted from PLAY). The bar does not shift; the kick stays on the beat.
+  2. **`1:2` stays in step:** in case 1, A03's `1:2` hi-hat plays on the same passes as A02's would have: A02 started
+     its first pass at the change, A03 carries on from there (it does not restart at the jump, and it is not counted
+     from PLAY). Jump back and forth A02 <-> A03 a few times: the `1:2` never skips or doubles.
+  3. **RELOAD beside it** (`KY18 DJR1`): after case 1, reload the hi-hat track (`[PTN]` + `[TRACK n]`): its `1:2` stays
+     in step with the other tracks' `1:2` trigs (before: it could fall one pass out against them).
+  4. **A Clyps load beside it** (`KY18C DJR1`): after case 1, load another 12-step sequence with a `1:2` trig onto one
+     track from Clyps: its `1:2` stays in step with the untouched tracks'.
+  5. **Other normal changes are restarts too:** the same as case 1 with a CHAIN AFTER point in A01 (e.g. CHAIN AFTER 16
+     on a 64-step A01, so A02 starts mid-A01), and with a pattern chain that ends on A02: the jump lands in phase with
+     A02 as it started.
+  6. **Without a normal change nothing changed:** PLAY, DIRECT JUMP on from the start, jumps between patterns of
+     different lengths and scales: exactly as V7.2.2 (clock-locked to PLAY, cue in the last step, `1:2` across jumps,
+     LFO AUTO CHANGE, SILENCE TRACKS -- the `140C_KDJC6` / `KDJC9` lists above). STOP -> PLAY counts from PLAY again.
+  7. **Unchanged:** DIRECT JUMP off = stock; Clyps' ORIG PTN+PRT with DIRECT JUMP on (a self-jump, not a restart) and
+     off (stock's change to itself: a restart); Program Change on re-cues; MIDI tracks.
+  - **Result (the user, 2026-11-16):** `KY18C DJR1` flashed (syx e50d8f5e…, mainos 9d1a29c9… = KYOTI V1.8C's FINAL):
+    all three by-ear checks pass -- A03 lands in phase with A02 after the normal change, `1:2` stays in step, and a
+    Clyps one-track load after the jump stays in step. `KY18 DJR1` (RELOAD after a jump) not flashed: emulator only.
 - **KYOTI with Clyps "KY+CL DJC6"** (WIP, 2026-11-15; Clyps CL35 c72b4bc + DIRECT JUMP V7.2.2): the KDJC9 A/B above,
   inside and outside Clyps, then the DJC3 list below. NOT yet run on hardware.
 - **KYOTI with Clyps "KY+CL DJC3" walk-through** (WIP, 2026-11-14; Clyps CL34 bc04617 + DIRECT JUMP V7.2; NOT yet run
