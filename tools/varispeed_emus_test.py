@@ -1661,8 +1661,23 @@ def net_check(t, s, d, log):
                     t.eq("slot 2 loaded: its path, its tempo 714 -> 2880 (the loader's)",
                          (r[:0x104].split(b"\0")[0], struct.unpack(">I", r[0x114:0x118])[0]), (PATH_B[:-1], 2880))
             played({k: e for k, e in want.items() if kind != "machine" or k != n.get("enter", 7)}, 5400)
-        t.eq("toasts by the end", end_count, 1 if stepped else 0)
-        t.eq("MAX DSP: EMU LIMIT raised", len(ours), 1 if stepped else 0)
+        nt = 1 if stepped else 0
+        if kind == "part":
+            # VEM11 (VEMG2): the switch itself is priced as the mix it plays. Part 1's T5 trigs on the
+            # new pattern's first step (it switches at once); T6-T8 trig later and carry part 0's
+            # notes and live FX until then. After the net's step, if that mix is still over, the
+            # guard clamps carried notes on the switch frame (temporary) and raises its own toast.
+            new_e = {k: want.get(k, 0) for k in GT}
+            old_e = {k: ENG["SP12"] for k in GT}                     # part 0: SP12 x4, latched
+            fx0 = {k: (c["fx1"].get(k, "NONE"), c["fx2"].get(k, "DARK")) for k in GT}
+            fx1 = c["fx_p1"]
+            pr = lambda f, e: fx_price(f[0]) + fx_price(f[1]) + eng_price(e)
+            mix = m.base + sum(pr(fx1[k], new_e[k]) if G_STEPS[k] == 1 else
+                               max(pr(fx0[k], old_e[k]), pr(fx1[k], new_e[k])) for k in GT)
+            t.notes.append(f"the transition after the net: {mix} (budget {m.budget})")
+            nt += 1 if mix > m.budget else 0
+        t.eq("toasts by the end", end_count, nt)
+        t.eq("MAX DSP: EMU LIMIT raised", len(ours), nt)
     elif kind == "emus":
         eng = dict(eng0)
         stop = eng.get(7, 0)

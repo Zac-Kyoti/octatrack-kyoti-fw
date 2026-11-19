@@ -122,6 +122,33 @@ CASES["carry_s950_ot"] = dict(CASES["carry_fit"], a_emus=ALL("S950"))
 # the working bank's), but from the bank / PART_B move to the apply (message 21 / 20, ~7 ticks)
 CASES["own_xbank"] = dict(CASES["own_step1"], b_bank=1)
 CASES["mix_xbank"] = dict(CASES["mix_max"], b_bank=1)
+# VEMG2: a cue cancelled (pattern 0, the playing one, cued again at frame 3000) and a cue changed
+# (to pattern 2, which uses the current Part 0) before the switch: nothing written, nothing heard
+CASES["cancel_mix_max"] = dict(CASES["mix_max"], recue=(3000, 0, 0))
+CASES["change_mix_max"] = dict(CASES["mix_max"], recue=(3000, 0, 2))
+# VEMG2: the first-step certainty. A's T5 / T6 hold SP12 + DJ EQ x2 (881); B (fits alone, 3,307) has
+# them on OT + DJ EQ + DARK and T7 / T8 on SP12 + DJ EQ + DARK, every B track on step 1. Sure trigs:
+# B alone, nothing to do. A condition (Fill), a probability (50 %) or a micro-timing (+1) on T5 /
+# T6's step 1: they may carry their A notes (3,841): priced as carrying -- clamped, then B's T8 capped
+_CERT = dict(a_emus={4: "SP12", 5: "SP12", 6: "OT", 7: "OT"},
+             a_fx1={4: "DJEQ", 5: "DJEQ", 6: "NONE", 7: "NONE"},
+             a_fx2={4: "DJEQ", 5: "DJEQ", 6: "NONE", 7: "NONE"},
+             b_emus={4: "OT", 5: "OT", 6: "SP12", 7: "SP12"},
+             b_fx1=ALL("DJEQ"), b_fx2=ALL("DARK"),
+             a_trigs={4: [1], 5: [3], 6: [5], 7: [7]}, b_trigs=ALL([1]))
+CASES["cert_sure"] = dict(_CERT)
+CASES["cert_fill"] = dict(_CERT, b_tw={4: 0x0001, 5: 0x0001})
+CASES["cert_prob"] = dict(_CERT, b_tw={4: 0x0013, 5: 0x0013})
+CASES["cert_micro"] = dict(_CERT, b_tw={4: 0x0080, 5: 0x0080})
+# VEMG2, decision 4: a held VARI note into a Part where that track is not VARI keeps its VARI speed
+# (and, when it fits, its engine) until its own next trig; the reverse -- a held non-VARI note
+# (TSTR NORM) into a Part where it is VARI SP12 -- changes only at its own next trig too
+CASES["nonvari_fit"] = dict(a_emus={4: "SP12", 5: "SP12", 6: "OT", 7: "OT"}, a_fx1=ALL("NONE"), a_fx2=ALL("NONE"),
+                            b_emus=ALL("OT"), b_tstr=ALL(0), b_fx1=ALL("NONE"), b_fx2=ALL("NONE"),
+                            a_trigs={4: [1], 5: [3], 6: [5], 7: [7]}, b_trigs={4: [9], 5: [9], 6: [1], 7: [1]})
+CASES["rev_vari"] = dict(a_emus=ALL("OT"), a_tstr={4: 2, 5: 2}, a_fx1=ALL("NONE"), a_fx2=ALL("NONE"),
+                         b_emus={4: "SP12", 5: "SP12", 6: "OT", 7: "OT"}, b_fx1=ALL("NONE"), b_fx2=ALL("NONE"),
+                         a_trigs={4: [1], 5: [3], 6: [5], 7: [7]}, b_trigs={4: [9], 5: [9], 6: [1], 7: [1]})
 CASES["carry_sp12_s950"] = dict(CASES["carry_fit"], b_emus=ALL("S950"))
 # the timing variants of own_step1: the cue late in the bar (just before / after the commit point,
 # after it), PROGRAM CHANGE, a change length of 4, the transport stopped at the cue
@@ -132,14 +159,23 @@ for tag, over in (("cue5100", dict(cue=5100, frames=11600)), ("cue5120", dict(cu
                   ("cue5500", dict(cue=5500, frames=11600)), ("midipc", dict(cue=-1, midi=True)),
                   ("chg4", dict(chg=4)), ("stopped", dict(cue_pre=True))):
     CASES[f"own_step1_{tag}"] = dict(CASES["own_step1"], **over)
-# nothing has to act here: byte-for-byte the base
-CONTROLS = ("ref_clean", "carry_fit_step1")
+# nothing has to act here: byte-for-byte the base (FINAL) -- engines, increments, steps and toasts.
+# VEMG2: the clamp acts only when the transition needs it, so the carry cases that fit are controls
+# too; and the cases whose next Part is over on its own see the net act as FINAL does.
+CONTROLS = ("ref_clean", "carry_fit_step1", "carry_fit", "carry_s950_ot", "carry_sp12_s950", "own_late78",
+            "own_step1", "own_step1_cue5100", "own_step1_midipc", "own_step1_chg4",
+            "cancel_mix_max", "change_mix_max", "cert_sure")
+# (own_xbank is not one: FINAL drops every voice to plain OT 400 frames early there -- fix 3's case)
+# nothing may be written: the Part blocks at the end byte-for-byte the base's
+UNWRITTEN = ("cancel_mix_max", "change_mix_max", "cert_sure", "carry_fit", "mix_late")
+# a held note must keep its speed (and its engine unless clamped) until its own next trig
+HELD = {"mix_nonvari": (4, 5), "nonvari_fit": (4, 5), "rev_vari": (4, 5)}
 # the clamp acts here (a carried engine above the next Part's): the audible change of VEM11
 CLAMPED = ("own_late78", "carry_fit", "carry_s950_ot", "carry_sp12_s950", "mix_late", "mix_never", "mix_max",
            "mix_max_s2", "mix_nonvari")
 # the A/B listening pack (at most 10, the author's rule): the clamp's cases, the pitch jump, two controls
-PACK = ("carry_fit", "carry_s950_ot", "carry_sp12_s950", "own_late78", "mix_late", "mix_max", "mix_nonvari",
-        "ref_clean", "carry_fit_step1")
+PACK = ("mix_late", "mix_max", "mix_nonvari", "nonvari_fit", "cert_fill", "own_xbank", "rev_vari",
+        "carry_fit", "cancel_mix_max", "ref_clean")
 RENDER = 0x80004898                               # + 40t: the render state; +36 the increment
 
 
@@ -152,6 +188,7 @@ def trig_mask(pattern, t, steps):
 
 
 def part_cfg(part, emus, fx1, fx2, live, tstr=None):
+    """(tstr: per track; 4 = VARI with emus, else that TSTR and no EMUS)"""
     pk = []
     for t in GT:
         ts = (tstr or {}).get(t, 4)
@@ -175,6 +212,8 @@ def watches(syms):
     pcs = [0x4005a2b8, S["vg_fix"], S["vg_step_ot"], 0x400621e2, 0x40009e00, 0x400a44d0, 0x40009094]
     if "vgx_step" in S:
         pcs.append(S["vgx_step"])
+    if ".xt_commit" in S:
+        pcs.append(S[".xt_commit"])
     return mem, pcs
 
 
@@ -187,12 +226,17 @@ def run_case(name, img, audio=False):
     syms = json.loads(symsf.read_text())
     d = OUT / img / name
     d.mkdir(parents=True, exist_ok=True)
-    pk = part_cfg(0, c["a_emus"], c["a_fx1"], c["a_fx2"], live=True)
+    pk = part_cfg(0, c["a_emus"], c["a_fx1"], c["a_fx2"], live=True, tstr=c.get("a_tstr"))
     pb = part_cfg(1, c["b_emus"], c["b_fx1"], c["b_fx2"], live=False, tstr=c.get("b_tstr"))
     pb += [V.b(MMDB + 1 * 0x8ed8 + 0x8e57, 1)]          # pattern 1 uses Part 1
     for t in GT:
         pk += trig_mask(0, t, c["a_trigs"][t])
         pb += trig_mask(1, t, c["b_trigs"][t])
+    for t, w in c.get("b_tw", {}).items():             # B's step-1 trig word (condition / micro-timing)
+        a = MMDB + 1 * 0x8ed8 + int(t) * 0x91a + 0x89a
+        pb += [V.b(a, w >> 8), V.b(a + 1, w & 0xff)]
+    if c.get("recue"):
+        pk += [V.b(MMDB + 2 * 0x8ed8 + 0x8e57, 0)]       # pattern 2 uses Part 0 (the playing one)
     xb = c.get("b_bank", 0)
     if xb:                                              # B in another bank's blob (DB only: the SRAM
         out = []                                        #   copy is the working bank's)
@@ -214,6 +258,9 @@ def run_case(name, img, audio=False):
         steps.append("-:call:0x400a1030,0x0,0x1")
     elif cue >= 0:
         steps.append(V.call(cue, 0x400a1030, xb, 1))
+    if c.get("recue"):
+        f, bk, pt = c["recue"]
+        steps.append(V.call(f, 0x400a1030, bk, pt))
     steps.append(f"{frames - 30}:dump:{V.mmpart(1):#x},{V.PSTRIDE:#x}={d / 'end_p1.part'};"
                  f"{V.mmpart(0):#x},{V.PSTRIDE:#x}={d / 'end_p0.part'}")
     mem, pcs = watches(syms)
@@ -273,6 +320,7 @@ def analyze(d):
         k = min(max(bisect.bisect_left(ins_i, i), 0), len(instr) - 1)
         return instr[k][1]
 
+    trigs = {t: [] for t in GT}      # CF frames of each track's trigs (TRIGB bit 4)
     ev = []                          # (cf frame, sample, kind, data)
     inc = {t: [] for t in GT}        # (cf frame, increment) on every change
     fxc = []
@@ -283,6 +331,8 @@ def analyze(d):
             ev.append((f, s, "PART_B", val))
         elif ad == 0x80001828:
             ev.append((f, s, "APPLIED", val))
+        elif 0x46104d10 <= ad <= 0x46104d13 and val & 0x10:
+            trigs[ad - 0x46104d0c].append(f)
         elif ad == syms["vg_toast"] and val:
             ev.append((f, s, "vg_toast", val))
         elif 0x80000ec8 <= ad <= 0x80000ed3:
@@ -301,6 +351,8 @@ def analyze(d):
              0x400621e2: "msg20", 0x40009e00: "light_apply", 0x400a44d0: "commit", 0x40009094: "heavy_apply"}
     if "vgx_step" in syms:
         names[syms["vgx_step"]] = "vgx_step"
+    if ".xt_commit" in syms:
+        names[syms[".xt_commit"]] = "vgx_commit"
     for i, pc, d0, d1 in pcs:
         s = pc_sample(i)
         ev.append((cf_frame(s), s, names.get(pc, hex(pc)), (d0, d1)))
@@ -352,7 +404,7 @@ def analyze(d):
         trig = [t + 1 for t in GT if e.get(t, (0, 0))[1]]
         rows.append(dict(k=k, f=k - off, cyc=sw[0][k][1] / 16, ins=sw[0][k][0] / 16, eng=eng, est=est,
                          trig=trig, fx=fxs))
-    return dict(ev=ev, rows=rows, off=off, inc=inc, case=case, name=d.name, img=d.parent.name)
+    return dict(ev=ev, rows=rows, off=off, inc=inc, case=case, name=d.name, img=d.parent.name, trigs=trigs)
 
 
 def summary(a):
@@ -361,12 +413,13 @@ def summary(a):
     applies = [f for f, s, k, v in a["ev"] if k == "APPLIED"]
     steps = [(f, k) for f, s, k, v in a["ev"] if k in ("vg_step_ot", "vgx_step")]
     toasts = [f for f, s, k, v in a["ev"] if k == "NOTIFY"]
+    commits = [f for f, s, k, v in a["ev"] if k == "vgx_commit"]
     # the cycles after the first DSP frame of a steady second (skip the boundary frame's own spike)
     return dict(est_max=max((r["est"] for r in rows), default=0),
                 cyc_max=max((r["cyc"] for r in rows), default=0),
                 over=len(over), over_ms=len(over) * 16 / 44.1,
                 over_cyc_max=max((r["cyc"] for r in over), default=0),
-                applies=applies, steps=steps, toasts=toasts)
+                applies=applies, steps=steps, toasts=toasts, commits=commits)
 
 
 def engine_changes(a, t, lo=0):
@@ -429,11 +482,11 @@ def cost(imgs):
             tail = rng(g["vg_tick"], nxt(g["vg_tick"])) + rng(g["vg_sig"], nxt(g["vg_sig"]))
             idle = pend = npend = 0
             if "vgx_tick" in g:
-                idle = rng(g["vgx_tick"], g["vgx_fix"])            # vgx_tick's own tests
-                npend = cnt.get(g["vgx_fix"], 0)
+                idle = rng(g["vgx_tick"], g["vgx_clear"])          # vgx_tick's own code
+                npend = cnt.get(g["vgx_price"], 0)
                 # the pricing's own code (rp_gate_a lands in rp_gate_m's body in the cave, shared
                 # with the frame path: not counted here)
-                pend = rng(g["vgx_fix"], nxt(g["vgx_step"]))
+                pend = rng(g["vgx_clear"], nxt(g["vgx_step"]))
             frame = rng(g["vem_frame"], g["voice_set"])
             rows.append((img, c, n, ticks, tail / ticks if ticks else 0, idle / ticks if ticks else 0,
                          npend, pend / npend if npend else 0, frame / n, rng(sy["cave"], sy["end"]) / n,
@@ -476,8 +529,17 @@ def check(imgs):
                 if not any(0 <= tf - f <= 2 for tf in s["toasts"]):
                     fails.append(f"{img}/{name}: step {k} at f{f} without a toast")
             for tf in s["toasts"]:
-                if not any(0 <= tf - f <= 2 for f, k in s["steps"]):
-                    fails.append(f"{img}/{name}: toast at f{tf} without a step")
+                if not any(0 <= tf - f <= 2 for f in [f for f, k in s["steps"]] + s["commits"]):
+                    fails.append(f"{img}/{name}: toast at f{tf} without a step or a commit")
+            # VEMG2: nothing reaches a Part before its switch -- a step comes after the apply
+            # (vgx_step at the commit) or from the net once PART_B has moved
+            ap = [f for f in s["applies"] if f > 0]
+            pbm = [f for f, s_, k, v in a["ev"] if k == "PART_B" and f > 0]
+            for f, k in s["steps"]:
+                if k == "vgx_step" and not (ap and f >= ap[0]):
+                    fails.append(f"{img}/{name}: vgx_step at f{f}, before the switch")
+                if k == "vg_step_ot" and f >= 0 and not (pbm and f >= pbm[0]):
+                    fails.append(f"{img}/{name}: a step at f{f}, before PART_B's move")
             if name == "mix_nonvari":
                 ap = [f for f in s["applies"] if f > 0]
                 sw = ap[0] if ap else None
@@ -488,11 +550,35 @@ def check(imgs):
                     early = [c for c in engine_changes(a, t, lo=lo) if sw is None or c[1] < sw]
                     if early:
                         fails.append(f"{img}/{name}: T{t + 1} changes before the switch frame f{sw}: {early}")
+            if name in HELD:
+                for t in HELD[name]:
+                    own = [f for f in a["trigs"][t] if ap and f > ap[0]]
+                    hi = own[0] if own else 10 ** 9
+                    lo = (pbm[0] - 50) if pbm else 0
+                    for c in engine_changes(a, t, lo=lo):
+                        if c[1] >= hi:
+                            continue
+                        if c[0] == "increment" and (int(c[2], 16) & ~0xf) != (int(c[3], 16) & ~0xf):
+                            fails.append(f"{img}/{name}: T{t + 1}'s speed changes at f{c[1]}, before its own "
+                                         f"trig f{hi}: {c}")
+                        elif c[0] == "engine" and not (ap and c[1] == ap[0] and c[3] == "OT"):
+                            fails.append(f"{img}/{name}: T{t + 1}'s engine changes at f{c[1]} (not a clamp "
+                                         f"on the switch frame), before its own trig f{hi}: {c}")
             b = res.get((base, name))
+            if name in UNWRITTEN and b is not None:
+                for part in ("end_p0.part", "end_p1.part"):
+                    if (OUT / img / name / part).read_bytes() != (OUT / base / name / part).read_bytes():
+                        fails.append(f"{img}/{name}: {part} differs from {base}'s (something was written)")
             if name in CONTROLS and b is not None:
                 sb = summary(b)
-                if s["steps"] or s["toasts"]:
-                    fails.append(f"{img}/{name}: control case stepped / toasted ({s['steps']}, {s['toasts']})")
+                # the same steps and toasts; their CF frame within 2 (the ColdFire load differs, so a
+                # UI-task event can fall a frame either side of the frame-ISR edge)
+                near = lambda x, y: len(x) == len(y) and all(abs(i - j) <= 2 for i, j in zip(x, y))
+                if not (near([f for f, k in s["steps"]], [f for f, k in sb["steps"]])
+                        and [k for f, k in s["steps"]] == [k for f, k in sb["steps"]]
+                        and near(s["toasts"], sb["toasts"])):
+                    fails.append(f"{img}/{name}: steps / toasts {s['steps']} {s['toasts']} differ from "
+                                 f"{base}'s {sb['steps']} {sb['toasts']}")
                 ea = [tuple(r["eng"].values()) for r in a["rows"]]
                 eb = [tuple(r["eng"].values()) for r in b["rows"]]
                 n = min(len(ea), len(eb))
@@ -502,8 +588,6 @@ def check(imgs):
                 for t in GT:
                     if [v for f, v in a["inc"][t]] != [v for f, v in b["inc"][t]]:
                         fails.append(f"{img}/{name}: T{t + 1}'s increments differ from {base}")
-                if sb["steps"] or sb["toasts"]:
-                    fails.append(f"{base}/{name}: the base stepped here -- not a control")
     print()
     for f in fails:
         print("FAIL", f)
@@ -513,21 +597,27 @@ def check(imgs):
 
 # ------------------------------------------------------------------------------- A/B pack
 LISTEN = {
-    "carry_fit": "T5-T8 sound SP12 in Part A; Part B has them on OT. A keeps SP12 on the held notes until B's "
-                 "step-9 trigs (1 s after the switch); B turns them to OT on the switch itself.",
-    "carry_s950_ot": "As carry_fit with S950 in Part A: B turns the held S950 notes to OT on the switch.",
-    "carry_sp12_s950": "As carry_fit, Part B has the tracks on S950: B turns the held SP12 notes to S950 on the switch.",
-    "own_late78": "Part B is over budget on its own: both step its T7 / T8 to OT (A at PART_B's move, B at the cue). "
-                  "T7 / T8 do not trig until step 9: A plays their held SP12 notes on to step 9, B turns them to OT "
-                  "on the switch.",
     "mix_late": "Each Part fits, the mix does not (A: 3,681 for 1 s). T5 / T6 hold SP12 notes into a Part that has "
-                "them on OT: B turns them to OT on the switch (fits, 3,307); A keeps them on SP12 until step 9.",
-    "mix_max": "The worst mix (A: 4,001 for 1 s). B steps Part B's T7 / T8 to OT at the cue (toast), so B's T7 / T8 "
-               "play OT for the whole bar, and T5 / T6's held SP12 notes turn OT on the switch.",
-    "mix_nonvari": "The pitch jump: Part B has no VARI track. A's T5 / T6 leave VARI (engine and speed) 145 ms BEFORE "
-                   "the switch; B's at the switch. Listen just before the switch.",
+                "them on OT: B clamps the two held notes to OT on the switch (temporary; the toast); the Part is "
+                "not changed. A keeps them on SP12 until their step-9 trigs.",
+    "mix_max": "The worst mix (A: 4,001 for 1 s). B clamps the held T5 / T6 SP12 notes to OT on the switch and, "
+               "since that is not enough, plays Part B's T7 / T8 on OT (committed to the Part at the switch, toast).",
+    "mix_nonvari": "Part B has no VARI track. A: T5 / T6 leave VARI (speed and engine) 145 ms BEFORE the switch. "
+                   "B: they keep their VARI speed to their own step-9 trig; their engine is clamped to OT on the "
+                   "switch (the mix needs it).",
+    "nonvari_fit": "As mix_nonvari without FX (it fits). A: T5 / T6 leave VARI 145 ms before the switch. B: speed "
+                   "and engine kept to their step-9 trigs.",
+    "cert_fill": "Part B fits alone; its T5 / T6 step-1 trigs carry a Fill condition (they do not fire), so A's "
+                 "T5 / T6 SP12 + DJ EQ x2 notes play on into B (A: 3,841, over). B: those notes clamped to OT on "
+                 "the switch and B's T8 on OT (toast).",
+    "own_xbank": "A cue into another bank. A: every T5-T8 voice drops to plain OT 400 frames before the switch. "
+                 "B: they play on to the switch.",
+    "rev_vari": "The reverse case: T5 / T6 hold NORM notes into a Part that has them on VARI SP12: both keep the "
+                "held notes as they are until the step-9 trigs (expected identical).",
+    "carry_fit": "Control (VEMG1 changed it): held SP12 notes into a Part that has them on OT; the mix fits: "
+                 "A and B identical (SP12 to step 9).",
+    "cancel_mix_max": "Control: mix_max cued, then cancelled before the switch: nothing written, A and B identical.",
     "ref_clean": "Control, no Part switch: A and B identical.",
-    "carry_fit_step1": "Control: every track trigs on the switch (nothing carried): A and B identical.",
 }
 
 
@@ -542,7 +632,7 @@ def pack(dest):
     man = []
     for i, name in enumerate(PACK, 1):
         clips = {}
-        for tag, img in (("A_final", "base_feature"), ("B_vem11", "feature")):
+        for tag, img in (("A_final", "base_feature"), ("B_vemg2", "feature")):
             d = OUT / img / name
             w = wave.open(str(d / "audio_core0.wav"))
             n, ch, sw = w.getnframes(), w.getnchannels(), w.getsampwidth()
@@ -556,23 +646,33 @@ def pack(dest):
                 o = (k * ch) * sw
                 fr += raw[o + 2 * sw:o + 3 * sw] + raw[o + 3 * sw:o + 4 * sw]
             clips[tag] = bytes(fr)
-        # the two loads end a few samples apart: align B on A by the lag (whole samples) that makes
-        # their first 0.5 s identical (before the switch nothing differs), if one does
-        lag = 0
-        for g in sorted(range(-32, 33), key=abs):
-            sa, sb = (0, g) if g >= 0 else (-g, 0)
-            if clips["A_final"][6 * sa:6 * (sa + 22050)] == clips["B_vem11"][6 * sb:6 * (sb + 22050)]:
-                lag = g
-                break
-        else:
-            print(f"  {name}: no lag in -32..32 makes the first 0.5 s identical -- unaligned")
-        sa, sb = (0, lag) if lag >= 0 else (-lag, 0)
-        a0, b0 = clips["A_final"][6 * sa:], clips["B_vem11"][6 * sb:]
-        L = min(len(a0), len(b0))
-        a, b = a0[:L], b0[:L]
+        # the two loads end a few samples apart: align B on A, each channel by the lag (whole samples)
+        # that makes its first 0.5 s identical (before the switch nothing differs), if one does (the
+        # emulator's TX slots can also rotate by a sample between two runs, so L and R may differ)
+        A, Bc = clips["A_final"], clips["B_vemg2"]
+        ch = lambda x, c: b"".join(x[k + 3 * c:k + 3 * c + 3] for k in range(0, len(x) - 5, 6))
+        lags, outs = [], []
+        for c in (0, 1):
+            ac, bc = ch(A, c), ch(Bc, c)
+            lag = 0
+            for g in sorted(range(-32, 33), key=abs):
+                sa, sb = (0, g) if g >= 0 else (-g, 0)
+                if ac[3 * sa:3 * (sa + 22050)] == bc[3 * sb:3 * (sb + 22050)]:
+                    lag = g
+                    break
+            else:
+                print(f"  {name} ch {c}: no lag in -32..32 makes the first 0.5 s identical -- unaligned")
+            sa, sb = (0, lag) if lag >= 0 else (-lag, 0)
+            lags.append(lag)
+            outs.append((ac[3 * sa:], bc[3 * sb:]))
+        L = min(len(x) for pr in outs for x in pr) // 3
+        inter = lambda i: b"".join(outs[0][i][3 * k:3 * k + 3] + outs[1][i][3 * k:3 * k + 3] for k in range(L))
+        a, b = inter(0), inter(1)
+        L = len(a)
+        lag = lags
         first = next((k // 6 for k in range(0, L, 3) if a[k:k + 3] != b[k:k + 3]), None)
         files = {}
-        for tag, data in (("A_final", a), ("B_vem11", b)):
+        for tag, data in (("A_final", a), ("B_vemg2", b)):
             f = dest / f"{i:02d}_{name}_{tag}.wav"
             with wave.open(str(f), "wb") as o:
                 o.setnchannels(2)
@@ -580,13 +680,13 @@ def pack(dest):
                 o.setframerate(44100)
                 o.writeframes(data)
             files[tag] = f.name
-        man.append(dict(n=i, case=name, listen=LISTEN[name], A=files["A_final"], B=files["B_vem11"],
+        man.append(dict(n=i, case=name, listen=LISTEN[name], A=files["A_final"], B=files["B_vemg2"],
                         switch_at_s=None if name == "ref_clean" else 1.0,
                         first_difference_s=None if first is None else round(first / 44100, 4), lag=lag,
                         seconds=round(L / 6 / 44100, 3)))
     (dest / "manifest.json").write_text(json.dumps(man, indent=1))
-    md = ["# VARISPEED_EMUS VEM11 A/B pack (emulator renders, ot_emu --audio-out)", "",
-          "A = the promoted FINAL VARISPEED_EMUS feature image (mainos 52823ea6...), B = VEM11 (the WIP fix). "
+    md = ["# VARISPEED_EMUS VEMG2 A/B pack (emulator renders, ot_emu --audio-out)", "",
+          "A = the promoted FINAL VARISPEED_EMUS feature image (mainos 52823ea6...), B = VEMG2 (the WIP fix). "
           "MMTESTDT (a hardware export), T5-T8 on DSP core 0, set by runtime pokes "
           "(tools/varispeed_emus_switch_test.py). Each clip is the main out, from 1.0 s before the Part switch "
           "(ref_clean: no switch) to the end of the render. 24-bit stereo, 44.1 kHz. B is aligned on A to the "
@@ -619,7 +719,7 @@ def main():
     if a.verb == "timeline":
         return timeline(a.arg)
     if a.verb == "pack":
-        return pack(a.arg or ROOT / "out/ab_emus_guard")
+        return pack(a.arg or ROOT / "out/ab_emus_guard2")
     if a.verb == "run":
         jobs = [(n, i) for i in imgs for n in names]
         with ThreadPoolExecutor(a.jobs) as ex:

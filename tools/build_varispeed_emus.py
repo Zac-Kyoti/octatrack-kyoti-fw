@@ -18,12 +18,13 @@ slot picked from a slot list that changes its machine (VEM10, "6b, option B exte
 safety net -- run in the UI task's message loop when a signature of the estimate's inputs
 changes -- steps just enough tracks to OT however else a core got over (Part change,
 reload, loads, machine, paste), in its order; the toast MAX DSP: EMU LIMIT is raised from
-that loop only. VEM11 (2026-11-18): a sequencer Part switch is priced as the TRANSITION it
-plays -- each track keeps the old Part's FX and engine until its own first trig in the new
-Part -- before the switch, and the new Part's EMUS stepped to OT until that mix fits; the
-frame hook clamps a carried engine once, on the real switch frame (APPLIED_B / APPLIED_P),
-to the new Part's EMUS; and a playing VARI voice keeps its engine and speed until that frame
-(no early pitch jump from PART_B's move 7 ticks ahead).
+that loop only. VEM11 (2026-11-18, VEMG2): a sequencer Part switch is priced as the TRANSITION
+it plays -- each track keeps the old Part's FX, engine and speed until its own first trig in
+the new Part; a track sure to trig on the new pattern's first step switches at once -- before
+the switch; over the budget, carried notes are clamped to OT first (temporary), the new Part's
+EMUS stepped to OT only if that is not enough. Nothing is written until the switch: the frame
+hook applies the decisions on the real switch frame (APPLIED_B / APPLIED_P), the UI task then
+commits the step-downs to the Part and raises the toast; a cancelled cue leaves nothing.
 Spec: reference/handoffs/VARISPEED_SPEC.md (clean-room); facts:
 VARISPEED_SCOPE.md + VARISPEED_SCOPE_EMUS.md; this build:
 reference/handoffs/VARISPEED_IMPL.md.
@@ -219,6 +220,15 @@ CONTEXT.update({
     # the render state of track t: 0x80004898 + 40t (its +36 = the increment the engine rides in)
     0x4000d386: "223c8000489823c1800062a4",
     0x4000d536: "7028d1b9800062a4",
+    # VEMG2: stock's per-track pair of the Part a track's live bytes came from, 0x8000182a + t (bank)
+    # / 0x80001832 + t (part): written at the track's trig (0x80000110 + t + 0x171a / + 0x1722) ...
+    0x4000bf5a: "102f0076206f00a41140171a102f007711401722",
+    # ... and by the heavy apply for every track; the light apply (a sequencer switch) does not
+    0x40009390: "0dbc102f004a1340171a122f004b1341",
+    # the step handler: the trig word of step s at track + 0x89a + 2s, its condition (bits 6-0) the
+    # test 0x400a5164 skips the trig on; the note / trig-type masks ORed for "anything on this step"
+    0x4009d318: "203c0000048d4c070800222f0078243c0000476c4c021800d081d0af007c240006820000044d10332a01767fc6802f032f2f00802f074eb9",
+    0x4009d36e: "43f2cc08323c091a4c071800d3c141f2cc00d1c12031b80080b0b80041f2cc10d1c180b0b80041f2cc18d1c180b0b800",
 })
 
 

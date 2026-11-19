@@ -74,7 +74,7 @@ U = "vem_cf"
 LINKED = (
     Linked(U, os.path.join(_HERE, "varispeed_emus.s"),
            reference=(0x400d6500,
-                      "7fbf2a3be014f8f1b5a64e7bf6843dbba5cee3e9d7415cfb34e806664e1d6a4e")),
+                      "44ed2c56a9e76daa61041a60be26970eeeb0849ac457d22bf5e6f914653d6c2a")),
 )
 
 _X = bytes.fromhex

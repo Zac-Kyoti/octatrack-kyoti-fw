@@ -24,6 +24,11 @@ def main():
     ap.add_argument("--quick", action="store_true")
     ap.add_argument("--jobs", type=int, default=8)
     ap.add_argument("--frames", type=int, default=3000)
+    ap.add_argument("--base-shift", type=int, default=0,
+                    help="frames added to the base run's timed steps: ot_emu's 'N frames after the transport start' "
+                         "can fall a few frames apart from the sequencer when the two images' loads end at another "
+                         "frame phase (a larger DRAM payload); the shift that makes the pokes land at the same "
+                         "sequencer time makes the comparison like for like")
     a = ap.parse_args()
     os.environ["VEM_PROJECT"] = a.project
     os.environ.setdefault("VEM_EMU", str(ROOT / "out/emu/octabam/out/emu/ot_emu"))
@@ -35,17 +40,20 @@ def main():
             "base": pathlib.Path(os.environ.get("VEM_IMG_BASE", ROOT / "out/base_unit.bin"))}
     sc = {**H.matrix(a.quick), **H.oor_matrix()}
     st = {n: H.scenario_steps(cfg, "new") for n, cfg in sc.items()}
+    shift = lambda steps, d: [x if x.split(":", 1)[0] == "-" else f"{int(x.split(':', 1)[0]) + d}:{x.split(':', 1)[1]}"
+                              for x in steps]
     logs = {}
     for tag, img in imgs.items():
         H.IMAGES["new"] = img.resolve()
         print(f"running {tag} ({img.name}): {len(sc)} scenarios ...", flush=True)
-        logs[tag] = H.run("new", st, a.frames, a.jobs, tag)
+        logs[tag] = H.run("new", {n: shift(v, a.base_shift if tag == "base" else 0) for n, v in st.items()},
+                          a.frames, a.jobs, tag)
     bad = 0
     for n in sc:
         la, lb = logs["new"][n], logs["base"][n]
         reached = all("run ended REACHED" in p.read_text() for p in (la, lb))
         r = H.compare(H.parse(str(la) + ".vem"), H.parse(str(lb) + ".vem"), sc[n], f"{n} new vs FINAL")
-        w = r.get("whole_run", [])
+        w = r.get("whole_run", []) if not a.base_shift else []    # (shifted: the compared region only)
         same = r["ok"] and reached and not w
         bad += not same
         print(f"  {'IDENTICAL' if same else 'DIFFER   '} {n}"
