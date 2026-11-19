@@ -28,6 +28,11 @@ STOCK_SECT = ROOT / "out/raw/section_3_MAIN_OS.bin"
 OUT = ROOT / "out/mainos_empty_pattern_led_fix.bin"
 import kyoti_place                   # combined-image placement (build_kyoti.py); no-op standalone
 CAVE_AT = kyoti_place.at("patch_pattern_led", 0x400d7000)
+# build_kyoti.py may carry the predicate in DRAM (tools/dram/, as DIRECT JUMP's unit): linked at the address
+# it is given and NOT written into this image -- only the detour is; the combined builder appends the
+# linked blob (out/patch_pattern_led.bin) behind its loader. The predicate runs on the UI task only (the
+# pattern-LED painters, the [BANK] grid), long after the boot-time loader. Unset standalone: as before.
+DRAM = bool(kyoti_place.at("patch_pattern_led_dram", False))
 DETOUR_AT = 0x4009a464
 DETOUR_EXPECT = bytes.fromhex("2f02202f0008")      # move.l %d2,-(%sp) ; move.l 8(%sp),%d0
 
@@ -60,12 +65,16 @@ def main():
         sys.exit(f"detour site 0x{DETOUR_AT:08x} unexpected: {bytes(img[do:do+6]).hex()} "
                  f"(wrong firmware, or already patched)")
     co = CAVE_AT - BASE
-    if any(img[co:co + len(cave)]):
+    if DRAM:
+        if BASE <= CAVE_AT < BASE + len(img):
+            sys.exit(f"patch_pattern_led_dram: 0x{CAVE_AT:08x} is inside the OS image, not DRAM")
+    elif any(img[co:co + len(cave)]):
         sys.exit(f"cave at 0x{CAVE_AT:08x} is not free: {bytes(img[co:co+16]).hex()}")
 
     # detour: jmp <cave>  (6 B, exactly replaces the two prologue instructions)
     img[do:do + 6] = b"\x4e\xf9" + CAVE_AT.to_bytes(4, "big")
-    img[co:co + len(cave)] = cave
+    if not DRAM:
+        img[co:co + len(cave)] = cave
 
     OUT.write_bytes(bytes(img))
 
@@ -74,7 +83,7 @@ def main():
     changed = sum(1 for a, b in zip(stock, img) if a != b)
     print(f"{OUT}: {len(img):,} bytes, {changed} changed vs stock ({len(cave)} B cave + 6 B detour)")
     print(f"  detour  0x{DETOUR_AT:08x}  jmp 0x{CAVE_AT:08x}")
-    print(f"  cave    0x{CAVE_AT:08x}  {len(cave)} B")
+    print(f"  cave    0x{CAVE_AT:08x}  {len(cave)} B" + ("  (DRAM: carried by the combined image's loader, not written here)" if DRAM else ""))
 
     if not EFT.exists() or not STOCK_SYX.exists():
         print("\n  (EFT tool or stock syx missing -- skipping the .syx/.bin wrap)")

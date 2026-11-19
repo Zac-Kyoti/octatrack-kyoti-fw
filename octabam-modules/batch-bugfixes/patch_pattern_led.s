@@ -64,12 +64,12 @@
 | clear the row) stay off by construction; lock bytes WITHOUT a mask bit stay off
 | under [BANK] (lit under [PTN], whose full-array scan is unchanged).
 | Cost bound: at most PL_BUDGET rows are checked per call (22 instructions a row), so a
-| pattern of nothing but empty trigless locks costs ~460 cave instructions instead of the
+| pattern of nothing but empty trigless locks costs ~390 cave instructions instead of the
 | 32 KB scan S119 removed; past the budget the pattern reads as stock reads it (empty).
-| A pattern without trigless-lock bits costs one OR over the 16 masks: 97 instructions.
+| A pattern without trigless-lock bits costs one walk over the 16 masks: 104 instructions.
 | Measured (tools/led_bank_stall.py, ot_emu, transport running, 0.6 s with [BANK] held):
-| OT DEMO 41.16M -> 41.34M ColdFire instructions (idle 39.80M); all 256 patterns empty
-| 39.57M -> 39.68M; every pattern 1,024 empty trigless locks 41.20M -> 42.30M (holding
+| OT DEMO 41.16M -> 41.35M ColdFire instructions (idle 39.80M); all 256 patterns empty
+| 39.57M -> 39.69M; every pattern 1,024 empty trigless locks 41.20M -> 42.13M (holding
 | [PTN] on that project costs 42.42M with the FINAL already).  Session 119's stall: 116.8M.
 | The [PTN] path is the Session 119 code (12,390 instructions per empty pattern).
 
@@ -107,16 +107,16 @@ cave:
     tst.l   %d0
     beq.s   0f
     rts                                   | trigs -> content (d0 = 1)
-0:  lea     -28(%sp),%sp
-    movem.l %d2-%d6/%a2-%a3,(%sp)         | the caller's
-    move.l  32(%sp),%d3                   | pattern
+0:  lea     -24(%sp),%sp
+    movem.l %d2-%d4/%d6/%a2-%a3,(%sp)     | the caller's
+    move.l  28(%sp),%d3                   | pattern (24(sp) = the return address)
     move.l  #PAT_STRIDE,%d2
     muls.l  %d2,%d3
-    move.l  36(%sp),%d1                   | bank
+    move.l  32(%sp),%d1                   | bank
     move.l  #BANK_STRIDE,%d2
     muls.l  %d2,%d1
     add.l   %d1,%d3                       | d3 = this pattern's blob offset
-    move.l  28(%sp),%d0
+    move.l  24(%sp),%d0
     cmpi.l  #BANKGRID_RET,%d0
     beq.s   .Lbank                        | the [BANK] grid: the trigless-lock rows only
 
@@ -133,39 +133,46 @@ cave:
     bra.s   .Ldone
 
 | [BANK] grid (bank_has_content: all 256 patterns on every LED refresh while [BANK] is held)
+| One walk over the 8 audio + 8 MIDI tracks in pairs: the four mask words ORed (8 instructions a
+| pair, the usual answer being "no trigless lock"), and only a pair with a bit set has its rows read.
 .Lbank:
-    movea.l %d3,%a0                       | first, all 16 masks ORed: the usual answer is
-    adda.l  #BLOB+LMASK,%a0               | "no trigless lock at all" (8 instructions a pair)
-    lea     MID_BLK(%a0),%a1
+    moveq   #PL_BUDGET,%d4
+    movea.l %d3,%a0
+    adda.l  #BLOB+LMASK,%a0               | a0 = audio track t's trigless-lock mask (TRAC+0x10)
+    lea     MID_BLK(%a0),%a1              | a1 = MIDI track t's (MTRA+0x10)
     moveq   #8,%d2
-    moveq   #0,%d0
-1:  or.l    (%a0),%d0
+1:  move.l  (%a0),%d0
     or.l    4(%a0),%d0
     or.l    (%a1),%d0
     or.l    4(%a1),%d0
-    lea     AUD_STRIDE(%a0),%a0
+    bne.s   3f
+2:  lea     AUD_STRIDE(%a0),%a0
     lea     MID_STRIDE(%a1),%a1
     subq.l  #1,%d2
     bne.s   1b
-    tst.l   %d0
-    beq.s   .Ldone                        | none: empty (Z set)
-    moveq   #PL_BUDGET,%d4
-    movea.l %d3,%a0                       | 8 audio tracks: TRAC+0x10, stride 0x91a
-    adda.l  #BLOB+LMASK,%a0
-    lea     AUD_ROW0(%a0),%a1
-    move.l  #AUD_STRIDE,%d5
-    bsr.s   .Lside
-    bne.s   .Ldone                        | a locked row
-    movea.l %d3,%a0                       | 8 MIDI tracks: MTRA+0x10, stride 0x8b0
-    adda.l  #BLOB+MID_BLK+LMASK,%a0
-    lea     MID_ROW0(%a0),%a1
-    move.l  #MID_STRIDE,%d5
-    bsr.s   .Lside
+    bra.s   .Ldone                        | Z set: no locked trigless lock
+| the mask is 64-bit BE, bit n = step n: +0 holds steps 32..63, +4 steps 0..31
+3:  lea     AUD_ROW0+32*32(%a0),%a2
+    move.l  (%a0),%d0
+    bsr.s   .Lrows
+    bne.s   .Ldone
+    lea     AUD_ROW0(%a0),%a2
+    move.l  4(%a0),%d0
+    bsr.s   .Lrows
+    bne.s   .Ldone
+    lea     MID_ROW0+32*32(%a1),%a2
+    move.l  (%a1),%d0
+    bsr.s   .Lrows
+    bne.s   .Ldone
+    lea     MID_ROW0(%a1),%a2
+    move.l  4(%a1),%d0
+    bsr.s   .Lrows
+    beq.s   2b                            | nothing locked on this pair: the next one
 .Ldone:                                   | Z clear: content; Z set: empty
     sne     %d0
     andi.l  #1,%d0                        | 1 / 0
-    movem.l (%sp),%d2-%d6/%a2-%a3
-    lea     28(%sp),%sp
+    movem.l (%sp),%d2-%d4/%d6/%a2-%a3
+    lea     24(%sp),%sp
     rts
 
 | a0 = the first of 8 p-lock arrays, d1 = the gap from one array's end to the next's
@@ -190,28 +197,6 @@ cave:
     subq.l  #1,%d2
     bne.s   1b                            | falls out with Z set: nothing
 3:  rts
-
-| a0 = track 0's trigless-lock mask, a1 = its lock row 0, d5 = the track stride.
-| Z clear: a set bit whose row holds a lock; Z set: none.
-| The mask is 64-bit BE, bit n = step n: +0 holds steps 32..63, +4 steps 0..31.
-.Lside:
-    moveq   #8,%d2
-1:  move.l  (%a0),%d0
-    or.l    4(%a0),%d0
-    beq.s   3f                            | no trigless lock on this track (6 instructions)
-    lea     32*32(%a1),%a2
-    move.l  (%a0),%d0                     | steps 32..63
-    bsr.s   .Lrows
-    bne.s   9f
-    movea.l %a1,%a2
-    move.l  4(%a0),%d0                    | steps 0..31
-    bsr.s   .Lrows
-    bne.s   9f
-3:  adda.l  %d5,%a0
-    adda.l  %d5,%a1
-    subq.l  #1,%d2
-    bne.s   1b                            | falls out with Z set: nothing
-9:  rts
 
 | d0 = a mask word, a2 = the lock row of its bit 0.  Each set bit b: the 32 bytes at
 | a2 + 32*b; their AND is 0xFFFFFFFF exactly when nothing is locked on that step.
@@ -243,9 +228,9 @@ cave:
     tst.l   %d0
     bne.s   1b
 9:  rts
-.Lspent:                                  | called only as .Lbank -> .Lside -> .Lrows: drop
-    addq.l  #8,%sp                        | both return addresses (addq to sp keeps Z set)
-    bra.w   .Ldone                        | -> 0, stock's answer
+.Lspent:                                  | called only from .Lbank: drop the return
+    addq.l  #4,%sp                        | address (addq to sp keeps Z set)
+    bra.s   .Ldone                        | -> 0, stock's answer
 
 | The stock predicate, entered as the detour found it: replay the displaced prologue
 | (`move.l d2,-(sp) ; move.l 8(sp),d0`) and continue at CONT; its own epilogue

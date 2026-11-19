@@ -39,12 +39,19 @@ KEYS = {"bank": 0x2F, "ptn": 0x2E}             # NOTES: BANK 0x2f (0x4007af80), 
 WINDOW = 1654                                    # 0.6 s
 
 
+CAVE_LEN = {}                                     # --cave-len: the cave's length when it lives in DRAM
+
+
 def cave_range(image):
     img = pathlib.Path(image).read_bytes()
     d = DETOUR - BASE
     if img[d:d + 2] != b"\x4e\xf9":
         sys.exit(f"{image}: no jmp at 0x{DETOUR:08x}")
     at = int.from_bytes(img[d + 2:d + 6], "big")
+    if not BASE <= at < BASE + len(img):            # a DRAM unit (KYOTI): not at its address in the file
+        if "n" not in CAVE_LEN:
+            sys.exit(f"{image}: the cave 0x{at:08x} is in DRAM -- give --cave-len")
+        return at, at + CAVE_LEN["n"]
     end = img.find(CONT_JMP, at - BASE)
     if end < 0 or end - (at - BASE) > 0x400:
         sys.exit(f"{image}: cannot find the cave's end")
@@ -78,11 +85,13 @@ def run(emu, image, scen, settle, key=BANK_KEY):
     lo, hi = cave_range(image)
     rng = f"{lo:#x},{hi:#x}"
     ent = f"{lo:#x},{lo + 2:#x}"
+    def fr(n):         # in chunks: ot_emu's `frames` has a wall-clock ceiling (5x real time + 2 s)
+        return [f"frames {min(50, n - k)}" for k in range(0, n, 50)]
     L = ["ptr blob=0x46c82456"] + scenario_pokes(scen) + [
-        "frame on", "transport", f"frames {settle}", "coverage",
-        f"icount {rng}", f"icount {ent}", f"frames {WINDOW}", f"icount {rng}", f"icount {ent}",
-        f"key {key:#x} down", f"frames {settle}",
-        f"icount {rng}", f"icount {ent}", f"frames {WINDOW}", f"icount {rng}", f"icount {ent}",
+        "frame on", "transport", *fr(settle), "coverage",
+        f"icount {rng}", f"icount {ent}", *fr(WINDOW), f"icount {rng}", f"icount {ent}",
+        f"key {key:#x} down", *fr(settle),
+        f"icount {rng}", f"icount {ent}", *fr(WINDOW), f"icount {rng}", f"icount {ent}",
         f"key {key:#x} up", "frames 50"]
     sf = ROOT / "out" / f"led_stall_steps_{scen}_{pathlib.Path(image).stem}.txt"
     sf.write_text("\n".join(L) + "\n")
@@ -107,7 +116,10 @@ def main():
     ap.add_argument("--scenarios", default="demo,empty,tl_lock,tl_empty")
     ap.add_argument("--settle", type=int, default=300)
     ap.add_argument("--key", default="bank", choices=sorted(KEYS), help="the key held in the second window")
+    ap.add_argument("--cave-len", type=lambda x: int(x, 0), help="the cave's length (a DRAM-placed cave)")
     a = ap.parse_args()
+    if a.cave_len:
+        CAVE_LEN["n"] = a.cave_len
     print(f"window {WINDOW} frames (0.6 s); M = 1e6 ColdFire instructions\n")
     print("scenario   image".ljust(52) + f"idle all     cave   | [{a.key.upper()}] all   cave      calls   cave/call")
     for scen in a.scenarios.split(","):

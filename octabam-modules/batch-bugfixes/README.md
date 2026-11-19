@@ -7,7 +7,7 @@ instrument do what it already meant to do.
 | # | fix | size | sites |
 |---|---|---|---|
 | 1 | MIDI Plays-Free trig (`MIDI_PLAYS_FREE_FIX`) | 62 B | `0x4009b6f2` (18-byte splice) |
-| 2 | Empty-pattern LED (`EMPTY_PATTERN_LED_FIX`) | 360 B | `0x4009a464` |
+| 2 | Empty-pattern LED (`EMPTY_PATTERN_LED_FIX`) | 318 B | `0x4009a464` |
 | 3 | Part-change carryover (`PART_CHANGE_CARRYOVER_FIX`) | 402 B | `0x40062216` + `0x400621da` |
 
 ## Contents
@@ -43,8 +43,8 @@ When that says "empty":
 
 A trigless lock with nothing locked lights neither grid. Lock values on a step with no trig
 and no trigless-lock flag (a project edited off the unit can hold them) light `[PTN]` only. Measured in the
-emulator with the sequencer playing and `[BANK]` held: ~0.4 % more ColdFire work than the
-`[BANK]` grid without this check on a real project; ~2.7 % in a contrived worst case where
+emulator with the sequencer playing and `[BANK]` held: ~0.5 % more ColdFire work than the
+`[BANK]` grid without this check on a real project; ~2.3 % in a contrived worst case where
 every pattern of every bank is nothing but empty trigless locks (less than holding `[PTN]` on
 that same project costs today).
 
