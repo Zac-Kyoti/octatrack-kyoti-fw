@@ -39311,3 +39311,82 @@ change" to the plain build.
 - **V1.8BC (kyoti-bp, not touched):** at its merge, move_for_varispeed() puts pattern_led into SPRING too, but SPRING
   there also holds patch_triglock_bp; if it does not fit, pattern_led (UI task) can go to DRAM (that image has a DRAM
   arena) or another UI piece moves. Re-run its gates (BP one-per-core) and re-pin.
+
+## 2026-11-19 cont. (`emus-guard`) — VARIG2: QUAN enters VARI at 1/1 (VARISPEED VRG2, VARISPEED_EMUS VEMG3, KYOTI V1.8 / V1.8C VRG2; WIP, NOT flashed)
+
+The author on `KY18C VRG1`: turning SRC SETUP's TSTR to VARI showed QUAN `5/4` instead of `1/1`. The rule ("very
+important"): QUAN is ALWAYS 1/1 when a track goes to VARI, unless that track had another QUAN, left VARI and came back
+(then that value). PTCH comes back unchanged when it leaves.
+
+- **Not a regression.** `tools/varispeed_quan_entry_test.py` (new: 14 cases through the real panel in ot_emu, OTDEMO
+  FLEX + MMTESTDT STATIC) gives the same QUAN failures on FINAL VARISPEED (feature c3af514f), VRG1 (f3317663), KYOTI
+  V1.8C FINAL (9d1a29c9) and `KY18C VRG1` (983d3f55): legacy / forgot / stale / auto / partsw read `5/4` with PTCH +12;
+  VARISPEED_EMUS VEM11 (e2faf75d) the same but `forgot` (its SETUP page's EMUS dial polls the track). The design is
+  REPITCH rev 5's (5be77eb), retained. Not the 2026-10-23 rotary switch (it draws rk_bucket of the stored byte: 64 =
+  1/1 straight up, the same dial in every 1/1 case), not the TSNS / EMUS pair, not VRG1's freeze.
+- **Root cause** (VRG1 source `varispeed_emus.s`): which domain a machine's PTCH slot is in (PTCH or QUAN) lived only
+  in RAM, `rp_prev`, forgotten at every Part apply, bulk write and Part change (`rp_forget`, `rp_sync`) and
+  re-taken from the gate at the next poll ("first sight", rp_swap_m :2607 `bhi .sm_adopt`; the other machine in
+  rp_swap :2517-2520) -- without looking at the bytes. And entering took ANY park of 4 or more as QUAN (:2632-2637).
+  So (a) a gate that comes on before anything polled the track (a TSTR edit, a sample's TIMESTRETCH / tempo under
+  AUTO, a Part whose TSTR is VARI over bytes that never entered) is ADOPTED: the PTCH value is read as QUAN -- +12 =
+  raw 76 -> (76+3)/15 = stop 5 = `5/4`; (b) once such bytes leave VARI the park holds a PTCH value, saved with the
+  Part, and every later entry "remembers" it: `5/4` again, on every return, across sessions -- what the author saw
+  on a track that seemed fresh. A missed poll (stale rp_prev 0 over VARI bytes) re-enters and does the same.
+  The exact hardware trigger is not reproduced: in ot_emu every SRC SETUP open polls the track first (the PLAYBACK
+  dial underneath draws), and SAVE + RELOAD PROJECT, a power cycle (CS1), Part switches running or stopped, PLAY and
+  cues all came out clean. Seen in ot_emu: during RELOAD PROJECT the UI poll adopts the DEFAULT Part (gate 0) and the
+  loaded VARI Part then sits ~650 ms (emulated) before the apply's forget -- any poll there swaps PTCH into QUAN;
+  ot_emu makes none there, the unit's frame hook (FINAL: no freeze) may.
+- **Fix (VARIG2, the shared source; both builds and KYOTI).** The park says the domain:
+  - off VARI it holds nothing (below 4) or the QUAN of the last exit with bit 7 (`0x80 | QUAN`); on VARI it holds
+    PTCH, never below 4 (PTCH -64..-61 is parked as -60; it came back as 0 before);
+  - entering VARI: QUAN = the remembered one (bit 7), else `1/1`. A park an older build left off VARI (4..127, no
+    bit 7: an old QUAN, or the PTCH value the bug put there) is not memory: `1/1` (once per track an older build's
+    remembered QUAN is not kept);
+  - first sight on VARI: `rp_unent` -- a remembered QUAN, or an empty park under a slot that is no QUAN stop
+    (4 + 15k) = the entry is still to come, made now; PTCH parked, or an empty park under a QUAN stop (a VARI page an
+    SRC page paste brought) = on VARI, adopted. Off VARI nothing moves;
+  - leaving over a park with bit 7 (already off VARI) moves nothing;
+  - the other machine's first sight goes through rp_swap_m too (Part bytes only);
+  - VARISPEED_EMUS: the guard's "EMUS still parked" test is `rp_pend` (rp_prev 0, or forgotten over bytes still to
+    enter); `vg_tkey` moved to the UI section (DRAM) for cave room.
+  - Residual: a never-VARI track whose PTCH sits exactly on a stop other than 0 (+-15, +-30, +-45, +-60) edited to
+    VARI while rp_prev is forgotten adopts that stop; a missed poll on a VARI track re-enters (QUAN `1/1`, the parked
+    PTCH lost -- FINAL: `5/4` and lost).
+- **Sizes / placement.** Plain unit 2,996 -> 3,092 B (0x400d6500..0x400d7114); octabam varispeed reference 81989fcd.
+  VARISPEED_EMUS: cave unit ..0x400d7b38 (VEM11 ..0x400d7b3c), DRAM .vemui 1,982 -> 2,172 B (feature: + partreapply,
+  2,574 B, 1 arena page); octabam varispeed-emus reference 249eab1b. Feature images: VARISPEED partreapply 0x400d7114,
+  pattern_led 0x400d72a8, trigscale 0x400d7b00 (as VRG1, behind the larger unit); VARISPEED_EMUS pattern_led
+  0x400d7b38, trigscale 0x400d7bd8 (4 B lower than VEM11), partreapply DRAM 0x40a95e5c. KYOTI: patch_varispeed 2,492 ->
+  2,584 B in CAVE (56 B left), the CAVE pieces behind it +92 B; EMPTY_PATTERN_LED_FIX stays in SPRING at 0x400d5824
+  (V1.8 and V1.8C, as VRG1); build_kyoti.py unchanged.
+- **Gates (emulator).** `varispeed_quan_entry_test.py`: VRG2 feature, VEMG3 feature, `KY18 VRG2`, `KY18C VRG2` 15/15
+  each (ptch0, p12, m5, mem32, legacy, forgot, stale, auto, partsw, st_p12, st_mem32, reload = SAVE + RELOAD PROJECT,
+  power = CS1 power cycle, midi = no other Part byte moves, switch = the same 1/1 dial everywhere, another for 3/2).
+  The old images 6/15 (VEM11 7/15): the QUAN failures above, plus p12 / m5 / st_p12 / switch only because the exit
+  park now carries bit 7 (their PTCH came back right). varispeed_test.py (KYOTI_UNIT=1): unit 10/11, feature 9/11,
+  as VRG1 / FINAL (widget pre-existing; static flags the bug fixes' bytes); the swap test's exit park now 0x80 | 109.
+  varispeed_emus_test.py (VEM_STUB_AT=0x47fd8000): unit 44/45, feature 44/45 (widget pre-existing; ref_fx_alone after
+  rebuilding the lowbudget variant); every --build-variants test build builds. Switch tests: VEM unit + feature
+  (base VEM10) ALL GATES PASS, plain `check --plain` ALL PLAIN GATES PASS; against the VEM11 / VRG1 runs of the same
+  cases the per-frame increments (engines included), trigs and end Part dumps are identical in every case (VEM 30 +
+  28, plain 13 + 12); the plain events too; VEM's UI-task events (net checks that do nothing, PART_B's move, a
+  commit / step / toast) land one UI pass later in some cases, the same decisions. Equivalence matrix
+  (varispeed_emus_equiv.py, base = VRG1 / VEM11 units): OTDEMO 35/35 identical both; MMTESTDT plain 11/35 strict
+  but every 64-pass window delivers the same payloads (only the interleaving of passes moved), VEM 4/35 strict,
+  with `--base-shift 2` every voice's sequence of values identical in all 35 (the larger DRAM payload, +190 B, ends
+  the load at another frame phase, as VEMG2). KYOTI smokes (A = FINAL, B = VRG2): V1.8C REF-LOCK c1 and RS1 A == B
+  every field; diag_clyps_ui ABCDY PASS; V1.8 diag_reload_quant VERDICT PASS (32 checks), its log identical to FINAL's. Every other FINAL image rebuilds to its pin
+  without the opt-in (feature_image.py: MUTE_MODES, QLR, SIDECHAIN, TRIGLESS, RELOAD, DJK, RTM, BATCH_BUGFIXES;
+  build_kyoti --clyps-standalone 94e41a22); BLACKPYRAMIDS_303 not rebuilt.
+- **Builds (WIP, NOT flashed):** VARISPEED `out/VARISPEED/OCTATRACK_OS1.40C_VARISPEED.syx` 4710a2d2… (.bin 0c0efb00…,
+  mainos 4bfdf194…; unit d33f6a81…), OS VERSION `140C_VRG2`; VARISPEED_EMUS
+  `out/VARISPEED_EMUS/OCTATRACK_OS1.40C_VARISPEED_EMUS.syx` c99ff40a… (.bin eef0857c…, mainos 48386a0b…; unit
+  35548133…), `140C_VEMG3`; KYOTI V1.8 `KY18 VRG2` syx 6f436dfe… (.bin 82650569…, mainos 3063ea49…); V1.8C `KY18C VRG2`
+  syx 69b3b9e4… (.bin dc0f4236…, mainos e4ae2d7a…). FLASHING §4 "VARISPEED VRG2" item 7, "VARISPEED_EMUS VEMG3". Commit 2cdc8d1.
+- **V1.8BC (kyoti-bp; FINAL on origin/main 1f43bd3, not touched):** gets VARIG2 with VRG1 at its merge (patch_varispeed
+  +92 B more in CAVE; SPRING / pattern_led as the VRG1 note says); BLACKPYRAMIDS_303's signature 'O','T',1 sits in
+  NEIGHBOR p1 bytes 18..20, byte 18 = STATIC's PTCH park: 'O' = 0x4f reads as an old park (not memory: QUAN 1/1),
+  and a STATIC VARI exit writes 0x80 | QUAN there -- re-run the BP303 gates and check a STATIC VARI track beside an
+  OT-303 track; re-pin.

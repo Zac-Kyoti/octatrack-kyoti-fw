@@ -158,6 +158,18 @@ are lowercase-hyphen, because octabam requires a module's name to equal its fold
 
 > Check this against the tree before trusting it; it has gone stale before.
 
+- **2026-11-19: VARIG2 -- QUAN enters VARI at 1/1 (WIP, NOT flashed, branch `emus-guard`)** -- the author's report on
+  `KY18C VRG1` (QUAN `5/4` on entering VARI). Not a regression: the same on every FINAL VARISPEED / VARISPEED_EMUS /
+  KYOTI (the swap took the PTCH slot's domain from RAM `rp_prev`, re-adopted from the gate after every forget, and took
+  any park >= 4 as a remembered QUAN: PTCH +12 = 76 = `5/4`). Fix in the shared `varispeed_emus.s`: the park carries
+  the domain (remembered QUAN = bit 7; on VARI it holds PTCH >= 4), first sight checks the bytes (`rp_unent`).
+  Images `140C_VRG2` (syx `4710a2d2…`), `140C_VEMG3` (syx `c99ff40a…`), `KY18 VRG2` (syx `6f436dfe…`), `KY18C VRG2`
+  (syx `69b3b9e4…`); VRG1 / VEMG2 superseded as test images. Gate: `tools/varispeed_quan_entry_test.py`. FLASHING §4
+  "VARISPEED VRG2" item 7 + "VARISPEED_EMUS VEMG3"; NOTES 2026-11-19 cont. Open: the author's check; promotion would
+  re-pin VARISPEED (unit + feature), VARISPEED_EMUS (unit + feature), KYOTI V1.8 / V1.8C, octabam references; V1.8BC
+  (FINAL on main since 1f43bd3) needs VRG1 + VARIG2 merged and its BP303 gates rerun (BP's signature shares NEIGHBOR
+  byte 18 = STATIC's PTCH park).
+
 - **2026-11-19: VARISPEED VRG1 (WIP, NOT flashed, branch `emus-guard`)** — the VEMG2 freeze ported to plain VARISPEED:
   a held VARI note keeps its speed through a Part switch until its own next trig (FINAL changed it ~7 ticks early,
   and a cross-bank cue dropped it briefly). Images `140C_VRG1` (syx `2aae3558…`), `KY18 VRG1` (syx `07df9d49…`),

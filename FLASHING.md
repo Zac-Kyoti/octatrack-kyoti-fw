@@ -121,8 +121,9 @@ unit that boots; if it doesn't, use §3b.
 | VARISPEED | `140C_VARI1` |
 | VARISPEED_EMUS | `140C_VEM10` |
 | VARISPEED_EMUS VEM11 (WIP, the Part-switch guard) | `140C_VEMG2` |
-| VARISPEED VRG1 (WIP, no early speed change at a Part switch) | `140C_VRG1` |
-| KYOTI V1.8 / V1.8C with VARISPEED VRG1 (WIP) | `KY18 VRG1` / `KY18C VRG1` |
+| VARISPEED VRG2 (WIP: VRG1's Part-switch speed + QUAN enters VARI at 1/1) | `140C_VRG2` |
+| VARISPEED_EMUS VEMG3 (WIP: VEM11 + QUAN enters VARI at 1/1) | `140C_VEMG3` |
+| KYOTI V1.8 / V1.8C with VARISPEED VRG2 (WIP) | `KY18 VRG2` / `KY18C VRG2` |
 | ERASE_EMPTY_TRIGLESS_LOCKS and the BATCH_BUGFIXES builds | `1.40C` (stock string — check by behaviour) |
 | a feature + BATCH_BUGFIXES | `BUG_` + the feature (`BUG_MUTEDT`, `BUG_DJV7`, `BUG_SC3X`, `BUG_RL3`, `BUG_QLREC`, `BUG_TRIGLK`, `BUG_RTM`, `BUG_BP303`, `BUG_VARI`, `BUG_VEM10`) |
 
@@ -290,9 +291,12 @@ quick check for each:
      refusals, TSTR onto VARI) unchanged. FREE MEM in the audio pool as with the FINAL image (one 6 KB arena page).
   - **Result (the user, 2026-11-19):** `140C_VEMG2` flashed (syx 12220cf0…, feature mainos e2faf75d…): all 8 checks pass.
     Promoted as VARISPEED_EMUS VEM11 (the same code, OS VERSION `140C_VEM11`).
-- **VARISPEED VRG1 walk-through** (WIP, NOT promoted; `out/VARISPEED/OCTATRACK_OS1.40C_VARISPEED.syx`, sha256
-  `2aae3558…`; also in `out/KYOTI/OCTATRACK_OS1.40C_KYOTI_V1.8.syx` `KY18 VRG1` and `..._V1.8C.syx` `KY18C VRG1`;
-  NOTES 2026-11-19 `emus-guard`). A held VARI note keeps its speed through a Part switch until its own next trig.
+- **VARISPEED VRG2 walk-through** (WIP, NOT promoted; `out/VARISPEED/OCTATRACK_OS1.40C_VARISPEED.syx`, sha256
+  `4710a2d2…`; also in `out/KYOTI/OCTATRACK_OS1.40C_KYOTI_V1.8.syx` `KY18 VRG2` (`6f436dfe…`) and `..._V1.8C.syx`
+  `KY18C VRG2` (`69b3b9e4…`); NOTES 2026-11-19 `emus-guard` (VRG1, and cont.: VRG2). VRG2 = VRG1 + item 7. VRG1
+  (`2aae3558…`, `KY18C VRG1`): the author found QUAN on 5/4 instead of 1/1 when TSTR went to VARI (item 7's bug,
+  present in every FINAL VARISPEED / VARISPEED_EMUS / KYOTI). A held VARI note keeps its speed through a Part switch
+  until its own next trig.
   1. Part 1: T5 / T6 `VARI` on a loop whose ATTR TEMPO differs from the project tempo, notes held over the bar line.
      Part 2: T5 / T6 TSTR `OFF`, their trigs from step 9. Cue pattern 2: the held notes keep their VARI speed through
      the downbeat and change at their step-9 trigs (FINAL: ~0.15 s before the downbeat).
@@ -305,6 +309,18 @@ quick check for each:
   6. KYOTI images only: EMPTY_PATTERN_LED_FIX moved to another ROM zone -- hold `[BANK]` on a project with a
      pattern whose only content is a MIDI p-lock: its LED lights, the grid stays lit and responsive; the KYOTI V1.8 /
      V1.8C checks otherwise unchanged (Clyps, DIRECT JUMP, RELOAD, MUTE MODE, SIDE-CHAIN, QLR).
+  7. **QUAN enters VARI at 1/1.** On the project where VRG1 showed 5/4: a track with PTCH `+12` (and one with `-5`),
+     TSTR to `VARI` in SRC SETUP: QUAN reads `1/1` (the switch straight up), also on the track that showed `5/4`
+     before. TSTR back to `BEAT`: PTCH reads `+12` / `-5` again. On VARI set QUAN `3/2`, TSTR to `BEAT`, back to
+     `VARI`: `3/2` (the only case that is not 1/1); leave it there, SAVE PROJECT, power off and on (or RELOAD
+     PROJECT): still `3/2`, and `BEAT` still gives PTCH `+12`. Change pattern into a Part where that track is on
+     VARI and back: each Part shows its own (QUAN there, PTCH here). An AUTO track whose sample's ATTR TIMESTRETCH
+     you set to `VARI` in the audio editor: QUAN `1/1`. STATIC and FLEX both. MIDI tracks unchanged. Once per track:
+     a QUAN that an older build remembered off VARI is not kept (it enters `1/1`).
+- **VARISPEED_EMUS VEMG3** (WIP, NOT promoted; `out/VARISPEED_EMUS/OCTATRACK_OS1.40C_VARISPEED_EMUS.syx`, sha256
+  `c99ff40a…`; NOTES 2026-11-19 `emus-guard` cont.) = VEM11 + the QUAN fix. The VRG2 walk-through's item 7 on this
+  image, plus: entering VARI gives EMUS `OT` unless the track had another EMUS when it last left VARI (as before);
+  the VEMG2 checks 1-8 unchanged (the guard, the clamp, no early pitch change).
 - **MIDI_PLAYS_FREE_FIX** — a PLAYS FREE MIDI track, trig quantize DIRECT, SCALE MODE PER
   TRACK, notes on steps 1 and 2: a manual trig keeps it running instead of stalling.
 - **EMPTY_PATTERN_LED_FIX** — a pattern whose only content is a p-lock on a MIDI track:
