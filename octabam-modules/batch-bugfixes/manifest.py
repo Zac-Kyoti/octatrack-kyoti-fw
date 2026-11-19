@@ -13,8 +13,10 @@ three or none, and a site conflict on any one of them keeps all three out.)
   BUG 2 -- EMPTY-PATTERN LED (patch_pattern_led.s, `EMPTY_PATTERN_LED_FIX`)
     A pattern whose only content is parameter locks -- on a MIDI track, or trigless
     locks on an audio track, with no trig anywhere -- showed as an unused slot, its
-    grid LED unlit under [PTN]. 158 bytes, one 6-byte detour. The [BANK] grid (all
-    256 patterns per LED refresh) gets stock's test: scanning there starved the CPU.
+    grid LED unlit under [PTN]. 360 bytes, one 6-byte detour. The [BANK] grid (all
+    256 patterns per LED refresh) gets stock's test plus a bounded check of the
+    trigless-lock steps only (a full scan there starved the CPU): a bank holding a
+    pattern with trigless locks that carry a locked parameter lights.
 
   BUG 3 -- PART-CHANGE CARRYOVER (patch_partreapply.s, `PART_CHANGE_CARRYOVER_FIX`)
     After a pattern-triggered Part change, stale per-track state from the old Part
@@ -100,13 +102,20 @@ def ts_emit(addr: int):
 PL_HOOK = 0x4009a464
 PL_HOOK_STOCK = bytes.fromhex("2f02202f0008")    # move.l %d2,-(%sp); move.l 8(%sp),%d0
 PL_PINNED = bytes.fromhex(
-    "20170c804000fd8c670000882f2f00082f2f00086100007c508f4a80664c2f02"
-    "2f03262f000c243c00008ed84c023800222f0010243c0009b3404c021800d681"
-    "2043d1fc400e2239223c0000011a611c66102043d1fc400e6ae0223c000000b0"
-    "610a67027001261f241f4e75740843e808002018c098c098c098c098c098c098"
-    "c0984680660ab1c965e8d1c1538266de4e752f02202f00084ef94009a46a"
+    "2f2f00082f2f000861000152508f4a8067024e754fefffe448d70c7c262f0020"
+    "243c00008ed84c023800222f0024243c0009b3404c021800d681202f001c0c80"
+    "4000fd8c67242043d1fc400e2239223c0000011a617e666a2043d1fc400e6ae0"
+    "223c000000b0616c60582043d1fc400e21f043e848d074087000809080a80004"
+    "809180a9000441e8091a43e908b0538266e84a80672c78102043d1fc400e21f0"
+    "43e800492a3c0000091a614e66142043d1fc400e6ac043e800202a3c000008b0"
+    "613856c00280000000014cd70c7c4fef001c4e75740843e808002018c098c098"
+    "c098c098c098c098c0984680660ab1c965e8d1c1538266de4e757408201080a8"
+    "0004671445e90400201061166612244920280004610c6608d1c5d3c5538266dc"
+    "4e754a80672e2c0004c646860d80721fcc81eb8e47f26800221bc29bc29bc29b"
+    "c29bc29bc29bc29b46816608538467064a8066d24e75508f6000ff682f02202f"
+    "00084ef94009a46a"
 )
-assert len(PL_PINNED) == 158
+assert len(PL_PINNED) == 360
 # the cave replays the displaced prologue in its stock-predicate trampoline
 assert PL_HOOK_STOCK in PL_PINNED
 
@@ -201,7 +210,7 @@ MODULE = Module(
             reference=lambda addr: PL_PINNED,    # position independent
             cpu="5407",
             report_note=" (EMPTY_PATTERN_LED_FIX: a pattern holding only p-locks lights its "
-                        "grid LED under [PTN])",
+                        "grid LED under [PTN]; under [BANK], trigless locks with a locked parameter)",
         ),
         CavePatch(
             label="PART_CHANGE_CARRYOVER_FIX",
