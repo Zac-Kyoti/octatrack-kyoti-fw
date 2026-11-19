@@ -77,7 +77,7 @@ U = "vari_cf"
 LINKED = (
     Linked(U, os.path.join(_HERE, "varispeed.s"),
            reference=(0x400d6500,
-                      "6ab89088e9caabfc25c499ba6f2a3fc6f889274e3ea2ed55733b1f5e985b61ec"),
+                      "10db969498437228bba598bcad0631ed1dffaf304e684eea76e1813472f1d260"),
            include=_shared_source),
     # STORE's partclear / partsaved handlers (vs_st_*), octabam only: no standalone twin.
     Linked("vari_store", os.path.join(_HERE, "varispeed_store.s")),

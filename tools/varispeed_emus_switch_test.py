@@ -51,7 +51,19 @@ IMGS = {
                   pathlib.Path(os.environ.get("VEM_BASE_SYMS", ROOT / "out/base_syms.json"))),
     "base_feature": (pathlib.Path(os.environ.get("VEM_BASE_FEATURE", ROOT / "out/base_feature.bin")),
                      pathlib.Path(os.environ.get("VEM_BASE_SYMS", ROOT / "out/base_syms.json"))),
+    # VARISPEED, the plain build (VARIG1: the same per-track freeze, no engines, no guard)
+    "vari": (ROOT / "out/mainos_varispeed.bin", ROOT / "out/varispeed_syms.json"),
+    "vari_feature": (ROOT / "out/VARISPEED/mainos_varispeed.bin", ROOT / "out/varispeed_syms.json"),
+    "base_vari": (pathlib.Path(os.environ.get("VARI_BASE_UNIT", ROOT / "out/base_vari_unit.bin")),
+                  pathlib.Path(os.environ.get("VARI_BASE_SYMS", ROOT / "out/base_vari_syms.json"))),
+    "base_vari_feature": (pathlib.Path(os.environ.get("VARI_BASE_FEATURE", ROOT / "out/base_vari_feature.bin")),
+                          pathlib.Path(os.environ.get("VARI_BASE_SYMS", ROOT / "out/base_vari_syms.json"))),
 }
+# the plain build's gates (check --plain): speeds only (it has no engine); FINAL VARISPEED as the base
+PLAIN_HELD = {"mix_nonvari": (4, 5), "nonvari_fit": (4, 5), "rev_vari": (4, 5)}
+PLAIN_EARLY = ("own_xbank", "mix_xbank")          # nothing may change before the switch frame
+PLAIN_SAME = ("ref_clean", "carry_fit", "carry_fit_step1", "own_step1", "own_step1_stopped", "cert_sure",
+              "cancel_mix_max")                    # increments byte-for-byte FINAL's
 MMDB, GT = V.MMDB, V.GT
 CARD = V.MM["card"]
 MIDI_PC = OUT / "midi_pc1.txt"                    # frame 100: PROGRAM CHANGE ch 1 -> pattern 1
@@ -204,12 +216,14 @@ def part_cfg(part, emus, fx1, fx2, live, tstr=None):
 
 def watches(syms):
     S = syms["syms"]
-    mem = [(0x80000003, 1), (0x80001828, 2), (0x800065bd, 4), (0x46104d10, 4),
-           (S["vg_toast"], 1), (S["vg_last"], 4),
+    mem = [(0x80000003, 1), (0x80001828, 2), (0x800065bd, 4), (0x46104d10, 4)]
+    mem += [(S[k], n) for k, n in (("vg_toast", 1), ("vg_last", 4)) if k in S]
+    mem += [
            (V.mmpart(1) + V.O_P2 + 30 * 4, 120), (V.mmpart(0) + V.O_P2 + 30 * 4, 120),
            (0x80000ec8, 4), (0x80000ed0, 4), (0x800000e0, 1)]
     mem += [(RENDER + 40 * t + 36, 4) for t in GT]
-    pcs = [0x4005a2b8, S["vg_fix"], S["vg_step_ot"], 0x400621e2, 0x40009e00, 0x400a44d0, 0x40009094]
+    pcs = [0x4005a2b8] + [S[k] for k in ("vg_fix", "vg_step_ot") if k in S] + \
+        [0x400621e2, 0x40009e00, 0x400a44d0, 0x40009094]
     if "vgx_step" in S:
         pcs.append(S["vgx_step"])
     if ".xt_commit" in S:
@@ -333,7 +347,7 @@ def analyze(d):
             ev.append((f, s, "APPLIED", val))
         elif 0x46104d10 <= ad <= 0x46104d13 and val & 0x10:
             trigs[ad - 0x46104d0c].append(f)
-        elif ad == syms["vg_toast"] and val:
+        elif ad == syms.get("vg_toast") and val:
             ev.append((f, s, "vg_toast", val))
         elif 0x80000ec8 <= ad <= 0x80000ed3:
             for j in range(sz):
@@ -347,8 +361,9 @@ def analyze(d):
             t = (ad - RENDER - 36) // 40
             if not inc[t] or inc[t][-1][1] != val:
                 inc[t].append((f, val))
-    names = {0x4005a2b8: "NOTIFY", syms["vg_fix"]: "vg_fix", syms["vg_step_ot"]: "vg_step_ot",
-             0x400621e2: "msg20", 0x40009e00: "light_apply", 0x400a44d0: "commit", 0x40009094: "heavy_apply"}
+    names = {0x4005a2b8: "NOTIFY", 0x400621e2: "msg20", 0x40009e00: "light_apply", 0x400a44d0: "commit",
+             0x40009094: "heavy_apply"}
+    names.update({syms[k]: k for k in ("vg_fix", "vg_step_ot") if k in syms})
     if "vgx_step" in syms:
         names[syms["vgx_step"]] = "vgx_step"
     if ".xt_commit" in syms:
@@ -473,13 +488,15 @@ def cost(imgs):
         nxt = lambda a: min(v for v in g.values() if v > a)
         for c in COST:
             d = OUT / img / c
+            if not (d / "cov.txt").exists():
+                continue
             cov = [(int(a, 16), int(n)) for a, n in (l.split() for l in open(d / "cov.txt"))]
             cnt = dict(cov)
             log = (d / "log.txt").read_text()
             n = int(re.search(r"frames run : (\d+)", log).group(1))
             rng = lambda lo, hi: sum(k for a, k in cov if lo <= a < hi)
-            ticks = cnt.get(g["vg_tick"], 0)
-            tail = rng(g["vg_tick"], nxt(g["vg_tick"])) + rng(g["vg_sig"], nxt(g["vg_sig"]))
+            ticks = cnt.get(g["vg_tick"], 0) if "vg_tick" in g else 0
+            tail = rng(g["vg_tick"], nxt(g["vg_tick"])) + rng(g["vg_sig"], nxt(g["vg_sig"])) if ticks else 0
             idle = pend = npend = 0
             if "vgx_tick" in g:
                 idle = rng(g["vgx_tick"], g["vgx_clear"])          # vgx_tick's own code
@@ -621,7 +638,23 @@ LISTEN = {
 }
 
 
-def pack(dest):
+# the plain VARISPEED pack (VARIG1): A = FINAL VARISPEED, B = the port
+PLAIN_PACK = ("mix_nonvari", "nonvari_fit", "rev_vari", "own_xbank", "carry_fit", "ref_clean")
+PLAIN_LISTEN = {
+    "mix_nonvari": "Part B has T5 / T6 off VARI. A: T5's held VARI note changes speed 145 ms BEFORE the switch "
+                   "(T7 too). B: T5 keeps its VARI speed to its own step-9 trig; T7 changes at its own trig, on "
+                   "the switch.",
+    "nonvari_fit": "As mix_nonvari without FX: A changes T5's speed 145 ms before the switch, B at its step-9 trig.",
+    "rev_vari": "The reverse: T5 / T6 hold NORM notes into a Part that has them on VARI: both change at the "
+                "step-9 trig (identical).",
+    "own_xbank": "A cue into another bank. A: T5 / T7 drop to stock speed 400 frames before the switch and come "
+                 "back 7 frames later (a glitch). B: nothing changes before the switch.",
+    "carry_fit": "Control: held VARI notes into a Part where they are VARI too: identical.",
+    "ref_clean": "Control, no Part switch: identical.",
+}
+
+
+def pack(dest, plain=False):
     """The A/B listening pack: A = the FINAL feature image (base_feature), B = VEM11 (feature), each case's
     main out (core 0 TX slots 2 / 3, T5-T8) from 1.0 s before the switch (2.0 s after the transport start)
     to the end of the render; 24-bit stereo WAVs, 44.1 kHz, and a manifest."""
@@ -630,9 +663,14 @@ def pack(dest):
     dest = pathlib.Path(dest)
     dest.mkdir(parents=True, exist_ok=True)
     man = []
-    for i, name in enumerate(PACK, 1):
+    names = PLAIN_PACK if plain else PACK
+    imgs = (("A_final", "base_vari_feature"), ("B_vemg2", "vari_feature")) if plain else \
+        (("A_final", "base_feature"), ("B_vemg2", "feature"))
+    btag = "B_vrg1" if plain else "B_vemg2"
+    listen = PLAIN_LISTEN if plain else LISTEN
+    for i, name in enumerate(names, 1):
         clips = {}
-        for tag, img in (("A_final", "base_feature"), ("B_vemg2", "feature")):
+        for tag, img in imgs:
             d = OUT / img / name
             w = wave.open(str(d / "audio_core0.wav"))
             n, ch, sw = w.getnframes(), w.getnchannels(), w.getsampwidth()
@@ -673,25 +711,30 @@ def pack(dest):
         first = next((k // 6 for k in range(0, L, 3) if a[k:k + 3] != b[k:k + 3]), None)
         files = {}
         for tag, data in (("A_final", a), ("B_vemg2", b)):
-            f = dest / f"{i:02d}_{name}_{tag}.wav"
+            f = dest / f"{i:02d}_{name}_{btag if tag == 'B_vemg2' else tag}.wav"
             with wave.open(str(f), "wb") as o:
                 o.setnchannels(2)
                 o.setsampwidth(3)
                 o.setframerate(44100)
                 o.writeframes(data)
             files[tag] = f.name
-        man.append(dict(n=i, case=name, listen=LISTEN[name], A=files["A_final"], B=files["B_vemg2"],
+        man.append(dict(n=i, case=name, listen=listen[name], A=files["A_final"], B=files["B_vemg2"],
                         switch_at_s=None if name == "ref_clean" else 1.0,
                         first_difference_s=None if first is None else round(first / 44100, 4), lag=lag,
                         seconds=round(L / 6 / 44100, 3)))
     (dest / "manifest.json").write_text(json.dumps(man, indent=1))
-    md = ["# VARISPEED_EMUS VEMG2 A/B pack (emulator renders, ot_emu --audio-out)", "",
-          "A = the promoted FINAL VARISPEED_EMUS feature image (mainos 52823ea6...), B = VEMG2 (the WIP fix). "
+    md = ([f"# VARISPEED VRG1 A/B pack (emulator renders, ot_emu --audio-out)", "",
+           "A = the promoted FINAL VARISPEED feature image (mainos c3af514f...), B = VRG1 (the port: a held VARI "
+           "note keeps its speed through a Part switch until its own next trig). "] if plain else
+          ["# VARISPEED_EMUS VEMG2 A/B pack (emulator renders, ot_emu --audio-out)", "",
+           "A = the promoted FINAL VARISPEED_EMUS feature image (mainos 52823ea6...), B = VEMG2 (the WIP fix). "])
+    md[-1] += (
           "MMTESTDT (a hardware export), T5-T8 on DSP core 0, set by runtime pokes "
           "(tools/varispeed_emus_switch_test.py). Each clip is the main out, from 1.0 s before the Part switch "
           "(ref_clean: no switch) to the end of the render. 24-bit stereo, 44.1 kHz. B is aligned on A to the "
           "sample (the two emulated loads end a few samples apart); before what changes, A and B are "
-          "bit-identical.", ""]
+          "bit-identical.")
+    md += [""]
     for m in man:
         md += [f"## {m['n']:02d} {m['case']}", "", m["listen"], "",
                f"- A: `{m['A']}`  B: `{m['B']}`  ({m['seconds']} s; switch at {m['switch_at_s']} s)",
@@ -703,6 +746,50 @@ def pack(dest):
               f"{'none' if m['first_difference_s'] is None else str(m['first_difference_s']) + ' s'}")
 
 
+def check_plain(imgs):
+    """VARISPEED (plain): a held VARI note keeps its speed until its own next trig (and the reverse);
+    nothing changes before a cross-bank switch; elsewhere the increments are FINAL's."""
+    fails = []
+    for img in imgs:
+        base = "base_" + img
+        for name in sorted(set(PLAIN_HELD) | set(PLAIN_EARLY) | set(PLAIN_SAME)):
+            d = OUT / img / name
+            if not (d / "sw.txt").exists():
+                fails.append(f"{img}/{name}: not run")
+                continue
+            a = analyze(d)
+            ap = [f for f, s_, k, v in a["ev"] if k == "APPLIED" and f > 0]
+            pbm = [f for f, s_, k, v in a["ev"] if k == "PART_B" and f > 0]
+            lo = (pbm[0] - 50) if pbm else 0
+            spd = lambda c: c[0] == "increment" and (int(c[2], 16) & ~0xf) != (int(c[3], 16) & ~0xf)
+            note = []
+            if name in PLAIN_HELD:
+                for t in PLAIN_HELD[name]:
+                    own = [f for f in a["trigs"][t] if ap and f > ap[0]]
+                    hi = own[0] if own else 10 ** 9
+                    bad = [c for c in engine_changes(a, t, lo=lo) if c[1] < hi and spd(c)]
+                    note.append(f"T{t + 1} speed changes {[c[1] for c in engine_changes(a, t, lo=lo) if spd(c)]} "
+                                f"own trig f{hi}")
+                    if bad:
+                        fails.append(f"{img}/{name}: T{t + 1}'s speed changes before its own trig f{hi}: {bad}")
+            if name in PLAIN_EARLY:
+                for t in GT:
+                    bad = [c for c in engine_changes(a, t, lo=lo) if spd(c) and ap and c[1] < ap[0]]
+                    if bad:
+                        fails.append(f"{img}/{name}: T{t + 1} changes before the switch f{ap[0]}: {bad}")
+            if name in PLAIN_SAME and (OUT / base / name / "sw.txt").exists():
+                b = analyze(OUT / base / name)
+                for t in GT:
+                    if [v for f, v in a["inc"][t]] != [v for f, v in b["inc"][t]]:
+                        fails.append(f"{img}/{name}: T{t + 1}'s increments differ from {base}")
+            first = {t: next((hex(v) for f, v in a["inc"][t] if f >= 0), None) for t in GT}
+            print(f"{img:13s} {name:18s} switch f{ap[0] if ap else '-'}  first incs {first}  {'; '.join(note)}")
+    for f in fails:
+        print("FAIL", f)
+    print(f"\n{'ALL PLAIN GATES PASS' if not fails else f'{len(fails)} gate failure(s)'}")
+    return not fails
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("verb", choices=("run", "check", "timeline", "cost", "pack"))
@@ -711,6 +798,7 @@ def main():
     ap.add_argument("--only", default="")
     ap.add_argument("--jobs", type=int, default=8)
     ap.add_argument("--audio", action="store_true")
+    ap.add_argument("--plain", action="store_true", help="check: VARISPEED's gates (check_plain)")
     a = ap.parse_args()
     imgs = a.img or ["unit", "feature"]
     names = [n for n in list(CASES) + list(COST) if (not a.only and n in CASES) or n in a.only.split(",")]
@@ -719,14 +807,14 @@ def main():
     if a.verb == "timeline":
         return timeline(a.arg)
     if a.verb == "pack":
-        return pack(a.arg or ROOT / "out/ab_emus_guard2")
+        return pack(a.arg or ROOT / ("out/ab_vari_port" if a.plain else "out/ab_emus_guard2"), plain=a.plain)
     if a.verb == "run":
         jobs = [(n, i) for i in imgs for n in names]
         with ThreadPoolExecutor(a.jobs) as ex:
             for r in ex.map(lambda j: run_case(j[0], j[1], a.audio), jobs):
                 print(r, flush=True)
         return
-    sys.exit(0 if check(imgs) else 1)
+    sys.exit(0 if (check_plain(imgs) if a.plain else check(imgs)) else 1)
 
 
 if __name__ == "__main__":

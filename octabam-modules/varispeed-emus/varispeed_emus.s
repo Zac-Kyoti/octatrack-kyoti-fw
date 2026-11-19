@@ -341,28 +341,23 @@ vem_frame:
         tst.b   (%a0,%d1.l)
         beq     .vf_plain
 .vf_poll:
-        .if VEM_EMUS
         bsr     vf_win                  | this track's live bytes another Part's than the DB's
-        bne     .vf_frz                 |   current one (a Part switch): no poll (VEM11, fix 3)
-        .endif
+        bne     .vf_frz                 |   current one (a Part switch): no poll (VEM11, fix 3;
+                                        |   VARISPEED too since VARIG1)
         move.l  %d2,%d1
         bsr     rp_swap                 | d0 = md<<8 | domain<<1 | swapped
         move.l  %d0,%d5
-        .if VEM_EMUS
         lea     vf_eng(%pc),%a0
         clr.b   0(%a0,%d2.l)
-        .endif
         btst    #1,%d5
         beq     .vf_plain               | the slot holds PTCH: stock pitch
         move.l  %d5,%d1
         lsr.l   #8,%d1
         cmp.l   %d3,%d1
         bne     .vf_plain               | the DB machine is not the one rendering
-        .if VEM_EMUS
         moveq   #1,%d1
         move.b  %d1,0(%a0,%d2.l)        | vf_eng: this poll's verdict, kept for the window
 .vf_go:
-        .endif
 | Engaged only when the runtime gate agrees: a candidate (the lane's own TSTR, or AUTO
 | through the sample this voice plays), its sample and the project tempo in 30..300
 | BPM. Anything else -- out of range, or the Part gate and the voice disagreeing (a
@@ -533,8 +528,7 @@ vem_frame:
 .vf_store:
         move.l  %d0,36(%a3)
         jmp     (RENDER_BACK).l
-        .if VEM_EMUS
-| VEM11, fix 3: a track whose live bytes -- the lane -- are not the DB's current Part's: from a
+| VEM11, fix 3 (both builds since VARIG1): a track whose live bytes -- the lane -- are not the DB's current Part's: from a
 | sequencer switch's PART_B / bank move to the apply (every track), and after the apply until the
 | track's own first trig in the new Part (stock copies its live bytes then, per track). The poll
 | would read the NEXT Part's bytes: a playing VARI voice would leave VARI early (its engine and
@@ -564,7 +558,6 @@ vf_win:
         addi.l  #BANK0_DB,%d0
         cmp.l   (DB_PTR).l,%d0
 1:      rts
-        .endif
 | d2 = track -> a1 = the sample settings record the voice plays (voice +8), Z set when
 | there is none. Keeps everything but d1/a1 (d1 = the offset).
 voice_set:
@@ -3119,6 +3112,10 @@ rp_pb:                                  | the bank blob and part rp_prev describ
 rp_pp:
         .byte   0xff
         .balign 2
+        .if VEM_EMUS == 0
+vf_eng:                                 | the frame poll's verdict per track (1: QUAN on the
+        .byte   0, 0, 0, 0, 0, 0, 0, 0  |   rendering machine), kept while a track is frozen
+        .endif
         .if VEM_EMUS
 vg_eng:                                 | vg_scan: the engine each track's settings run
         .byte   0, 0, 0, 0, 0, 0, 0, 0
