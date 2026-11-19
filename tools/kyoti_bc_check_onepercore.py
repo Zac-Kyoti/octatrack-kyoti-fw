@@ -27,7 +27,7 @@ import argparse, json, os, pathlib, shutil, sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 OCTABAM = ROOT / "refs" / "octabam"
-OUT = ROOT / "out/KYOTI_WIP/KYOTI_V1.8BC"
+OUT = ROOT / "out/KYOTI"
 SET_KEY, NOTIFY = 0x40031734, 0x4005A2B8
 BLOB, BANKSTRIDE, PATSTRIDE, TRAC_A, PART_OFF, PARTSZ, SRAM_PART = 0x400E21E0, 0x9B340, 0x8ED8, 0x91A, 0x8ED80, 0x18B2, 0x100A4ECE
 PTN, BANK, YES, NO, FUNC, CUE = 0x2E, 0x2F, 0x31, 0x32, 0x2D, 0x2A

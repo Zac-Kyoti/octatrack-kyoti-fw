@@ -23,7 +23,7 @@ from unicorn.m68k_const import (UC_M68K_REG_PC, UC_M68K_REG_A7, UC_CPU_M68K_CFV4
                                 UC_M68K_REG_D0, UC_M68K_REG_A0)
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-IMG = pathlib.Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / "out/KYOTI_WIP/KYOTI_V1.8BC/mainos_kyoti_v1.8bc.bin"
+IMG = pathlib.Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / "out/KYOTI/mainos_kyoti_v1.8bc.bin"
 BASE, SITE, NOTIFY = 0x40000400, 0x40038a5c, 0x40027e00
 BLOB = 0x40400000                     # a bank blob in RAM for the test (the image's own pages are left alone)
 PART = BLOB + 0x8ed80

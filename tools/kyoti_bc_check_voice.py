@@ -5,7 +5,7 @@
 BLACKPYRAMIDS_303's own emulator check (tools/ot303/verify_ot303.py) on KYOTI V1.8BC (build_kyoti.py --clyps-bp),
 without editing it: the same jobs and the same verdicts, pointed at the combined image.
 
-  * the image, and the voice's runtime as linked there (out/KYOTI_WIP/KYOTI_V1.8BC/bp_runtime/, written by
+  * the image, and the voice's runtime as linked there (out/KYOTI/bp_runtime/, written by
     build_kyoti.py): verify's symbols (render counters, event log, descriptor) come from that ELF;
   * the DSP code's org there (bp_runtime/dsp_layout.json): hwprobe_image.build is asked at that org, so
     the pcwatch at hq_start and every DSP address verify reads are the combined image's;
@@ -22,7 +22,7 @@ FAILED on it alone. Every other line is verify's own verdict.
 import json, os, pathlib, re, subprocess, sys, tempfile
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-OUT = ROOT / "out/KYOTI_WIP/KYOTI_V1.8BC"
+OUT = ROOT / "out/KYOTI"
 os.environ["OT303_IMAGE"] = str((OUT / "mainos_kyoti_v1.8bc.bin").relative_to(ROOT / "out"))
 sys.path.insert(0, str(ROOT / "tools/ot303"))
 import verify_ot303 as v                    # noqa: E402

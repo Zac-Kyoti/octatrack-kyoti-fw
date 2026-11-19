@@ -23,7 +23,7 @@ it). Clyps owns the phase-D site 0x400a1f72 and chains dj_land (SUPERSEDE). Both
 buffers follow its unit (about 10 MB of the sample/recorder pool). Flashed and checked by the author as
 "KY+CL DJC9" (DIRECT JUMP V7.2.2) and, with V7.3, as "KY18C DJR1" (the same mainos as the FINAL, 9d1a29c9...).
 
---clyps-bp (alias --bc): KYOTI V1.8BC, WIP (the author, 2026-11-17): V1.8C + BLACKPYRAMIDS_303, with both
+--clyps-bp (alias --bc): KYOTI V1.8BC (the author, 2026-11-17; FINAL 2026-11-19): V1.8C + BLACKPYRAMIDS_303, with both
 SPRING REVERB and PLATE REVERB given up. Their DSP P modules are 1,657 contiguous words on each core
 (A P:$1000..$1679, B P:$0dc0..$1439): SIDE-CHAIN's DSP section from PLATE's first word, the voice right
 after it (inside SPRING's module), DARK REV's helper at SPRING's last 35 words as in the voice's own build.
@@ -34,8 +34,8 @@ not its own loader + reserve. ERASE_EMPTY_TRIGLESS_LOCKS skips BLKPYRAMD tracks 
 empty trigless lock is a tie there). One BLKPYRAMD per DSP core on every path (2026-11-17): Clyps is
 assembled with the voice runtime's bp_refuse_load (BP_CLASH: a FULL load that would put a second one on a
 core is refused whole) and bp_uitail (BP_UITAIL: the UI-tail net); Clyps owns the tail site 0x40062d1c and
-calls the net first (SUPERSEDE), so the voice is built before Clyps here. out/KYOTI_WIP/KYOTI_V1.8BC/,
-OS VERSION BC_VERSTR, never sealed.
+calls the net first (SUPERSEDE), so the voice is built before Clyps here. out/KYOTI/, OS VERSION BC_VERSTR,
+pinned in kyoti_status.FINAL (mainos_kyoti_v1.8bc.bin). Flashed and checked by the author (FLASHING §4).
 
 --clyps-standalone: the standalone CLYPS image (out/CLYPS/, OS VERSION "CLYPS V1.0"), what
 `python3 tools/build_clyps.py` builds. Clyps never ships without DIRECT JUMP (the author, 2026-11-15),
@@ -152,7 +152,7 @@ inside any displaced span; B1, B2 and the reclaim invariants.
 
 Usage:  python3 tools/build_kyoti.py                       KYOTI V1.8
         python3 tools/build_kyoti.py --clyps               KYOTI V1.8C
-        KYOTI_ALLOW_WIP=1 python3 tools/build_kyoti.py --clyps-bp   KYOTI V1.8BC (WIP)
+        python3 tools/build_kyoti.py --clyps-bp            KYOTI V1.8BC
         python3 tools/build_kyoti.py --clyps-standalone    the standalone CLYPS image
 Outputs (out/KYOTI/, or out/CLYPS/): OCTATRACK_OS1.40C_<TAG>.syx (MIDI), OCTATRACK_<TAG>.bin
 (CF card), mainos_<tag>.bin, <tag>_map.json (every placement + symbol).
@@ -282,7 +282,7 @@ FEATURES = {
 # composition order V1.8C was flashed with.
 CLYPS_FEATURE = {"CLYPS": ("build_clyps.py", "mainos_clyps.bin", "prep",
                            {"patch_clyps_dram": "patch_clyps_dram.bin"})}
-# --clyps-bp (KYOTI V1.8BC, WIP; the author, 2026-11-17): V1.8C + BLACKPYRAMIDS_303. Not in V1.8 / V1.8C.
+# --clyps-bp (KYOTI V1.8BC; the author, 2026-11-17, FINAL 2026-11-19): V1.8C + BLACKPYRAMIDS_303. Not in V1.8 / V1.8C.
 BP_FEATURE = {"BLACKPYRAMIDS_303": ("build_blackpyramids_303.py", "mainos_blackpyramids_303.bin", "prep",
                                     {"bp_runtime": "ot303/cf/ot303_runtime.bin"})}
 BC_VERSTR = "KYOTI1.8BC"            # the 10-char OS VERSION field (the author's name "KYOTI 1.8BC" is 11)
@@ -604,9 +604,9 @@ def apply_clyps(argv):
 
 
 def apply_bp():
-    """--clyps-bp / --bc: KYOTI V1.8BC = V1.8C + BLACKPYRAMIDS_303 (WIP, never sealed until promoted)."""
+    """--clyps-bp / --bc: KYOTI V1.8BC = V1.8C + BLACKPYRAMIDS_303, pinned on its own in kyoti_status.FINAL
+    (mainos_kyoti_v1.8bc.bin), out/KYOTI/ beside V1.8 and V1.8C."""
     global VERSTR, TAG, OUTDIR, SANDBOX
-    wip_variant("--clyps-bp")
     FEATURES.pop("RELOAD_FROM_PROJECT")
     FEATURES.update(BP_FEATURE)                  # before CLYPS: Clyps is built with the voice runtime's entries
     FEATURES.update(CLYPS_FEATURE)               # (bp_refuse_load, bp_uitail; SUPERSEDE at the UI tail)
@@ -615,9 +615,11 @@ def apply_bp():
     SIZING["ERASE_EMPTY_TRIGLESS_LOCKS"] = {"patch_triglock_bp": 0x400d7400}   # zero in stock, past ERASE's own cave
     SHARED_OK.add(frozenset({"SIDECHAIN_COMPRESSOR", "BLACKPYRAMIDS_303"}))
     VERSTR, TAG = BC_VERSTR, BC_TAG
-    OUTDIR = ROOT / "out/KYOTI_WIP" / TAG
+    from kyoti_status import FINAL
+    if f"mainos_{TAG.lower()}.bin" not in FINAL.get("build_kyoti.py", {}):
+        wip_variant("--clyps-bp")
     SANDBOX = OUTDIR / "_sandbox"
-    print(f"  {TAG} (WIP): {', '.join(FEATURES)}  ->  OS VERSION {VERSTR!r}, {OUTDIR.relative_to(ROOT)}\n")
+    print(f"  {TAG}: {', '.join(FEATURES)}  ->  OS VERSION {VERSTR!r}, {OUTDIR.relative_to(ROOT)}\n")
 
 
 def dsp_layout(sizes_dir):
