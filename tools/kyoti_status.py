@@ -60,7 +60,7 @@ FINAL = {
         "mainos_rec_trig_mute.bin":                          "dac87abd3d70f6074438f450b492cd4a004f2aeca66fe9969743ebc8ab9dc556",
         "mainos_blackpyramids_303.bin":                      "ca3089ca53aabba09f065d67eab9e21078bf9ea6d2a41ead89df05ece9b1212e",
         "mainos_varispeed.bin":                              "c3af514f52feb1c46747736d7a6151b5109f664b2561278f37d01e99d8f10663",
-        "mainos_varispeed_emus.bin":                         "52823ea6714036808037757ff49e2e6bcf4cc3d2ebe1ced1f2f0810ac9781943",
+        "mainos_varispeed_emus.bin":                         "e2faf75d9695e91903917f2dc690bd34cb9c1f40f34e525a3b5b51bacaf9f7e1",
         "mainos_batch_bugfixes.bin":                         "0cf328357bf8c7c222de2c6e6a284e29b6f8572019b1485373a39e3f604cbef6",
     },
     "build_kyoti.py": {
@@ -71,7 +71,7 @@ FINAL = {
     "build_blackpyramids_303.py":          "5b7dfb2f8359e0490c44cb92372e481e6750345ff4db72982ac8cc556893810a",
     "build_part_change_carryover_fix.py":  "dd2a7e2ba3328364caa560e431195fd248cbb5d83dce1759de1e7e3effc5febd",
     "build_varispeed.py":                  "ce4f769602d1231ac40c48fde43a00c332a1f7b698fdb9442152864803eff169",
-    "build_varispeed_emus.py":             "dbf8cd68cf2180db8924b46317378ccf739a92cb36371de41506b784882affc3",
+    "build_varispeed_emus.py":             "d23d9e63521cf9838ea5e9255967d128a202cfb31ef4b0fdaf7cafed1ca856cc",
 }
 
 _RULE = "  " + "-" * 72

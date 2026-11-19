@@ -158,7 +158,8 @@ are lowercase-hyphen, because octabam requires a module's name to equal its fold
 
 > Check this against the tree before trusting it; it has gone stale before.
 
-- **2026-11-18: VARISPEED_EMUS VEM11 = `140C_VEMG2` (WIP, NOT flashed, branch `emus-guard`)** — the load guard across
+- **2026-11-19: VARISPEED_EMUS VEM11 FINAL** (the author flashed `140C_VEMG2`: all 8 FLASHING §4 checks pass; the final is
+  that code as `140C_VEM11`: unit `d23d9e63…`, feature mainos `e2faf75d…`) — the load guard across
   a Part switch, the author's second round (VEMG1 superseded): the transition is priced before the switch with only real
   carry (a track sure to trig on the new pattern's first step switches at once); over budget, carried notes are clamped
   first (temporary), the new Part's EMUS stepped only if that is not enough; nothing is written until the switch (the
@@ -166,8 +167,9 @@ are lowercase-hyphen, because octabam requires a module's name to equal its fold
   nothing); a held VARI note keeps its speed (and, when it fits, its engine) until its own next trig, read from stock's
   per-track live-bytes pair 0x8000182a/32. Emulator: `tools/varispeed_emus_switch_test.py` (28 cases x unit + feature
   image, all gates pass), A/B pack in that worktree's out/ab_emus_guard2/. Image: syx `12220cf0…`, mainos `e2faf75d…`.
-  FLASHING §4 "VARISPEED_EMUS VEMG2"; NOTES 2026-11-18 (`emus-guard`) cont. Open: the author's by-ear check; the
-  plain-VARISPEED port (NOTES); octabam pin / PR.
+  FLASHING §4 "VARISPEED_EMUS VEMG2"; NOTES 2026-11-18/19 (`emus-guard`). Open: the plain-VARISPEED port (branch
+  `emus-guard`, images VRG1, WIP, not flashed). No octabam VARISPEED_EMUS module exists; octabam's varispeed module
+  shares the source (its pin moves with the port).
 
 - **2026-11-16: DIRECT JUMP V7.3 FINAL** (the author flashed `KY18C DJR1`: the three by-ear checks pass) — the last restart (PLAY or any stock
   pattern switch) is a jump's time origin, for its landing and its trig conditions (detour 0x400a4850 `dj_swres`).

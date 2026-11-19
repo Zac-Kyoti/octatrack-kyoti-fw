@@ -261,7 +261,7 @@ quick check for each:
   crunchier. FX menus no longer offer SPRING REVERB. Put `SP12` on all four tracks of one core
   with a heavy FX stack: a turn or an FX choice that would overload the DSP is refused with
   `MAX DSP: EMU LIMIT`.
-- **VARISPEED_EMUS VEMG2 walk-through** (WIP, NOT promoted; `out/VARISPEED_EMUS/OCTATRACK_OS1.40C_VARISPEED_EMUS.syx`,
+- **VARISPEED_EMUS VEMG2 walk-through** (FINAL 2026-11-19 as `140C_VEM11`; `out/VARISPEED_EMUS/OCTATRACK_OS1.40C_VARISPEED_EMUS.syx`,
   sha256 `12220cf0…`; NOTES 2026-11-18 `emus-guard` cont.). A Part switch is priced as the mix it plays; nothing
   changes unless that mix would overload the DSP. Set up on T5-T8 (one DSP core) STATIC or FLEX tracks with long held
   samples, TSTR `VARI`. Pattern 1 on Part 1, pattern 2 on Part 2; Part 2's tracks trig only from step 9 unless said.
@@ -286,6 +286,8 @@ quick check for each:
   7. **Another bank.** Step 3 with pattern 2 in another bank: the same on the downbeat.
   8. With the transport stopped a cue applies at once, as before. The VARISPEED_EMUS checks above (EMUS and FX
      refusals, TSTR onto VARI) unchanged. FREE MEM in the audio pool as with the FINAL image (one 6 KB arena page).
+  - **Result (the user, 2026-11-19):** `140C_VEMG2` flashed (syx 12220cf0…, feature mainos e2faf75d…): all 8 checks pass.
+    Promoted as VARISPEED_EMUS VEM11 (the same code, OS VERSION `140C_VEM11`).
 - **MIDI_PLAYS_FREE_FIX** — a PLAYS FREE MIDI track, trig quantize DIRECT, SCALE MODE PER
   TRACK, notes on steps 1 and 2: a manual trig keeps it running instead of stalling.
 - **EMPTY_PATTERN_LED_FIX** — a pattern whose only content is a p-lock on a MIDI track:

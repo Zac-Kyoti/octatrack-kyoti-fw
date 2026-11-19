@@ -39257,3 +39257,15 @@ VEMG1 (`d782ea56…`) is superseded.
   on the per-track pair, .vf_frz, vf_eng: ~90 B, ~15 instructions per polled VARI track per frame) in the shared
   source's VEM_EMUS = 0 path; re-pins VARISPEED's unit / feature image and KYOTI V1.8 / V1.8C (and V1.8BC on its
   branch); KYOTI's CAVE has 92 B left beside it, so a UI piece moves zone; octabam's varispeed module reference.
+
+## 2026-11-19 (`vem11-promote`) — VARISPEED_EMUS VEM11 PROMOTED FINAL
+
+- **Hardware (the author):** `140C_VEMG2` (syx 12220cf0…, feature mainos e2faf75d…, unit d23d9e63…) flashed; all 8
+  FLASHING §4 "VARISPEED_EMUS VEMG2" checks pass (the clamp when the overlap does not fit, the step-down committed at the
+  switch, a cancelled cue leaves nothing, certain first-step trigs, no early pitch change incl. the reverse case,
+  another bank, stopped cue / the usual EMUS checks). The A/B pack: the author could barely hear any difference.
+- **Promoted on the author's word** from `212a9cc` (the VEMG2 commits only; the plain-VARISPEED port a373ff4..d867de5
+  stays on `emus-guard`, WIP): `build_varispeed_emus.py` unit dbf8cd68 -> d23d9e63, `feature_image.py`
+  mainos_varispeed_emus.bin 52823ea6 -> e2faf75d (rebuilt without the opt-in: identical), OS VERSION 140C_VEM10 ->
+  140C_VEM11 (wrap only). README: the Part-switch behaviour + Hardware confirmed (this image); BUILD_KYOTI OS VERSION.
+  Every other FINAL rebuilds to its pin. No octabam VARISPEED_EMUS module exists.

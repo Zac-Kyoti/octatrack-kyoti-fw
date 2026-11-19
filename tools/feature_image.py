@@ -121,7 +121,7 @@ FEATURES = {
     # carries DSP payload changes (the S950 / SP12 kernel in SPRING REVERB's modules, SPRING off
     # both FX choosers), composed as the SIDECHAIN base is: the image as built, the fixes only
     # in the ColdFire cave zone, every feature byte preserved (the interlock proof)
-    "VARISPEED_EMUS": ("build_varispeed_emus.py", "out/mainos_varispeed_emus.bin", "140C_VEM10",
+    "VARISPEED_EMUS": ("build_varispeed_emus.py", "out/mainos_varispeed_emus.bin", "140C_VEM11",
                        "STATIC/FLEX TSTR VARI + EMUS (OT / S950 / SP12), DSP load guard."),
     "BATCH_BUGFIXES": (None, None, "140C_FIXES",
                        "MIDI_PLAYS_FREE_FIX + EMPTY_PATTERN_LED_FIX + PART_CHANGE_CARRYOVER_FIX on stock."),

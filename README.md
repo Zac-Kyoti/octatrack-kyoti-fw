@@ -217,12 +217,16 @@ the engine the track plays through:
 A change of engine takes effect at the track's next trig. The engines run on the DSP. A
 change that would overload a DSP core is refused and shows `MAX DSP: EMU LIMIT`: an `EMUS`
 turn stops at the heaviest engine that fits, an FX type doesn't land, and a track coming
-onto VARI plays `OT`.
+onto VARI plays `OT`. At a pattern change to another Part, the old Part's held notes and the new
+Part's sounds overlap until each track's next trig; if that overlap would overload the core, the
+held notes drop to `OT` on the downbeat and, only if that is not enough, the new Part's engines step
+down (saved at the switch; a cancelled cue changes nothing). Held VARI notes keep their speed
+through the change until their own next trig.
 
 The DSP space comes from **SPRING REVERB**, which leaves both FX lists; a project that still
 uses it loads it as NONE.
 
-**Hardware:** the feature confirmed; this image, with the three bug fixes, not flashed as such.\
+**Hardware:** confirmed (this image).\
 **Final build:** [`tools/build_varispeed_emus.py`](tools/build_varispeed_emus.py) →
 `out/VARISPEED_EMUS/OCTATRACK_OS1.40C_VARISPEED_EMUS`
 

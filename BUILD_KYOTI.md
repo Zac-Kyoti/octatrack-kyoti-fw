@@ -47,7 +47,7 @@ image of a feature without them. Each writes its image to `out/<FEATURE>/`:
 | REC_TRIG_MUTE | `python3 tools/build_rec_trig_mute.py` | `140C_RTM` |
 | BLACKPYRAMIDS_303 | `python3 tools/build_blackpyramids_303.py` | `140C_BP303` |
 | VARISPEED | `python3 tools/build_varispeed.py` | `140C_VARI1` |
-| VARISPEED_EMUS | `python3 tools/build_varispeed_emus.py` | `140C_VEM10` |
+| VARISPEED_EMUS | `python3 tools/build_varispeed_emus.py` | `140C_VEM11` |
 | BATCH_BUGFIXES (the three fixes alone) | `python3 tools/build_batch_bugfixes.py` | `140C_FIXES` |
 | SIDECHAIN_COMPRESSOR light (the earlier version; WIP, not recommended; no bug fixes) | `KYOTI_ALLOW_WIP=1 python3 tools/build_sidechain_compressor_light.py` | `140C_SCLT` |
 
