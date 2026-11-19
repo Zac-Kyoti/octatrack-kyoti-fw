@@ -158,6 +158,13 @@ are lowercase-hyphen, because octabam requires a module's name to equal its fold
 
 > Check this against the tree before trusting it; it has gone stale before.
 
+- **2026-11-19: VARISPEED VRG1 (WIP, NOT flashed, branch `emus-guard`)** — the VEMG2 freeze ported to plain VARISPEED:
+  a held VARI note keeps its speed through a Part switch until its own next trig (FINAL changed it ~7 ticks early,
+  and a cross-bank cue dropped it briefly). Images `140C_VRG1` (syx `2aae3558…`), `KY18 VRG1` (syx `07df9d49…`),
+  `KY18C VRG1` (syx `eba5cf5d…`); in KYOTI, EMPTY_PATTERN_LED_FIX's predicate moves CAVE -> SPRING (build_kyoti
+  `move_for_varispeed`). VARISPEED_EMUS VEMG2 unchanged. FLASHING §4 "VARISPEED VRG1"; NOTES 2026-11-19. Open: the
+  author's check; V1.8BC (kyoti-bp) gets it at its merge -- SPRING there also holds patch_triglock_bp.
+
 - **2026-11-19: VARISPEED_EMUS VEM11 FINAL** (the author flashed `140C_VEMG2`: all 8 FLASHING §4 checks pass; the final is
   that code as `140C_VEM11`: unit `d23d9e63…`, feature mainos `e2faf75d…`) — the load guard across
   a Part switch, the author's second round (VEMG1 superseded): the transition is priced before the switch with only real

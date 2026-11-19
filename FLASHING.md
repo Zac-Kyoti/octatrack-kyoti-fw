@@ -121,6 +121,8 @@ unit that boots; if it doesn't, use §3b.
 | VARISPEED | `140C_VARI1` |
 | VARISPEED_EMUS | `140C_VEM10` |
 | VARISPEED_EMUS VEM11 (WIP, the Part-switch guard) | `140C_VEMG2` |
+| VARISPEED VRG1 (WIP, no early speed change at a Part switch) | `140C_VRG1` |
+| KYOTI V1.8 / V1.8C with VARISPEED VRG1 (WIP) | `KY18 VRG1` / `KY18C VRG1` |
 | ERASE_EMPTY_TRIGLESS_LOCKS and the BATCH_BUGFIXES builds | `1.40C` (stock string — check by behaviour) |
 | a feature + BATCH_BUGFIXES | `BUG_` + the feature (`BUG_MUTEDT`, `BUG_DJV7`, `BUG_SC3X`, `BUG_RL3`, `BUG_QLREC`, `BUG_TRIGLK`, `BUG_RTM`, `BUG_BP303`, `BUG_VARI`, `BUG_VEM10`) |
 
@@ -288,6 +290,21 @@ quick check for each:
      refusals, TSTR onto VARI) unchanged. FREE MEM in the audio pool as with the FINAL image (one 6 KB arena page).
   - **Result (the user, 2026-11-19):** `140C_VEMG2` flashed (syx 12220cf0…, feature mainos e2faf75d…): all 8 checks pass.
     Promoted as VARISPEED_EMUS VEM11 (the same code, OS VERSION `140C_VEM11`).
+- **VARISPEED VRG1 walk-through** (WIP, NOT promoted; `out/VARISPEED/OCTATRACK_OS1.40C_VARISPEED.syx`, sha256
+  `2aae3558…`; also in `out/KYOTI/OCTATRACK_OS1.40C_KYOTI_V1.8.syx` `KY18 VRG1` and `..._V1.8C.syx` `KY18C VRG1`;
+  NOTES 2026-11-19 `emus-guard`). A held VARI note keeps its speed through a Part switch until its own next trig.
+  1. Part 1: T5 / T6 `VARI` on a loop whose ATTR TEMPO differs from the project tempo, notes held over the bar line.
+     Part 2: T5 / T6 TSTR `OFF`, their trigs from step 9. Cue pattern 2: the held notes keep their VARI speed through
+     the downbeat and change at their step-9 trigs (FINAL: ~0.15 s before the downbeat).
+  2. The reverse (Part 1 `NORM`, Part 2 `VARI`): the held notes change at their own next trig, as before.
+  3. The same cue into another bank: nothing changes before the downbeat (FINAL: a brief drop to stock speed ~0.15 s
+     before it).
+  4. Press PLAY on a project whose tracks are VARI: the first note plays VARI (speed locked to the tempo). STOP, change
+     pattern / Part while stopped, PLAY: the first note again plays the new Part's settings.
+  5. The usual VARISPEED checks (QUAN, tempo follow, TSTR back to BEAT restores PTCH).
+  6. KYOTI images only: EMPTY_PATTERN_LED_FIX moved to another ROM zone -- hold `[BANK]` on a project with a
+     pattern whose only content is a MIDI p-lock: its LED lights, the grid stays lit and responsive; the KYOTI V1.8 /
+     V1.8C checks otherwise unchanged (Clyps, DIRECT JUMP, RELOAD, MUTE MODE, SIDE-CHAIN, QLR).
 - **MIDI_PLAYS_FREE_FIX** — a PLAYS FREE MIDI track, trig quantize DIRECT, SCALE MODE PER
   TRACK, notes on steps 1 and 2: a manual trig keeps it running instead of stalling.
 - **EMPTY_PATTERN_LED_FIX** — a pattern whose only content is a p-lock on a MIDI track:

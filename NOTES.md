@@ -39269,3 +39269,45 @@ VEMG1 (`d782ea56…`) is superseded.
   mainos_varispeed_emus.bin 52823ea6 -> e2faf75d (rebuilt without the opt-in: identical), OS VERSION 140C_VEM10 ->
   140C_VEM11 (wrap only). README: the Part-switch behaviour + Hardware confirmed (this image); BUILD_KYOTI OS VERSION.
   Every other FINAL rebuilds to its pin. No octabam VARISPEED_EMUS module exists.
+## 2026-11-19 (`emus-guard`) — VARISPEED VRG1 (WIP, NOT flashed): the per-track freeze ported to plain VARISPEED
+
+The author heard little difference in the VEMG2 pack; VEMG2 goes to the hardware test as is. Port of "no early speed
+change" to the plain build.
+
+- **Change (shared source, plain path):** `vf_win` / `.vf_frz` / the `vf_eng` store are no longer inside `.if VEM_EMUS`;
+  the plain build has its own `vf_eng` (8 B). A track whose live-bytes Part (stock's pair 0x8000182a + t / 0x80001832
+  + t) is not the DB's current one is not polled and keeps its last verdict. VARISPEED_EMUS's bytes unchanged
+  (unit d23d9e63, feature e2faf75d, rebuilt). Plain unit 2,896 -> 2,996 B (0x400d6500..); octabam varispeed
+  reference 10db9694 (the manifest's only change). OS VERSION `140C_VRG1` (the requested `140C_VARIG1` is 11
+  characters; the field holds 10).
+- **KYOTI:** patch_varispeed 2,388 -> 2,492 B in CAVE (first, 0x400d6500). CAVE had 92 B left, so `move_for_varispeed()`
+  moves EMPTY_PATTERN_LED_FIX's predicate (UI task, 158 B) to SPRING REVERB's dead descriptor record (after QLR's key
+  handlers; 46 B left there; CAVE 148 B left) -- only in an image that carries VARISPEED and reclaims SPRING. Every
+  invariant reported clean (spans, B1 / B2, reclaim unreferenced, descriptor table). CLYPS standalone 94e41a22
+  unchanged.
+- **Gates (emulator).** Switch cases on the plain unit AND feature image (`check --plain`): ALL PASS. FINAL vs VRG1:
+  mix_nonvari / nonvari_fit -- FINAL: T5's held VARI note to stock speed at f5112 (400 frames, 145 ms before the switch;
+  T7 too); VRG1: T5 at its own trig f8268, T7 at its own trig on the switch f5512. rev_vari -- both at f8268 (identical).
+  own_xbank / mix_xbank -- FINAL: T5 / T7 drop to stock speed at f5112 and back at f5119; VRG1: nothing before the
+  switch. Identical increments: ref_clean, carry_fit, carry_fit_step1, own_step1, own_step1_stopped (a pattern / Part
+  changed while stopped: the first notes after PLAY), cert_sure, cancel_mix_max. The PLAY / load edge: stock resets the
+  pair to 0xff on PLAY (0x40004768, seen just before every run's transport start) and the first trig rewrites it
+  before the voice loop: every track's first note in every case is VARI (e.g. T5 0x3460e60 at f0), identical to FINAL.
+  varispeed_test.py (needs KYOTI_UNIT=1 now: it imports build_sidechain_compressor, whose gate hands off): unit 10/11,
+  FINAL 10/11 (widget, pre-existing); feature image 9/11 = FINAL feature (static flags the bug fixes' bytes: the test
+  predates feature images). Harness matrix VRG1 vs FINAL VARISPEED (tools/varispeed_emus_equiv.py): OTDEMO 35/35,
+  MMTESTDT 34/35 (tempo_edge_720 as always).
+- **KYOTI smokes (A = FINAL from the main checkout, B = VRG1):** V1.8C Clyps UI (diag_clyps_ui --only ABCDY): PASS.
+  V1.8C RS1 (diag_reflock, DJ jumps) and REF-LOCK c1 (16 <-> 7, DJ_MODE 0x40a96550 on: LAND commits): A == B, every
+  field. V1.8 diag_reload_quant (A-I, W, F): VERDICT PASS, 32 checks, its log identical to FINAL's. (Fixtures copied
+  read-only: DJTEST2 from the dj-restart worktree, the FINAL V1.8C Clyps symbols -- unchanged addresses.)
+- **Cost:** frame hook body 285.9 -> 342.2 instructions per frame with 4 VARI tracks (+56, ~14 per polled VARI track);
+  whole ColdFire +49 per frame. A track that is no VARI candidate pays nothing.
+- **A/B pack** out/ab_vari_port/ (A = FINAL VARISPEED feature image, B = VRG1): mix_nonvari, nonvari_fit, own_xbank
+  (first differences at 0.856 s = FINAL's early change), rev_vari, carry_fit, ref_clean (identical).
+- **Builds (WIP, NOT flashed):** VARISPEED `out/VARISPEED/OCTATRACK_OS1.40C_VARISPEED.syx` 2aae3558… (.bin 80870d5d…,
+  mainos f3317663…; unit 19d2aba8…); KYOTI V1.8 `KY18 VRG1` syx 07df9d49… (.bin c2e4255b…, mainos e9189233…); V1.8C
+  `KY18C VRG1` syx eba5cf5d… (.bin bbd286e1…, mainos 983d3f55…).
+- **V1.8BC (kyoti-bp, not touched):** at its merge, move_for_varispeed() puts pattern_led into SPRING too, but SPRING
+  there also holds patch_triglock_bp; if it does not fit, pattern_led (UI task) can go to DRAM (that image has a DRAM
+  arena) or another UI piece moves. Re-run its gates (BP one-per-core) and re-pin.
