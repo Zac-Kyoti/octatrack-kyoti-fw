@@ -39474,3 +39474,51 @@ every recorded field identical to the passing V1.8BC run; every other FINAL rebu
 `0e10e65a…`, .bin `c97ff3a3…`; KYOTI V1.8BC mainos `b3df2058…`, syx `48d10402…`, .bin `87e40e6d…`.
 **Not verified:** hardware (the fast path's misses would show only as a late repair: within a second at worst); the
 real UI message rate on the unit (the amortised figure assumes the 60 Hz tick alone).
+
+## 2026-11-19 (`kyoti-bp`) — KYOTI V1.8BC + BLACKPYRAMIDS_303 (one per core, SRC page paste) PROMOTED FINAL
+
+**Hardware (the author's MKI).** First image (V1.8BC mainos `b3df2058…`, syx `48d10402…`): FLASHING §4 V1.8BC items
+1-10 pass; of the BLACKPYRAMIDS_303 checks, run on V1.8BC: B1 (TRACK PASTE T1->T3 refused) and B2 (T1->T5 allowed,
+both play), B3 (stale signature), B5 (Part changes) and B7 (idle feel) pass; B4 (UNDO bringing a second one back) is
+not reachable from the panel: making T1 a BLKPYRAMD selects T1, and back on T3 `[FUNC]` + PASTE is PASTE TRACK again;
+B6 (a project saved with two on a core) skipped (the author's choice, both images). The standalone image was never
+flashed as such: its code is V1.8BC's (one source, other placement).
+- **Seen once, not reproduced:** while setting up A10 by TRACK COPY of T1's BLKPYRAMD and TRACK PASTE onto T2 / T5 of
+  a pattern on another Part, PLAY left step 1 lit and the sequencer did not advance. The author could not repeat it;
+  ot_emu replay (out/kbc/a10_repro.py: the paste into pattern 1 / Part 2 and the cue, the chooser route, B2, a
+  control) stepped normally in every variant. (In that replay, pasting into a pattern not on screen moved the engine
+  Part to 2 and the voice rendered nothing until the cue landed: an artefact of calling the paste for a pattern the
+  UI is not on, which the panel cannot do.) If it comes back: the steps, then a diagnostic image.
+- **Found (B3):** a FLEX SRC page pasted onto a BLKPYRAMD track left it a BLKPYRAMD with FLEX's numbers (VOL 0 ...).
+  A page holds one machine's twelve bytes + the machine (copy core 0x40026314, paste 0x40027e4c, kind 26 at +0x8ed8 in
+  the clipboard 0x460c8122 or the undo buffer 0x460bf218; the [FUNC]+PASTE handler 0x4005df40: UNDO 0x40028f40 first,
+  else the undo save 0x40027d64 and the paste 0x40028fc4). An OT-303 is FLEX in those bytes, its signature in
+  NEIGHBOR's, which a FLEX page never touches. **Fix (control.c ot_pgcopy / ot_pgpaste, machine.s):** the copy core
+  notes whether the copied SRC page is an OT-303's (`bp_pg[2]`, clipboard / undo buffer); the page paste (entry
+  0x40028fc4) and the page UNDO (its `pea 0x460bf218` at 0x40028f94, a jsr that leaves the pea's long) assign before
+  stock writes: onto an OT-303 from any other page -> ot_assign(.., 0) (FLEX back, knobs parked), then the pasted
+  values; an OT-303's page onto another machine -> ot_assign(.., 1), refused with the toast when the target's core
+  has another in that Part (the paste returns 0: the handler clears the undo state, no PASTE toast); an UNDO is never
+  refused (a refusal there makes the handler paste). VARISPEED owns 0x40027e4c (`vh_srcpaste`), hence the callers.
+  Gate `tools/ot303/verify_page_paste.py` (flex_on_bp + UNDO, bp_on_flex other core / own core, static_on_bp): ALL
+  GOOD on both images. The author flashed V1.8BC with it (`25bd7a24…`): as intended.
+
+**Promoted on the author's word**, rebased onto origin/main (0218091, VARISPEED_EMUS VEM11) and rebuilt there: the same
+hashes as the flashed / gated builds. Pins: KYOTI V1.8BC mainos `4c7fb0fe…` (syx `25bd7a24…` = the flashed file, .bin
+`2182062c…`); BLACKPYRAMIDS_303 unit `b3327bd3…` (was 5b7dfb2f), feature image mainos `6a124db1…` (was ca3089ca; OS
+VERSION `140C_BP303`, syx `f7efb1c7…`, .bin `8b2b2df3…`). `build_kyoti.py --clyps-bp` builds without the opt-in into
+out/KYOTI/ (reads its pin as `--clyps` does); the `tools/kyoti_bc_check_*.py` gates read out/KYOTI/.
+
+**Gates (after the page-paste change):** verify_one_per_core ALL GOOD (both images); kyoti_bc_check_onepercore ALL GOOD;
+Clyps UI ABCDY PASS (50); DJ REF-LOCK c1 / RS1 ran; voice check (V1.8BC) and verify_ot303 (unit): as before, only the
+core-1 DARK REV stopwatch line (3267 / 3286 vs stock 3252, the known emulator effect) and PLATE on V1.8BC (given up);
+MUTE matrix as before (muted tracks start 0 notes in OTFX-T / DT-T); SC levels vs V1.8C FINAL 0.00 dB (10 scenarios).
+**Trap:** `diag_clyps_ui.py` reads Clyps' symbols from `CLYPS_SYMS`; out/bp1pc/bc_clyps_syms.txt was the previous
+build's, and the voice runtime growing 1,460 B (41,716 -> 43,176) moved 1,154 of Clyps' 1,364 symbols (Clyps follows it in DRAM): Y FAILED
+and then looped forever in `while state()["cur"] != q: tap(DOWN)`. Regenerate it from the map
+(`kyoti_v1.8bc_map.json` symbols.patch_clyps_dram) after any change to a unit before Clyps.
+
+**Next:** octabam's `blackpyramids-303` gets everything (TRACK PASTE refusal, the net, the SRC page fixes; no Clyps
+there): an octabam test image for the author to flash first, then the pin PR to Sam (octabam PR checklist). Modwerk's
+form stays parked (#1542). Clyps' owner told: tools/clyps/* has the V1.8BC-only BP_CLASH / BP_UITAIL blocks (Clyps and
+V1.8C byte-identical without them).

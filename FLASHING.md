@@ -111,7 +111,7 @@ unit that boots; if it doesn't, use §3b.
 |---|---|
 | MUTE_MODES, SIDECHAIN_COMPRESSOR, RELOAD_FROM_PROJECT, QUANTIZE_LIVE_REC_TOGGLE | `140C_KYOTI` |
 | SIDECHAIN_COMPRESSOR light (the earlier version, WIP) | `140C_SCLT` |
-| KYOTI V1.8BC (WIP test image: V1.8C + BLACKPYRAMIDS_303) | `KYOTI1.8BC` |
+| KYOTI V1.8BC (V1.8C + BLACKPYRAMIDS_303) | `KYOTI1.8BC` |
 | KYOTI V1.7 (the features in one image) | `KYOTI V1.7` |
 | KYOTI V1.6 (the previous one) | `KYOTI V1.6` |
 | KYOTI V1.5 (the previous one) | `KYOTI V1.5` |
@@ -119,7 +119,6 @@ unit that boots; if it doesn't, use §3b.
 | DIRECT_JUMP_KYOTI | `140C_KDJ7` |
 | REC_TRIG_MUTE | `140C_RTM` |
 | BLACKPYRAMIDS_303 | `140C_BP303` |
-| BLACKPYRAMIDS_303, one-per-core WIP test image (2026-11-17) | `140C_BP1PC` |
 | VARISPEED | `140C_VARI1` |
 | VARISPEED_EMUS | `140C_VEM10` |
 | VARISPEED_EMUS VEM11 (WIP, the Part-switch guard) | `140C_VEMG2` |
@@ -129,8 +128,16 @@ unit that boots; if it doesn't, use §3b.
 PERSONALIZE is reset by every flash, so features are off until you re-enable them. A
 quick check for each:
 
-- **KYOTI V1.8BC walk-through** (WIP test image, NOT flashed yet; `out/KYOTI_WIP/KYOTI_V1.8BC/OCTATRACK_OS1.40C_KYOTI_V1.8BC.syx`,
-  built with `KYOTI_ALLOW_WIP=1 python3 tools/build_kyoti.py --clyps-bp`). KYOTI V1.8C plus BLACKPYRAMIDS_303;
+- **KYOTI V1.8BC walk-through** (FINAL 2026-11-19; `out/KYOTI/OCTATRACK_OS1.40C_KYOTI_V1.8BC.syx`, `python3
+  tools/build_kyoti.py --clyps-bp`). **Results (the author's MKI):** the first image (mainos `b3df2058…`, syx
+  `48d10402…`, 2026-11-18): items 1-10 pass, and of the BLACKPYRAMIDS_303 checks below TRACK PASTE (refused /
+  allowed), the stale signature, Part changes and the idle feel pass; B4 (UNDO bringing a second one back) cannot
+  be reached from the panel (selecting another track turns `[FUNC]` + PASTE back into PASTE TRACK); a project with
+  two on a core was not tried (the author's choice). Seen once, not reproduced (by the author or in ot_emu): after
+  pasting a BLKPYRAMD track into another Part's pattern, the sequencer would not advance from step 1 on PLAY.
+  Found: a Flex SRC page pasted onto a BLKPYRAMD track left it a BLKPYRAMD with Flex's numbers (VOL 0 ...): fixed,
+  item 11. The FINAL (mainos `4c7fb0fe…`, syx `25bd7a24…`) flashed 2026-11-19: item 11 as intended.
+  KYOTI V1.8C plus BLACKPYRAMIDS_303;
   SPRING REV **and PLATE REV** are given up for the voice and SIDE-CHAIN's DSP code. Run V1.8C's own checks
   (Clyps, DIRECT JUMP, MUTE MODE, SIDE-CHAIN, QUANTIZE LIVE REC, REC TRIG MUTE, VARISPEED) as usual, then:
   1. **Boot + version:** OS VERSION `KYOTI1.8BC`. Power-cycle once, then again at the end of the session.
@@ -176,6 +183,12 @@ quick check for each:
      - Not tried in the emulator, check here: ORIG TRK FULL / ORIG PTN+PART and a card reload (`[BANK]` +
        `[TRACK]`, `[PTN]` + `[BANK]` + trig) that would bring a second one back onto a core: refused the same way.
      - Playing: a FULL load cued while running that would clash is refused at the press, not at the landing.
+  11. **SRC page copy / paste keeps the machine** (2026-11-18): copy a Flex track's SRC page, paste it onto a
+     BLKPYRAMD track: it becomes that Flex track's settings on a **Flex** track (FLEX shown, the pasted values);
+     `[FUNC]` + PASTE again (UNDO): the BLKPYRAMD comes back with its knobs. A Static page pasted onto it: Static
+     with the pasted values. Copy a BLKPYRAMD track's SRC page and paste it onto a Flex track on the other core:
+     a BLKPYRAMD with the same knobs; onto a track on its own core: refused with `ONE 303 PER CORE!`, nothing
+     changes.
 
 - **KYOTI V1.7 walk-through** (FINAL 2026-11-02, flashed: all of it passed; `out/KYOTI/OCTATRACK_OS1.40C_KYOTI_V1.7.syx`).
   V1.6's features unchanged; only addresses move (NOTES 2026-11-01).
@@ -302,10 +315,8 @@ quick check for each:
   0, brighter all the way, one octave more above 100; at CUT 127 with RES 127 the resonance stays below
   piercing. Turn VOL across 64 / 65 and back while a note holds: no click or pop. Turn RES and ACC
   through their range: every part of the knob changes the sound.
-  **One per core on every path** (WIP test image `140C_BP1PC`, 2026-11-17, NOT flashed yet:
-  `out/BLACKPYRAMIDS_303/OCTATRACK_OS1.40C_BLACKPYRAMIDS_303.syx`, built with
-  `KYOTI_ALLOW_WIP=1 KYOTI_VERSTR=140C_BP1PC python3 tools/build_blackpyramids_303.py`). Each refusal shows
-  `ONE 303 PER CORE!` exactly once:
+  **One per core on every path** (FINAL 2026-11-19; checked on the unit in KYOTI V1.8BC, results there: this
+  standalone image not flashed as such). Each refusal shows `ONE 303 PER CORE!` exactly once:
   - BLKPYRAMD on T1. TRACK COPY T1, select T3, TRACK PASTE: refused -- T3 keeps what it had (no `PASTE TRACK`
     toast); PASTE again on T3 is refused again (there is nothing to undo). Select T5, TRACK PASTE: allowed -- T5 is a BLKPYRAMD
     with T1's knobs, both play.
@@ -313,9 +324,9 @@ quick check for each:
     is Static. Make T1 a BLKPYRAMD (allowed). Copy a FLEX SRC page and paste it onto T2: T2 is a **Flex** track
     (it shows `FLEX` and its sample, not BLKPYRAMD, with the pasted page's values); T1 still plays the voice. No
     toast. (Before this build T2 came back as a second BLKPYRAMD on core 1.)
-  - TRACK PASTE then undo: T3 a BLKPYRAMD; paste a Flex track onto T3; make T1 a BLKPYRAMD; PASTE again on T3:
-    if stock offers the undo (`UNDO TRACK`) and it brings T3's BLKPYRAMD back, T3 turns back to Flex at once with
-    the toast and T1 keeps the voice; if stock pastes again instead, T3 just stays Flex.
+  - TRACK PASTE then undo: not reachable from the panel (the author, 2026-11-19): making T1 a BLKPYRAMD selects
+    T1, and back on T3 `[FUNC]` + PASTE is PASTE TRACK again, never UNDO TRACK. The net would repair it anyway.
+  - SRC page copy / paste: KYOTI V1.8BC item 11, the same here.
   - A project with two on a core (from a build with another allocation, or any older save that has two): on
     LOAD PROJECT the lower-numbered track of the core keeps BLKPYRAMD, the other is Flex with its old Flex
     values, the toast once, the Part marked edited. Part / pattern changes between Parts with BLKPYRAMD on

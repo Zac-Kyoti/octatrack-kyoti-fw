@@ -67,23 +67,27 @@ composes the three fixes onto it, proving that every changed byte has exactly on
 three fix builders (`build_midi_plays_free_fix.py`, `build_empty_pattern_led_fix.py`,
 `build_part_change_carryover_fix.py`) give the BATCH_BUGFIXES image too.
 
-### The combined images: KYOTI V1.8 and KYOTI V1.8C
+### The combined images: KYOTI V1.8, V1.8C and V1.8BC
 
-Every FINAL feature except BLACKPYRAMIDS_303 and VARISPEED_EMUS in one image, in two versions:
+Every FINAL feature except BLACKPYRAMIDS_303 and VARISPEED_EMUS in one image, in two versions, and a
+third with BLACKPYRAMIDS_303:
 
 ```sh
 python3 tools/build_kyoti.py            # KYOTI V1.8:  RELOAD_FROM_PROJECT + DIRECT_JUMP_KYOTI
 python3 tools/build_kyoti.py --clyps    # KYOTI V1.8C: CLYPS (Direct Jump Kyoti built in), no RELOAD
+python3 tools/build_kyoti.py --clyps-bp # KYOTI V1.8BC: V1.8C + BLACKPYRAMIDS_303 (SPRING + PLATE REV given up)
 ```
 
-They write `out/KYOTI/OCTATRACK_OS1.40C_KYOTI_V1.8.syx` (OS VERSION `KYOTI V1.8`) and
-`out/KYOTI/OCTATRACK_OS1.40C_KYOTI_V1.8C.syx` (OS VERSION `KYOTI 1.8C`), each with its `.bin`.
+They write `out/KYOTI/OCTATRACK_OS1.40C_KYOTI_V1.8.syx` (OS VERSION `KYOTI V1.8`),
+`out/KYOTI/OCTATRACK_OS1.40C_KYOTI_V1.8C.syx` (OS VERSION `KYOTI 1.8C`) and
+`out/KYOTI/OCTATRACK_OS1.40C_KYOTI_V1.8BC.syx` (OS VERSION `KYOTI1.8BC`), each with its `.bin`.
 `build_clyps.py` runs `build_kyoti.py --clyps-standalone` (CLYPS + DIRECT_JUMP_KYOTI + BATCH_BUGFIXES,
 `out/CLYPS/`). No builder puts CLYPS beside the standalone DIRECT_JUMP_KYOTI or RELOAD_FROM_PROJECT
 (`tools/feature_exclusions.py`).
 
 > **Sample memory.** RELOAD_FROM_PROJECT and DIRECT JUMP run from DRAM in V1.8: eleven 6 KB pages (66 KB)
-> of the 85.5 MB pool. In V1.8C and the CLYPS image, CLYPS and DIRECT JUMP take 1,709 pages (about 10 MB),
+> of the 85.5 MB pool. In V1.8C and the CLYPS image, CLYPS and DIRECT JUMP take 1,709 pages (about 10 MB; V1.8BC
+> with the voice's runtime: 1,720),
 > almost all of it Clyps' originals and working copies. The MEMORY page still reads 85.5 MB. An
 > octabam-built image (octabam's own remixer) reserves a fixed **10 MiB** whenever any module runs from DRAM.
 
@@ -91,7 +95,7 @@ KYOTI V1.0 was withdrawn on 2026-10-06; V1.1 replaced it, V1.2 (with an earlier 
 V1.3 replaced V1.2, whose SPRING reclaim overwrote PLATE REVERB's page (`reference/kb/caves.md` §0),
 V1.4 replaced V1.3 without that module, V1.5 replaced V1.4, adding VARISPEED, V1.6 replaced V1.5, and
 V1.7 replaced V1.6: V1.1–V1.6 kept code on the stock DELAY's coefficient table (`reference/kb/caves.md`,
-the cave table), which darkened DELAY repeats. V1.8 and V1.8C replace V1.7.
+the cave table), which darkened DELAY repeats. V1.8, V1.8C and V1.8BC replace V1.7.
 V1.7 builds from tag `ref/kyoti-v1.7-2026-11-09`, V1.6 from tag `ref/kyoti-v1.6-2026-10-29`. V1.4 still
 builds from the commit it was promoted at (`git worktree add ../octatrack-kyoti-fw-v14 19348d9`,
 with `vendor/`, `out/raw/`, `downloads/` and `refs/octabam` linked in by absolute path).
