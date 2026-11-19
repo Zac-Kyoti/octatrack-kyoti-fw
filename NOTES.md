@@ -39390,3 +39390,256 @@ important"): QUAN is ALWAYS 1/1 when a track goes to VARI, unless that track had
   NEIGHBOR p1 bytes 18..20, byte 18 = STATIC's PTCH park: 'O' = 0x4f reads as an old park (not memory: QUAN 1/1),
   and a STATIC VARI exit writes 0x80 | QUAN there -- re-run the BP303 gates and check a STATIC VARI track beside an
   OT-303 track; re-pin.
+## 2026-11-17 (`kyoti-bp`) — KYOTI V1.8BC: KYOTI V1.8C + BLACKPYRAMIDS_303 (WIP test image, NOT flashed)
+
+**The author's decisions (2026-11-17):** V1.8C's content + BLACKPYRAMIDS_303; SPRING REV **and PLATE REV** given up;
+ERASE_EMPTY_TRIGLESS_LOCKS skips BLKPYRAMD tracks; name "KYOTI 1.8BC" -> OS VERSION `KYOTI1.8BC` (10 chars; one
+constant, `BC_VERSTR` in build_kyoti.py), TAG `KYOTI_V1.8BC`. Not in it: RELOAD_FROM_PROJECT, VARISPEED_EMUS.
+
+**Build:** `KYOTI_ALLOW_WIP=1 python3 tools/build_kyoti.py --clyps-bp` (alias `--bc`; refused without the opt-in,
+never sealed: not in FINAL) -> out/KYOTI_WIP/KYOTI_V1.8BC/. The V1.8 / V1.8C / CLYPS FINALs rebuild to their pins
+without the opt-in (8807feee, 9d1a29c9, 94e41a22), as do the BP unit 5b7dfb2f and feature image ca3089ca, the SC
+unit 44465569 / image 4febe2e6, the ERASE unit 83690ffb / image db348f68 and MUTE_MODES' image 857d80d3.
+
+**DSP layout (both payloads, measured off our image):** PLATE REV's P module (594 w) ends where SPRING REV's
+(1,063 w) begins: 1,657 contiguous words; nothing outside reaches PLATE's words but its two dispatch entries
+(X:$215/$235[$14]; a full disassembly scan of every P module, and every X/Y data word).
+| | payload A (core 0, T5-T8) | payload B (core 1, T1-T4) |
+|---|---|---|
+| SIDE-CHAIN (677 w) | P:$1000..$12a5 (straddles PLATE/SPRING's record boundary, mapped word by word) | P:$0dc0..$1065 |
+| BLACKPYRAMIDS_303 voice | P:$12a5..$164d (936 w) | P:$1065..$1409 (932 w) |
+| spare | 9 w | 13 w |
+| DARK REV's helper (moved by the voice's build, as standalone) | P:$1656..$1679 | P:$1416..$1439 |
+| voice X | SPRING's five X records; run 1 at X:$7b04..$7bfb | same |
+| voice Y | $7a5..$feb | same |
+| SIDE-CHAIN Y | keybus $7e00..$7fff, MON $7df0..$7dff; window $33e00 | same; window $3be00 |
+Y/X disjoint. The moved voice = the standalone words up to relocated addresses (55 / 54 instructions; X and Y
+images identical); SC is assembled at its org by its own builder (dsp_asm + dsp_xasm cross-check).
+
+**Builders (placement only; every default = the standalone value):** SC `sc_dsp_org_*`, `sc_dsp_end_*`,
+`sc_donor_ids`; BP `bp_dsp_org_*`, `bp_donor_ids`, `bp_runtime` + `bp_runtime_dram`, `bp_mm_keymask`
+(tools/ot303/dsp_patch.py / hwprobe_image.py take an org; commit 3b7a580, `Thread: ot303`); ERASE
+`patch_triglock_bp` (tools/patch_triglock_bp.s, 122 B in SPRING's reclaimed record: ENC had 40 B left). Both SC and
+BP give up PLATE + SPRING with identical bytes (33, SHARED_OK); PLATE's ColdFire descriptor record stays stock
+(asserted), SPRING's record keeps patch_qlrec + patch_triglock_bp (82 B left).
+
+**DRAM:** the voice's loader only copies + hash-checks (no boot-time work), so its runtime is a unit of KYOTI's one
+DRAM image: DJ 4,012 B @0x40a955e0, BP 39,916 B @0x40a9658c, Clyps 28,576 B @0x40aa0178 (still last; its 10.4 MB
+of buffers follow). 72,504 B raw, 43,744 B packed, loader + payload 43,976 B; 1,719 arena pages (V1.8C: 1,709).
+
+**Found and fixed (WIP, this image only): MUTE MODE DT-T did not mute a BLKPYRAMD track.** The voice starts notes
+from the trigger flag (0x46104d0c, the frame builder's copy of 0x46104d15) before stock binds a voice, so
+MUTE_MODES' trig drop (fresh_bind / dt_trig) missed it (Modwerk #777's FM Synth case). ot_emu (octabam bc144523
+build from out/sc-leak, BOTLI, both tracks muted, main mix): DT-T -9.9 dBFS = unmuted level; OT / OTFX / OTFX-T
+-35.4 (AMP / post-FX cuts). Fix: control.c `KYOTI_MM_GATE` (only when build_kyoti passes MUTE_MODES' KEYMASK) asks
+mm_trig_muted's question (GATE 1/2, muted or unsoloed, less KEYMASK) and drops the note (consumed: queue stays
+paired) and a silenced track's live note. After: DT-T -35.4; muted tracks start 0 DSP notes in OTFX-T / DT-T.
+
+**Gates (all on mainos 7df332c7):**
+- composer: zones, disjoint deltas (SC x BP: 33 identical bytes, SHARED_OK), every byte owned, 160 code spans no
+  branch inside, B1/B2, reclaim, descriptor table, PLATE/SPRING off both choosers + id2e NONE + DSP stub, PLATE's
+  record stock; the FX2 list = stock minus PLATE and SPRING, order and id2pos consistent.
+- BP's verify (tools/kyoti_bc_check_voice.py = verify_ot303 pointed at this image): every line as standalone (ui,
+  flex round trip, park, renderer, line order on both cores, Y images, STG 2, the DRAM unit equal after the run,
+  KYOTI's loader once); PLATE REV = the stub (expected); DARK REV core 1 track 4 3267 vs stock 3252 = V1.8C
+  FINAL's own value (and bp-reclaim's known emulator effect).
+- every offered FX2 effect on both cores (tools/kyoti_bc_check_fx2.py) vs stock: same, but COMPRESSOR +22 (SC's
+  hook; identical to V1.8C FINAL) and PHASER / DARK jitter (V1.8C FINAL jitters the same way).
+- SC: emu_sc_dsp3 / _xcore / emu_sc_sctap at payload B's new org: ALL GOOD. ot_emu SCT1 tone fixture, keyed same
+  core, cross core, MON on core 1 and core 0 (both directions): per-track tone levels equal to V1.8C FINAL, 0.00 dB.
+- ERASE (tools/kyoti_bc_check_erase.py, Unicorn on the image): Flex last lock -> cleared; BLKPYRAMD -> kept; Static
+  with a stale signature -> cleared; other lock left / never-locked param -> kept; registers preserved.
+- DIRECT JUMP REF-LOCK (--cond): 16 <-> 7 standalone (gate1 S1, refs dj-clyps r1_0/r1_2) PASS, 5 segments, no
+  stock switch run; RS1 restart (16 -> 12 -> 12, refs dj-restart f1x/f1y) PASS, 4 segments.
+- Clyps UI (diag_clyps_ui.py --only ABCDY, OT DEMO): PASS (50 checks).
+
+**Cycle budget (estimate, not measured as a whole core):** the voice 591 / 636 emulator cycles a sample (square,
+mean / worst; ~738 on the chip); SIDE-CHAIN always-on ~30 instr (~39 cycles) a sample a core; a keyed COMPRESSOR
+stays cheaper than a DJ EQ, so it never makes a new worst case. Against BLACKPYRAMIDS_303.md §4's heaviest legal
+stack: core 1 square ~140-200 cycles spare, saw ~320-370; core 0 saw ~10-55, square ~-115..-170 (overrun, as
+before plus SC's fixed cost). Lighter stacks fit.
+
+**Not verified:** a Clyps FULL load onto/from a BLKPYRAMD track and a DIRECT JUMP across Parts with a BLKPYRAMD
+track (static only: the 136 B slice and Part bytes carry machine + signature; a FULL load can put a second
+BLKPYRAMD on a core, as stock TRACK PASTE can); SIDE-CHAIN keyed from/onto a BLKPYRAMD track (only tone tracks);
+anything on hardware. FLASHING §4 "KYOTI V1.8BC walk-through" lists the checks.
+
+## 2026-11-17 cont. (`kyoti-bp`) — One BLKPYRAMD per DSP core, on every path (WIP, NOT flashed)
+
+**The author's design (approved 2026-11-17):** refuse up front where the user acts (TRACK PASTE; Clyps' FULL loads in
+V1.8BC), with `ONE 303 PER CORE!` and nothing changing; a safety net on the UI task for every other way a second
+BLKPYRAMD reaches a core; the chooser / SRC SETUP refusals and the DSP's first-claim backstop stay. Evidence that
+started it (research, emulator): two to eight signed tracks on a core never crash, the extras are silent (the DSP's
+first claim wins), each extra costs ~1,000-1,400 CF instructions a frame; the unchecked writers were stock TRACK PASTE,
+a SRC page paste or other machine-byte writer reviving a STALE signature, Clyps FULL loads, and project / bank loads.
+
+**What changed (tools/ot303/cf/control.c "One BLKPYRAMD per DSP core, on every path", machine.s, the builder):**
+- **TRACK PASTE** -- detour at the paste wrapper's entry **0x4002b988** (`7004b0b9460d0ffa`, machine.s
+  `ot_paste_hook` -> `ot_paste_ok`), not at 0x4002b654: VARISPEED owns that one (`vh_trkpaste`) in V1.8BC, and stock's
+  undo calls it too. When the clipboard (0x460c8122, kind 0x460d0ffa = 4) holds a BLKPYRAMD (its slice: machine
+  +0x91e, signature +0x931) and another track on the target's core in the pattern's Part is one: nothing pasted, the
+  undo state cleared as stock's own undo leaves it (0x460c80f4 / 0x460c80f0), the wrapper returns 0 (the paste key's
+  handler 0x4005eb50 then shows no PASTE TRACK), the toast. An UNDO that brings a second one back is left to the net
+  (refusing it there would make the handler paste instead: 0x4002b910 returning 0 falls through to the paste).
+- **The net** (`bp_net`, from `bp_uitail`): the UI task's message-loop tail **0x40062d1c** (`tst.l 0x46c7c72c`):
+  standalone a `jsr bp_uitail` there (the net, then the displaced test; rts keeps its flags for stock's beq.w). Every
+  pass scans the current bank's four Parts (machine byte + signature, a byte or two a track). Per core, two or more
+  signed tracks: the track that alone held that core of that Part at the previous pass stays, else (after a load or a
+  bank change) the lowest-numbered; the others -> `ot_assign(part, t, 0)` (FLEX's stash = the pre-303 values, the
+  knobs parked; both Part copies), the current Part's track republished (0x400972fc(part, t, 1), as SRC paste does at
+  0x40027fbc), the Part marked edited as stock's TRACK PASTE marks it (bank+0x95048 and 0x100b145e bit p as bytes,
+  bank+0x9b332 = 1, 0x100f8598 = 1), RDRAW, the toast once. A **stale** signature (signature, machine not FLEX) is
+  cleared the same way, without a toast (nothing was refused). `ot_validate_part` only notes a Part with two on a core
+  or a stale signature (`bp_pend`, no toast: it runs inside the load); with `bp_pend` the net acts on a state seen on
+  two passes in a row (the load may still be writing) and keeps the lowest-numbered. Idle cost: **525 instructions a
+  pass** (ot_emu watch-pc timestamps, min = median over the timed passes, standalone and V1.8BC alike).
+- **V1.8BC (Clyps):** tools/clyps/patch_clyps.s / clyps_reload.s, all inside `.ifdef BP_CLASH` / `BP_UITAIL`, which
+  only `build_kyoti.py --clyps-bp` defines (build_clyps.py `BP_SYMS` from kyoti_place keys `bp_refuse_load`,
+  `bp_uitail`; pass-1 stand-ins `BP_SIZING`). `cl_bpgate` asks BLACKPYRAMIDS_303's `bp_refuse_load(dst, src[8], mask)`
+  before any FULL load: dst the playing pattern's Part, src[t] the Part t's slice comes from (this load's, via
+  `cl_bpsrc` = cl_fullone's sources: slot (cl_shsrc), ORIG snapshot, SAVEPART, RQ_PART; or a FULL load still cued for
+  t), refused when a core would end with two and one of them comes with this load. Asked at: cl_exec (between its two
+  passes: every target of a trig / [YES], groups included), cl_restore (ORIG SEQ/MCH/FX), cl_restorepat (ORIG
+  PTN+PART), the temp reload (ty_ours), the card's (cl_rqarm: the pattern and the batch of tracks, cl_rqarm1 alone).
+  Refused: nothing loaded or cued, no load flash / TEMP TRK RELOADED / card toast (rq_msg cleared), BP's toast once.
+  Clyps owns 0x40062d1c (cl_uitail): its first instruction is `jsr BP_UITAIL`; build_kyoti.py's SUPERSEDE gets the
+  entry (CLYPS, BLACKPYRAMIDS_303, 0x40062d1c, bp_uitail, BP_UITAIL) and the voice is now built before Clyps
+  (apply_bp). Without the flags Clyps assembles byte for byte as before: V1.8C 9d1a29c9 and CLYPS 94e41a22 rebuild to
+  their pins.
+
+**Builds (WIP, NOT flashed):** standalone `KYOTI_ALLOW_WIP=1 KYOTI_VERSTR=140C_BP1PC python3
+tools/build_blackpyramids_303.py` -> out/BLACKPYRAMIDS_303/ (unit and feature image both WIP now: the unit no longer
+matches 5b7dfb2f, the image no longer ca3089ca); KYOTI V1.8BC `KYOTI_ALLOW_WIP=1 python3 tools/build_kyoti.py
+--clyps-bp`. Hashes in the commit and FLASHING §4.
+
+**Images (WIP, NOT flashed):** standalone unit mainos `21855b85…`; feature image mainos `63c3556b…`, syx `0f3f8994…`,
+.bin `2a326132…` (`140C_BP1PC`); KYOTI V1.8BC mainos `fa5f7143…`, syx `7e4c2ff1…`, .bin `1bf5bd3d…`. Runtime +1,800 B
+(V1.8BC unit 41,716 B).
+
+**Gates (emulator; logs in the worktree's out/bp1pc/):**
+- `tools/ot303/verify_one_per_core.py` (ot_emu, BOTLI, stock routines through call steps), feature image and V1.8BC:
+  ALL GOOD both. paste T1->T3 refused (wrapper 0, the Part byte for byte unchanged, undo cleared, NOTIFY once with our
+  text); T1->T5 pasted (no toast); stale: T2 STATIC by a machine-byte write, T1 made one, T2 FLEX again -> FLEX with
+  its pre-303 values, not a BLKPYRAMD, 1 stale cleared, no toast; load_two (T2 + T3, validator run): T2 kept, T3
+  FLEX with its pre-303 values in both copies, Part edited, 1 toast; held (T2, then T1 arrives): T2 kept, 1 toast;
+  two Part switches between Parts with BLKPYRAMD on T2 / T3: nothing refused or demoted, no toast; idle pass 525
+  instructions. Control on the old FINAL image (ca3089ca): paste -> T1 + T3, stale -> T1 + T2, load -> T2 + T3,
+  all on core 1, no toast.
+- `tools/kyoti_bc_check_onepercore.py` (route A, OT DEMO, real keys): single FULL refused (sequence + slice
+  unchanged, nothing cued, no flash, 1 toast); a `[CUE]` group T2 + T5 refused whole (T5 alone would land), 1
+  toast; T5 alone lands as a BLKPYRAMD; sequence-only unaffected; temp reload refused (no TEMP TRK RELOADED, 1
+  NOTIFY): ALL GOOD. (Route A: `[CUE]` must be pressed before `[FUNC]` -- with `[FUNC]` held it is stock's key.)
+- Regression: every other FINAL rebuilds to its pin without the opt-in (KYOTI V1.8 8807feee, V1.8C 9d1a29c9,
+  CLYPS 94e41a22; the MUTE_MODES, QLR, SC, ERASE, RELOAD, DJK, RTM, VARISPEED, VARISPEED_EMUS, BATCH_BUGFIXES
+  feature images). BP verify (standalone unit, and kyoti_bc_check_voice on V1.8BC): every line as before but the
+  core-1 DARK REV stopwatch on track 4 (deterministic; the old FINAL unit 5b7dfb2f gives the same 3207 below
+  stock's 3248 minimum, so it fails identically there) and, on V1.8BC, PLATE (given up, by design). MUTE matrix:
+  muted tracks start 0 notes in OTFX-T / DT-T (BOTLI loads with T1/T3-T6 muted, 0x3d: the "none muted" DT-T row
+  drops T6 for that reason). SC levels (SCT1, 10 scenarios both cores) vs V1.8C FINAL: 0.00 dB. DJ REF-LOCK 16<->7
+  (c1) and RS1 (n1): every recorded field identical to the V1.8BC run that passed. Clyps UI ABCDY: PASS (50).
+
+**octabam / Modwerk (read-only survey; not changed, the author's call):** neither prevents a second instance except at
+the chooser / SRC SETUP. octabam modules/blackpyramids-303 carries the same control.c: `ot_admit_track` only from the
+commits; its validator never counts; no hook on 0x4002b654 / 0x4002b988 / 0x4008cea0 (VARISPEED's vh_trkpaste only);
+RELOAD's `rl_slA` copies machine + page 1 (the signature) with no admission; HOOKS' MACHINE_ROWS / MC_LIMIT do not
+list BLACKPYRAMIDS. Modwerk (origin/main machine_registry.c; BP only on the blackpyramids / bp-usb branches):
+`admit_track` only on selection (`mw_assign`); `charge()` re-books DSP cycles after loads / Part changes / pastes but
+never calls admit, so a second signed BP on a core is charged when the cycles fit; `mw_validate` masks PROTECT bytes
+only; the "lease" is the controller write lease. In both the DSP's first claim keeps the extra silent.
+
+**Not verified:** anything on hardware; Clyps ORIG TRK FULL / ORIG PTN+PART and the card reloads (gated in source,
+not driven in the emulator: OT DEMO's originals hold no BLKPYRAMD, and the card job was not run); a cued FULL load
+while running (the gate runs at the press; only stopped-transport loads were driven); the net during a real
+LOAD PROJECT from the card (the validator was called directly; whether the UI task can run mid-load on the unit is
+not known -- the two-identical-passes wait is the guard); stock's own undo bringing a second one back (the net's
+holder rule was driven by RAM, not by the undo key); the repair pass's cost (interrupts land inside its timing).
+FLASHING §4: BLACKPYRAMIDS_303 "One per core" and KYOTI V1.8BC item 10.
+
+## 2026-11-18 (`kyoti-bp`) — the one-per-core net made cheap when idle (WIP, NOT flashed)
+
+**The author's request (2026-11-17):** the net ran a full 4-Part scan after every UI message (525 instructions, the
+60 Hz tick included); make the idle pass well under 100 with every path still covered.
+
+**Design (machine.s `bp_uitail`, control.c `bp_fp` / `fp_take` / `net_cause`):** an assembly fast path at the UI loop's
+tail returns at once when everything the net reads is as its last full pass left it: the bank pointer, the wake flag,
+a periodic count (a full pass every 60 passes, about a second at the 60 Hz tick), the UI Part (0x100b14cf) and the
+engine Part (0x80000003), the playing / pending pattern (the long at 0x800065bc = PLAY_BANK, ACT_PAT, PEND_BANK; and
+PEND_PAT 0x800065c0), and the active Part's fingerprint: its 8 machine bytes (two longs) and each track's first two
+signature bytes ('O','T'; four longs, two tracks a long). Any difference -> `bp_net`, the full scan of all four Parts,
+exactly as before (holder rule, FLEX with pre-303 values, stale cleared without a toast, one toast, the two-stable-
+passes rule after loads), which then takes the new fingerprint. The wake flag is set by the writers that can reach a
+Part the fingerprint does not watch: the Part validator (every load), the TRACK PASTE hook, an allowed Clyps FULL load
+(bp_refuse_load, V1.8BC: no Clyps edit needed). Writers of the active Part (SRC page paste, the file browser's
+assigns, an undo, the chooser) change its fingerprint. A non-active Part is scanned when it is cued (PEND_PAT: before
+it plays a step), when it becomes active, after any wake, and once a second regardless. Only a change to a track's
+third signature byte alone in the active Part waits for the periodic pass. `bp_net_why` / `bp_net_fixpart` record
+why a repairing pass ran and which Part the engine played then (gate only).
+
+**Cost (ot_emu watch-pc instruction-count timestamps):**
+| | before | after |
+|---|---|---|
+| idle pass | 525 | **54** (min = median, 738 standalone / 759 V1.8BC passes timed) |
+| full pass | 525 (every pass) | 506-603 in bp_net + 5-7 for the checks before it |
+| worst pass timed | ~91,000 (an interrupt inside) | 8,500 (the repairing pass: ot_assign x2 copies, the republish, the toast; or an interrupt) |
+| a second at 60 passes | 31,500 | ~3,700 (59 idle + 1 full) |
+
+**Gates (out/bp1pc/):** `verify_one_per_core.py` ALL GOOD on both images with two new scenarios: two BLKPYRAMD written
+into Part 2 (not active) and pattern 1 (-> Part 2) cued while running -> repaired at the cue (why 8) while Part 1 still
+played; the same with no cue -> repaired by the periodic pass (why 16), Part 1 playing. Every earlier scenario as
+before. `kyoti_bc_check_onepercore.py` ALL GOOD; Clyps UI ABCDY PASS (50); BP verify, MUTE matrix, SC levels (0.00 dB,
+10 scenarios) as before (verify: only the pre-existing core-1 DARK REV line, and PLATE on V1.8BC); DJ REF-LOCK c1 / RS1 n1:
+every recorded field identical to the passing V1.8BC run; every other FINAL rebuilds to its pin without the opt-in
+(KYOTI V1.8 / V1.8C / CLYPS and the ten feature images: 13 of 13).
+
+**Images (WIP, NOT flashed):** standalone unit mainos `62ac6e44…`; feature image `140C_BP1PC` mainos `dfde2b50…`, syx
+`0e10e65a…`, .bin `c97ff3a3…`; KYOTI V1.8BC mainos `b3df2058…`, syx `48d10402…`, .bin `87e40e6d…`.
+**Not verified:** hardware (the fast path's misses would show only as a late repair: within a second at worst); the
+real UI message rate on the unit (the amortised figure assumes the 60 Hz tick alone).
+
+## 2026-11-19 (`kyoti-bp`) — KYOTI V1.8BC + BLACKPYRAMIDS_303 (one per core, SRC page paste) PROMOTED FINAL
+
+**Hardware (the author's MKI).** First image (V1.8BC mainos `b3df2058…`, syx `48d10402…`): FLASHING §4 V1.8BC items
+1-10 pass; of the BLACKPYRAMIDS_303 checks, run on V1.8BC: B1 (TRACK PASTE T1->T3 refused) and B2 (T1->T5 allowed,
+both play), B3 (stale signature), B5 (Part changes) and B7 (idle feel) pass; B4 (UNDO bringing a second one back) is
+not reachable from the panel: making T1 a BLKPYRAMD selects T1, and back on T3 `[FUNC]` + PASTE is PASTE TRACK again;
+B6 (a project saved with two on a core) skipped (the author's choice, both images). The standalone image was never
+flashed as such: its code is V1.8BC's (one source, other placement).
+- **Seen once, not reproduced:** while setting up A10 by TRACK COPY of T1's BLKPYRAMD and TRACK PASTE onto T2 / T5 of
+  a pattern on another Part, PLAY left step 1 lit and the sequencer did not advance. The author could not repeat it;
+  ot_emu replay (out/kbc/a10_repro.py: the paste into pattern 1 / Part 2 and the cue, the chooser route, B2, a
+  control) stepped normally in every variant. (In that replay, pasting into a pattern not on screen moved the engine
+  Part to 2 and the voice rendered nothing until the cue landed: an artefact of calling the paste for a pattern the
+  UI is not on, which the panel cannot do.) If it comes back: the steps, then a diagnostic image.
+- **Found (B3):** a FLEX SRC page pasted onto a BLKPYRAMD track left it a BLKPYRAMD with FLEX's numbers (VOL 0 ...).
+  A page holds one machine's twelve bytes + the machine (copy core 0x40026314, paste 0x40027e4c, kind 26 at +0x8ed8 in
+  the clipboard 0x460c8122 or the undo buffer 0x460bf218; the [FUNC]+PASTE handler 0x4005df40: UNDO 0x40028f40 first,
+  else the undo save 0x40027d64 and the paste 0x40028fc4). An OT-303 is FLEX in those bytes, its signature in
+  NEIGHBOR's, which a FLEX page never touches. **Fix (control.c ot_pgcopy / ot_pgpaste, machine.s):** the copy core
+  notes whether the copied SRC page is an OT-303's (`bp_pg[2]`, clipboard / undo buffer); the page paste (entry
+  0x40028fc4) and the page UNDO (its `pea 0x460bf218` at 0x40028f94, a jsr that leaves the pea's long) assign before
+  stock writes: onto an OT-303 from any other page -> ot_assign(.., 0) (FLEX back, knobs parked), then the pasted
+  values; an OT-303's page onto another machine -> ot_assign(.., 1), refused with the toast when the target's core
+  has another in that Part (the paste returns 0: the handler clears the undo state, no PASTE toast); an UNDO is never
+  refused (a refusal there makes the handler paste). VARISPEED owns 0x40027e4c (`vh_srcpaste`), hence the callers.
+  Gate `tools/ot303/verify_page_paste.py` (flex_on_bp + UNDO, bp_on_flex other core / own core, static_on_bp): ALL
+  GOOD on both images. The author flashed V1.8BC with it (`25bd7a24…`): as intended.
+
+**Promoted on the author's word**, rebased onto origin/main (0218091, VARISPEED_EMUS VEM11) and rebuilt there: the same
+hashes as the flashed / gated builds. Pins: KYOTI V1.8BC mainos `4c7fb0fe…` (syx `25bd7a24…` = the flashed file, .bin
+`2182062c…`); BLACKPYRAMIDS_303 unit `b3327bd3…` (was 5b7dfb2f), feature image mainos `6a124db1…` (was ca3089ca; OS
+VERSION `140C_BP303`, syx `f7efb1c7…`, .bin `8b2b2df3…`). `build_kyoti.py --clyps-bp` builds without the opt-in into
+out/KYOTI/ (reads its pin as `--clyps` does); the `tools/kyoti_bc_check_*.py` gates read out/KYOTI/.
+
+**Gates (after the page-paste change):** verify_one_per_core ALL GOOD (both images); kyoti_bc_check_onepercore ALL GOOD;
+Clyps UI ABCDY PASS (50); DJ REF-LOCK c1 / RS1 ran; voice check (V1.8BC) and verify_ot303 (unit): as before, only the
+core-1 DARK REV stopwatch line (3267 / 3286 vs stock 3252, the known emulator effect) and PLATE on V1.8BC (given up);
+MUTE matrix as before (muted tracks start 0 notes in OTFX-T / DT-T); SC levels vs V1.8C FINAL 0.00 dB (10 scenarios).
+**Trap:** `diag_clyps_ui.py` reads Clyps' symbols from `CLYPS_SYMS`; out/bp1pc/bc_clyps_syms.txt was the previous
+build's, and the voice runtime growing 1,460 B (41,716 -> 43,176) moved 1,154 of Clyps' 1,364 symbols (Clyps follows it in DRAM): Y FAILED
+and then looped forever in `while state()["cur"] != q: tap(DOWN)`. Regenerate it from the map
+(`kyoti_v1.8bc_map.json` symbols.patch_clyps_dram) after any change to a unit before Clyps.
+
+**Next:** octabam's `blackpyramids-303` gets everything (TRACK PASTE refusal, the net, the SRC page fixes; no Clyps
+there): an octabam test image for the author to flash first, then the pin PR to Sam (octabam PR checklist). Modwerk's
+form stays parked (#1542). Clyps' owner told: tools/clyps/* has the V1.8BC-only BP_CLASH / BP_UITAIL blocks (Clyps and
+V1.8C byte-identical without them).

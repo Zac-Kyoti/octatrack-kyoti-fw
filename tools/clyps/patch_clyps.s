@@ -680,6 +680,10 @@ ky_orig:
     move.l  #0x10000,%d0                | ORIG SEQ/MCH/FX
 ky_os:
     jsr     cl_restore
+.ifdef BP_CLASH
+    tst.b   cl_bpno                     | refused (cl_bpgate): no ORIG flash
+    bne.w   cl_refresh
+.endif
     jsr     cl_flhdr                    | the ORIG box flashes
     bra.w   cl_refresh
 ky_out:
@@ -1118,6 +1122,10 @@ kp_pat:
     clr.b   cl_chordout
     bra.w   cl_close
 kp_in:
+.ifdef BP_CLASH
+    tst.b   cl_bpno                     | refused (cl_bpgate): no flash
+    bne.w   cl_refresh
+.endif
     jsr     cl_flhdr                    | begun inside: the ORIG PTN+PART box flashes (the user)
     bra.w   cl_refresh
 
@@ -2364,6 +2372,12 @@ ex2_n:
     addq.l  #1,%d2
     cmpi.l  #16,%d2
     bne.w   ex2_l
+.ifdef BP_CLASH
+    moveq   #-1,%d1                     | KYOTI V1.8BC: a second BLKPYRAMD on a core -- the whole execution is
+    jsr     cl_bpgate                   | refused (cl_bpgate; each target its code in cl_xc)
+    tst.l   %d0
+    beq.w   ex2_bp
+.endif
 |   pass 2: restores in place (the track's next step, in phase), unless something here loads
     moveq   #0,%d2
 ex2_p:
@@ -2423,6 +2437,155 @@ ex2_out:
     movem.l (%sp),%d2-%d7/%a2
     lea     28(%sp),%sp
     rts
+.ifdef BP_CLASH
+ex2_bp:                                 | refused: nothing loads -- every target's code goes, the batch ends empty
+    lea     cl_xc,%a0
+    moveq   #15,%d0
+    moveq   #-1,%d1
+eb_l:
+    move.l  %d1,(%a0,%d0.l*4)
+    subq.l  #1,%d0
+    bpl.b   eb_l
+    clr.b   cl_xany
+    jsr     cl_bend
+    bra.w   ex2_out
+.endif
+
+.ifdef BP_CLASH
+| ---------------------------------------------------------------- KYOTI V1.8BC: one BLKPYRAMD per DSP core
+| (the author, 2026-11-17) A FULL load that would put a second BLACKPYRAMIDS_303 track on a DSP core (T1-4,
+| T5-8) is refused whole -- its sequence too, every member of a group, nothing loaded or cued -- with that
+| feature's toast (ONE 303 PER CORE!). Asked before every FULL load: an execution (cl_exec), ORIG SEQ/MCH/FX
+| (cl_restore), ORIG PTN+PART (cl_restorepat), a temp reload (ty_ours), the card's (cl_rqarm, cl_rqarm1).
+| cl_bpgate (d0 = the tracks, bit t; d1 = the code for each, -1: each its cl_xc) -> d0 = 1 go, 0 refused
+| (cl_bpno = 1). The question is BLACKPYRAMIDS_303's: BP_CLASH = its bp_refuse_load(dst, src[8], tracks), dst
+| the playing pattern's Part, src[t] the Part t's slice comes from -- this load's, or a FULL load still cued
+| for t -- else 0. Keeps d2-d7/a2-a6.
+cl_bpgate:
+    lea     -16(%sp),%sp
+    movem.l %d2-%d5,(%sp)
+    move.l  %d0,%d5                     | d5 = the tracks
+    move.l  %d1,%d4                     | d4 = the code, or -1
+    cmpi.l  #-1,%d4
+    bne.b   bg_m
+    moveq   #0,%d5                      | cl_exec: its targets
+    moveq   #7,%d3
+bg_x:
+    lea     cl_xc,%a0
+    move.l  (%a0,%d3.l*4),%d0
+    cmpi.l  #-1,%d0
+    beq.b   bg_xn
+    bset    %d3,%d5
+bg_xn:
+    subq.l  #1,%d3
+    bpl.b   bg_x
+bg_m:
+    moveq   #0,%d3                      | d3 = t
+bg_l:
+    moveq   #0,%d0                      | its source: none
+    btst    %d3,%d5
+    beq.b   bg_cue
+    move.l  %d4,%d2
+    cmpi.l  #-1,%d2
+    bne.b   bg_c
+    lea     cl_xc,%a0
+    move.l  (%a0,%d3.l*4),%d2
+bg_c:
+    btst    #16,%d2                     | the sequence alone: t keeps its slice
+    beq.b   bg_set
+    jsr     cl_bpsrc
+    bra.b   bg_set
+bg_cue:                                 | not in this load: a FULL load of t still cued
+    lea     cl_cue,%a0
+    move.l  %d3,%d1
+    add.l   %d1,%d1
+    moveq   #0,%d2
+    move.w  (%a0,%d1.l),%d2
+    cmpi.l  #0xffff,%d2
+    beq.b   bg_set
+    lea     cl_cuef,%a0
+    tst.b   (%a0,%d3.l)
+    beq.b   bg_set
+    jsr     cl_bpsrc
+bg_set:
+    lea     cl_bpsv,%a0
+    move.l  %d0,(%a0,%d3.l*4)
+    addq.l  #1,%d3
+    moveq   #8,%d0
+    cmp.l   %d3,%d0
+    bne.b   bg_l
+    moveq   #0,%d0
+    move.b  PLAY_BANK,%d0
+    moveq   #0,%d1
+    move.b  ACT_PAT,%d1
+    movea.l #BLOB,%a1
+    jsr     cl_partin                   | a0 = the playing pattern's Part
+    move.l  %d5,-(%sp)
+    pea     cl_bpsv
+    move.l  %a0,-(%sp)
+    jsr     BP_CLASH                    | 1 = refused (its toast shown)
+    lea     12(%sp),%sp
+    move.b  %d0,cl_bpno
+    eori.l  #1,%d0
+    movem.l (%sp),%d2-%d5
+    lea     16(%sp),%sp
+    rts
+
+| cl_bpsrc (d3 = t, d2 = code) -> d0 = the Part t's slice comes from (cl_fullone's sources), 0 = none.
+| Uses d0-d1/a0-a1.
+cl_bpsrc:
+    move.l  %d4,-(%sp)
+    move.l  %d2,%d4
+    lsr.l   #8,%d4
+    andi.l  #0xff,%d4                   | sbank / SRC_*
+    moveq   #0,%d0
+    cmpi.l  #SRC_SAVED,%d4
+    bne.b   bs_ns
+    lea     cl_svalid,%a0
+    tst.b   (%a0,%d3.l)
+    beq.b   bs_out
+    move.l  %d3,%d0
+    move.l  #PARTSZ,%d1
+    muls.l  %d1,%d0
+    addi.l  #SAVEPART,%d0
+    bra.b   bs_out
+bs_ns:
+    cmpi.l  #SRC_CARD,%d4
+    bne.b   bs_nc
+    tst.b   rq_stok
+    beq.b   bs_out
+    move.l  #RQ_PART,%d0
+    bra.b   bs_out
+bs_nc:
+    cmpi.l  #SRC_ORIG,%d4
+    bne.b   bs_slot
+    jsr     cl_origok
+    tst.l   %d0
+    beq.b   bs_out
+    moveq   #0,%d0
+    move.b  PLAY_BANK,%d0
+    moveq   #0,%d1
+    move.b  ACT_PAT,%d1
+    movea.l #SNAPB,%a1
+    jsr     cl_partin
+    move.l  %a0,%d0
+    bra.b   bs_out
+bs_slot:
+    move.l  %d4,%d0
+    moveq   #0,%d1
+    move.b  %d2,%d1
+    movea.l #BLOB,%a1
+    jsr     cl_partin
+    move.l  %a0,-(%sp)                  | CL29: a slice Clyps overwrote in that Part reads as it was
+    move.l  %d0,-(%sp)
+    move.l  %d4,-(%sp)
+    move.l  %d3,-(%sp)
+    jsr     cl_shsrc
+    lea     16(%sp),%sp
+bs_out:
+    move.l  (%sp)+,%d4
+    rts
+.endif
 
 | cl_asplays (d3 = track, d2 = code bank<<8 | pattern / SRC_*<<8) -> d0 = 0 when the playing pattern's
 | record of the track equals that source's record (cl_same: length / scale bytes aside), 1 otherwise or
@@ -2506,6 +2669,21 @@ cl_restore:
     lea     -12(%sp),%sp
     movem.l %d2-%d4,(%sp)
     move.l  %d0,%d3                     | d3 = 0 / 0x10000
+.ifdef BP_CLASH
+    clr.b   cl_bpno
+    tst.l   %d3                         | KYOTI V1.8BC: with its machine, refused whole when a core would get
+    beq.b   rs_bpok                     | a second BLKPYRAMD (cl_bpgate)
+    jsr     cl_targets
+    move.l  %d3,%d1
+    ori.l   #SRC_ORIG<<8,%d1
+    jsr     cl_bpgate
+    tst.l   %d0
+    bne.b   rs_bpok
+    movem.l (%sp),%d2-%d4
+    lea     12(%sp),%sp
+    rts
+rs_bpok:
+.endif
     jsr     cl_bbeg
     jsr     cl_targets
     move.l  %d0,%d4
@@ -2542,9 +2720,19 @@ rs_n:
 | slice holds (cl_slR, cl_pwhole), so the whole Part is as loaded; the pattern's own length / scale /
 | mode come back with the last track (cl_back). Nothing without a snapshot.
 cl_restorepat:
+.ifdef BP_CLASH
+    clr.b   cl_bpno
+.endif
     jsr     cl_origok
     tst.l   %d0
     beq.b   rp_out
+.ifdef BP_CLASH
+    move.l  #0xff,%d0                   | KYOTI V1.8BC: every track's slice as loaded -- refused whole when a
+    move.l  #0x10000+(SRC_ORIG<<8),%d1  | core would hold two BLKPYRAMD (cl_bpgate)
+    jsr     cl_bpgate
+    tst.l   %d0
+    beq.b   rp_out
+.endif
 |   2026-11-09 (the user): in place, DIRECT JUMP or not -- the pattern you are on comes back as loaded on the
 |   first step its tracks share, in phase (cl_togarm, as the card's reload of it); it replaces CL9's "pattern
 |   change to itself" (cl_self / cl_sw6 / cl_scommit / DJ's self-jump, inert now). A pattern cued meanwhile
@@ -2682,6 +2870,18 @@ ty_ours:
     jsr     cl_popc                     | d1 = how many
     tst.l   %d1
     beq.w   ty_done
+.ifdef BP_CLASH
+    tst.l   %d4                         | KYOTI V1.8BC: a temp reload (FULL) of audio tracks, refused whole when
+    beq.b   ty_bpok                     | a core would get a second BLKPYRAMD (cl_bpgate): no TEMP toast
+    tst.l   MIDI_MODE
+    bne.b   ty_bpok
+    move.l  %d3,%d0
+    move.l  #0x10000+(SRC_SAVED<<8),%d1
+    jsr     cl_bpgate
+    tst.l   %d0
+    beq.w   ty_done
+ty_bpok:
+.endif
     jsr     cl_bbeg
     moveq   #0,%d2
     moveq   #0,%d5                      | d5 = how many were done
@@ -6495,6 +6695,9 @@ cn_n:
 | The UI task's message loop, common tail 0x40062d1c (replaces `tst.l 0x46c7c72c`, 6 B; stock's
 | beq.w follows on those flags). Runs after every UI message. Does what a landing owes the UI.
 cl_uitail:
+.ifdef BP_UITAIL
+    jsr     BP_UITAIL                   | KYOTI V1.8BC: BLACKPYRAMIDS_303's net first (the site is ours: SUPERSEDE)
+.endif
     tst.b   cl_ptngo                    | a pattern reload from the card finished: go to that pattern
     beq.b   ut_ng
     jsr     cl_ptnswitch
@@ -8720,6 +8923,11 @@ cl_tname:   .space 16
 cl_s_savef2:.asciz "SAVE FIRST!"
 cl_s_ttsv:  .asciz "TEMP TRK SAVED"        | toast font 0x400ba862: 81 px
 cl_s_ttrl:  .asciz "TEMP TRK RELOADED"     | 99 px
+.ifdef BP_CLASH
+            .align 2
+cl_bpsv:    .space 32                   | cl_bpgate: each audio track's source Part (0: it keeps its own)
+cl_bpno:    .byte 0                     | cl_bpgate refused the last load
+.endif
     .align 4
 | the buffers: past the loaded image, uninitialised (dram.build's bss); read only behind a valid
 | mark. The snapshot is every bank as loaded (16 slabs + its Parts each: the Parts are there for

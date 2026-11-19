@@ -163,6 +163,22 @@ SC_SRC = ROOT / "tools/patch_sc_dsp3.asm"
 DONOR_WORDS = 1063
 NOP = 0x000000
 
+# A combined image with BLACKPYRAMIDS_303 (tools/build_kyoti.py --clyps-bp) gives up PLATE REVERB as
+# well: PLATE's P module (594 words) ends where SPRING's begins, so the two are 1,657 contiguous words
+# on each core, and this section moves to PLATE's first word, the voice after it. Placement only:
+# with no KYOTI_PLACE every value below is the standalone one and the image is byte-identical.
+#   sc_dsp_org_A/B  the section's first word (default: SPRING's init, cave_org)
+#   sc_dsp_end_A/B  the first word it may not reach (default: SPRING's module end)
+#   sc_donor_ids    the effects given up, off both choosers and the DSP dispatch (default SPRING only)
+PLATE = dict(fx_id=0x14, p=0x400d5594 + 0x38, sig=[0x254000, 0x0a7785, 0x000044],
+             A=dict(init=0x01000, proc=0x01055), B=dict(init=0x00dc0, proc=0x00e15))
+DONORS = {0x15: dict(name="SPRING REVERB", p=0x400d5726 + 0x38),
+          0x14: dict(name="PLATE REVERB", p=PLATE["p"])}
+DONOR_IDS = list(kyoti_place.at("sc_donor_ids", [0x15]))
+for _t, _d in DSP.items():
+    _d["org"] = kyoti_place.at(f"sc_dsp_org_{_t}", _d["cave_org"])
+    _d["end"] = kyoti_place.at(f"sc_dsp_end_{_t}", _d["cave_org"] + DONOR_WORDS)
+
 # ---------------- the donated (removed) effect, in ONE place ---------------
 # Retargeting this build at a different donor means changing only these two:
 # the chooser rebuild and the "old projects see NONE" redirect below are both
@@ -231,7 +247,7 @@ def cf_assemble(name, at):
     return (ROOT / f"out/{name}.bin").read_bytes(), syms
 
 
-def sc_assemble(tok, org):
+def sc_assemble(tok, org, limit=DONOR_WORDS):
     """assemble patch_sc_dsp3.asm at `org`, append the gain/f tables.
     Two passes so the two `move #>table,r1` widths don't shift.
     `tok` is one payload's DSP dict entry (corebase/fcorebase/sbase/fsbase/
@@ -271,8 +287,8 @@ def sc_assemble(tok, org):
     code, syms = one(org + n, org + n + sc_tables.GAIN_N)
     assert len(code) == n, "cave size shifted between the two sizing passes"
     words = code + sc_tables.gain_table() + sc_keyfilt.GT
-    if len(words) > DONOR_WORDS:
-        sys.exit(f"cave {len(words)} words > SPRING REVERB donor's {DONOR_WORDS}")
+    if len(words) > limit:
+        sys.exit(f"cave {len(words)} words > the donor space's {limit}")
     # round-trip the code region; reject mpysu/macsu (dsp_asm's `mpy x0,y0` trap)
     (ROOT / "out/patch_sc_dsp3_code.bin").write_bytes(
         b"".join(w.to_bytes(3, "little") for w in code))
@@ -424,9 +440,11 @@ def main():
 
     # ---------------- DSP (both payloads) ----------------
     print("\n=== DSP: SPRING REVERB donor + sctap / scdet / moncommit ===")
+    layout = {}
     for tag, d in DSP.items():
-        words, sctap, scdet, moncommit, scinit = sc_assemble(d, d["cave_org"])
-        print(f"  payload {tag}: cave {len(words)}w @ P:0x{d['cave_org']:05x}  "
+        words, sctap, scdet, moncommit, scinit = sc_assemble(d, d["org"], d["end"] - d["org"])
+        layout[tag] = dict(org=d["org"], words=len(words))
+        print(f"  payload {tag}: cave {len(words)}w @ P:0x{d['org']:05x}  "
               f"sctap=0x{sctap:x} scdet=0x{scdet:x} moncommit=0x{moncommit:x}")
 
         # SPRING REVERB's own real init routine's first 3 words -- a much more
@@ -437,9 +455,27 @@ def main():
         sig = [rd3(img, donor_off + 3 * i) for i in range(3)]
         assert sig == [0x22ee00, 0x0140c0, 0x000040], \
             f"payload {tag} SPRING REVERB init signature mismatch: {[hex(x) for x in sig]}"
-        for i, wv in enumerate(words):
-            img[donor_off + i * 3: donor_off + i * 3 + 3] = w3(wv)
-        print(f"    cave -> file 0x{donor_off:x} ({len(words)}/{DONOR_WORDS} donor words)")
+        if d["org"] == d["cave_org"]:
+            for i, wv in enumerate(words):
+                img[donor_off + i * 3: donor_off + i * 3 + 3] = w3(wv)
+            print(f"    cave -> file 0x{donor_off:x} ({len(words)}/{DONOR_WORDS} donor words)")
+        else:
+            # placed (build_kyoti.py --clyps-bp): from PLATE REVERB's first word, which may run on into
+            # SPRING's module. The two are separate payload records (a record header between them),
+            # so every word is mapped through its own module, and both modules must be the stock
+            # donors: PLATE's init signature at its start, SPRING's (asserted above) after it.
+            assert 0x14 in DONOR_IDS and 0x15 in DONOR_IDS, "a placed DSP section needs PLATE and SPRING given up"
+            pl = PLATE[tag]
+            po = dsp_module_fileoff(img, d["va"], d["ln"], pl["init"])
+            assert [rd3(img, po + 3 * i) for i in range(3)] == PLATE["sig"], f"payload {tag}: PLATE REVERB init"
+            assert pl["init"] + 594 == d["cave_org"], f"payload {tag}: PLATE's module does not end at SPRING's"
+            assert pl["init"] <= d["org"] and d["org"] + len(words) <= d["end"] <= d["cave_org"] + DONOR_WORDS, \
+                f"payload {tag}: P:{d['org']:x}+{len(words)} outside PLATE + SPRING (end {d['end']:x})"
+            for i, wv in enumerate(words):
+                wo = dsp_module_fileoff(img, d["va"], d["ln"], d["org"] + i)
+                img[wo:wo + 3] = w3(wv)
+            print(f"    cave -> P:0x{d['org']:05x}..0x{d['org'] + len(words):05x} over PLATE + SPRING "
+                  f"({len(words)} words, {d['end'] - d['org'] - len(words)} spare before P:0x{d['end']:05x})")
 
         # Detour sites patch in a 2-word `bsr` (PC-relative call), not the old
         # jsr_short()+NOP pair -- the SPRING REVERB donor's cave_org is past
@@ -495,12 +531,18 @@ def main():
         # can never drift from the id the ColdFire tables hide below -- a drift
         # would silently null one effect's module while the UI hid another's.)
         xt = dsp_xtable_fileoff(img, d["va"], d["ln"], 0x215)
-        ini_off, prc_off = xt + DONOR_ID * 3, xt + (0x20 + DONOR_ID) * 3
-        assert rd3(img, ini_off) == d["cave_org"] and rd3(img, prc_off) == d["spring_proc"], \
-            f"payload {tag} disp entry 0x{DONOR_ID:02x}: {rd3(img,ini_off):06x} {rd3(img,prc_off):06x}"
-        img[ini_off:ini_off + 3] = w3(d["stub_init"])
-        img[prc_off:prc_off + 3] = w3(d["stub_proc"])
-        print(f"    X:0x215[0x{DONOR_ID:02x}] -> null stub (donor -> passthrough)")
+        for did in DONOR_IDS:
+            want = (d["cave_org"], d["spring_proc"]) if did == 0x15 else (PLATE[tag]["init"], PLATE[tag]["proc"])
+            ini_off, prc_off = xt + did * 3, xt + (0x20 + did) * 3
+            assert (rd3(img, ini_off), rd3(img, prc_off)) == want, \
+                f"payload {tag} disp entry 0x{did:02x}: {rd3(img,ini_off):06x} {rd3(img,prc_off):06x}"
+            img[ini_off:ini_off + 3] = w3(d["stub_init"])
+            img[prc_off:prc_off + 3] = w3(d["stub_proc"])
+            print(f"    X:0x215[0x{did:02x}] -> null stub (donor -> passthrough)")
+
+    if kyoti_place.active():                  # the composer (build_kyoti.py) reads the DSP layout back
+        import json
+        (ROOT / "out/sc_dsp_layout.json").write_text(json.dumps(layout))
 
     # -------- hide the donated effect from the choosers AND the UI ---------
     # Stock's own convention for "this effect is not available on this bus"
@@ -532,7 +574,8 @@ def main():
             assert len(entries) < 0x20, f"no terminator in list at 0x{base:08x}"
         return entries
 
-    for bus in FX_BUSES:
+    for bus, DONOR_ID in [(b, i) for i in DONOR_IDS for b in FX_BUSES]:
+        DONOR_P = DONORS[DONOR_ID]["p"]
         entries = read_list(bus["lst"])
         if DONOR_P in entries:
             pos = entries.index(DONOR_P)

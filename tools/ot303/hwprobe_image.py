@@ -207,9 +207,10 @@ def labels_ok(src):
         raise ValueError(f'label prefixes another: {bad[:5]}')
 
 
-def build(tag, host=False):
-    """-> dict(org, words, syms, ysyms, p2=(addr, words), x={addr: word})"""
-    d = PAYLOAD[tag]
+def build(tag, host=False, org=None):
+    """-> dict(org, words, syms, ysyms, p2=(addr, words), x={addr: word}). `org`: another first P word
+    (a combined image's placement, tools/build_kyoti.py --clyps-bp); None = the payload's own"""
+    d = PAYLOAD[tag] if org is None else dict(PAYLOAD[tag], org=org)
     src, ysyms = source(tag, host)
     src = asm_macros.expand(src)
     labels_ok(src)

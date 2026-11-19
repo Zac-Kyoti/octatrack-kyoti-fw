@@ -82,22 +82,25 @@ def modmap():
     return mm
 
 
-def patch_dsp(img, mm, host):
-    """-> the two payloads' hwprobe_image.build() results"""
+def patch_dsp(img, mm, host, orgs=None):
+    """-> the two payloads' hwprobe_image.build() results. `orgs` {payload: first P word}: the code at
+    another word of SPRING's module (a combined image's placement, tools/build_kyoti.py --clyps-bp);
+    None = at SPRING's init, as always. DARK REV's helper goes to the module's end either way."""
     # ---------------- DSP, both payloads ----------------
     print("=== DSP: engine + wrapper in SPRING REV's words and X records; the source seam -> the wrapper ===")
     out = []
     for tag, d in DSP.items():
-        b = hwprobe_image.build(tag, host)
+        b = hwprobe_image.build(tag, host, org=(orgs or {}).get(tag))
         org, words = b["org"], b["words"]
-        assert org == d["spring_init"]
-        so, mod_a, mod_c = p_off(mm, img, d["va"], d["ln"], org)
-        assert [rd3(img, so + 3 * i) for i in range(3)] == SPRING_SIG, f"payload {tag}: SPRING init"
-        assert mod_a == org and mod_c == hwprobe_image.SPRING_N, f"payload {tag}: SPRING's module is not 1063 words at its init"
+        mo, mod_a, mod_c = p_off(mm, img, d["va"], d["ln"], d["spring_init"])
+        assert [rd3(img, mo + 3 * i) for i in range(3)] == SPRING_SIG, f"payload {tag}: SPRING init"
+        assert mod_a == d["spring_init"] and mod_c == hwprobe_image.SPRING_N, f"payload {tag}: SPRING's module is not 1063 words at its init"
+        assert mod_a <= org < mod_a + mod_c, f"payload {tag}: P:0x{org:05x} is not in SPRING's module"
+        so = mo + 3 * (org - mod_a)
         # DARK REV's helper: from inside SPRING's module to its last 35 words, its outside callers retargeted
         dark, n = d["dark_helper"], hwprobe_image.DARK_N
-        new = org + mod_c - n
-        helper = [rd3(img, so + 3 * (dark - org + i)) for i in range(n)]
+        new = mod_a + mod_c - n
+        helper = [rd3(img, mo + 3 * (dark - mod_a + i)) for i in range(n)]
         norm = helper.copy(); norm[6] -= dark
         assert hashlib.sha256(b"".join(w.to_bytes(3, "big") for w in norm)).hexdigest() == DARK_SHA, \
             f"payload {tag}: DARK REV's helper is not the stock routine"
@@ -108,14 +111,14 @@ def patch_dsp(img, mm, host):
                 continue
             off = (d["va"] - BASE) + data
             for k in range(1, cnt):
-                if rd3(img, off + 3 * k) == dark and rd3(img, off + 3 * (k - 1)) == JSR and not org <= addr + k < org + mod_c:
+                if rd3(img, off + 3 * k) == dark and rd3(img, off + 3 * (k - 1)) == JSR and not mod_a <= addr + k < mod_a + mod_c:
                     callers.append(addr + k - 1)
         assert tuple(callers) == d["dark_calls"], f"payload {tag}: helper callers {[hex(c) for c in callers]}"
         assert len(words) <= new - org, f"payload {tag}: code reaches the helper's new place"
         for i, wv in enumerate(words):
             img[so + 3 * i: so + 3 * i + 3] = w3(wv)
         for i, wv in enumerate(helper):
-            img[so + 3 * (new - org + i): so + 3 * (new - org + i) + 3] = w3(wv)
+            img[mo + 3 * (new - mod_a + i): mo + 3 * (new - mod_a + i) + 3] = w3(wv)
         for c in callers:
             co, _, _ = p_off(mm, img, d["va"], d["ln"], c + 1)
             img[co:co + 3] = w3(new)

@@ -148,7 +148,10 @@ still uses it loads it as NONE.
 A TB-303 voice as a track machine, shown as **BLKPYRAMD**, running on the Octatrack's DSP in 24-bit fixed
 point with its filter 4× oversampled at 176.4 kHz. Adapted from Open303 and recalibrated on the TB-303's own
 circuit against recordings of a real 303. It is the sixth row of a track's machine list (double-tap the
-track, or `[FUNC]` + `[SRC]` → MACHINE). One per DSP core: one on T1–T4, one on T5–T8.
+track, or `[FUNC]` + `[SRC]` → MACHINE). One per DSP core: one on T1–T4, one on T5–T8. A second one
+on a core is refused wherever it would arrive (the machine list, TRACK PASTE, an SRC page paste, and Clyps
+loads in KYOTI V1.8BC) with `ONE 303 PER CORE!`, and nothing changes; a project saved with two on a core
+keeps the lower-numbered one and turns the other back into its Flex track.
 
 - **SRC:** `PTCH` (C0–C8, a semitone a step, shown as note names; `FUNC` + turn or push + turn
   steps by octaves, on every held trig too) · `CUT` (0–100 the real 303's whole range, evenly; 101–127
@@ -172,6 +175,9 @@ track, or `[FUNC]` + `[SRC]` → MACHINE). One per DSP core: one on T1–T4, one
   SLOTS and SLICES modes have nothing to play here: their LEDs stay dark.
 - AMP, FX1, FX2, LFOs (`PMTR` lists the six SRC knobs), scenes, p-locks and trig conditions
   work as on any track.
+- **Copy and paste:** its SRC page copies as a BLKPYRAMD: pasted onto another track, it makes that track a
+  BLKPYRAMD with the same knobs. A Flex or Static SRC page pasted onto it makes it that machine with the
+  pasted values; choosing BLKPYRAMD again brings its knobs back. UNDO puts either back.
 
 **Limits:**
 - SPRING REVERB is removed: its DSP space holds the voice.
@@ -185,7 +191,9 @@ calibration and voicing are by Zac Kyoti, every choice made by ear, as is the ha
 Open303's and what is new, every voicing decision and full attribution:
 [`reference/BLACKPYRAMIDS_303.md`](reference/BLACKPYRAMIDS_303.md) and [`CREDITS.md`](CREDITS.md).
 
-**Hardware:** the feature confirmed; this image, with the three bug fixes, not flashed as such.\
+**Hardware:** the voice confirmed; the one-per-core refusals (machine list, TRACK PASTE, SRC page paste,
+Clyps), SRC page copy and paste and a project round trip confirmed in KYOTI V1.8BC; loading a project
+saved with two on a core not tried on the unit. This image, with the three bug fixes, not flashed as such.\
 **Final build:** [`tools/build_blackpyramids_303.py`](tools/build_blackpyramids_303.py) →
 `out/BLACKPYRAMIDS_303/OCTATRACK_OS1.40C_BLACKPYRAMIDS_303`
 
@@ -367,6 +375,22 @@ sample memory.
 **Hardware:** confirmed (this combined image).\
 **Final build:** [`tools/build_kyoti.py`](tools/build_kyoti.py) `--clyps` →
 `out/KYOTI/OCTATRACK_OS1.40C_KYOTI_V1.8C`
+
+### KYOTI V1.8BC
+
+KYOTI V1.8C with BLACKPYRAMIDS_303. OS VERSION reads `KYOTI1.8BC`. SPRING REVERB **and** PLATE
+REVERB are given up: their DSP space holds the voice and the side-chain; a project saved with either
+loads that FX2 as NONE. Clyps loads (FULL, groups, ORIG, temp and card reloads) that would put a second
+BLKPYRAMD on a core are refused whole, with `ONE 303 PER CORE!`. ERASE_EMPTY_TRIGLESS_LOCKS leaves a
+BLKPYRAMD track's trigless locks alone (there they are ties). Clyps and the voice keep about 10 MB of
+sample memory.
+
+**Hardware:** confirmed (this combined image): the voice on both cores, the FX2 list, SIDE-CHAIN
+keyed from and onto a BLKPYRAMD track, every MUTE MODE on a BLKPYRAMD track, the trigless-lock erase,
+Clyps and DIRECT JUMP with a BLKPYRAMD track, a project round trip, the one-per-core refusals and SRC page
+copy and paste. Loading a project saved with two on a core not tried on the unit.\
+**Final build:** [`tools/build_kyoti.py`](tools/build_kyoti.py) `--clyps-bp` →
+`out/KYOTI/OCTATRACK_OS1.40C_KYOTI_V1.8BC`
 
 ---
 
