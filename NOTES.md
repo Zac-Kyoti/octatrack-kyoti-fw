@@ -39522,3 +39522,91 @@ and then looped forever in `while state()["cur"] != q: tap(DOWN)`. Regenerate it
 there): an octabam test image for the author to flash first, then the pin PR to Sam (octabam PR checklist). Modwerk's
 form stays parked (#1542). Clyps' owner told: tools/clyps/* has the V1.8BC-only BP_CLASH / BP_UITAIL blocks (Clyps and
 V1.8C byte-identical without them).
+
+## 2026-11-19 (`led-fix`) — EMPTY_PATTERN_LED_FIX: the `[BANK]` grid lights trigless locks that carry a locked parameter (WIP, NOT flashed)
+
+**The author's spec:** a trigless lock with nothing locked stays off under `[PTN]` and `[BANK]`; a bank holding a pattern
+whose only content is trigless trigs (stock lit it already) or trigless locks that carry a locked parameter lights under
+`[BANK]` (new); `[PTN]` unchanged; no stall or slowdown while `[BANK]` is held (better no feature than that).
+
+**Design as built (`octabam-modules/batch-bugfixes/patch_pattern_led.s`, 158 -> 318 B, position independent).** Every
+call runs stock's test first. The `[PTN]` / chain-view path is Session 119's (any lock byte anywhere, 8-long AND scan).
+A call returning to 0x4000fd8c (bank_has_content) walks the 8 audio + 8 MIDI tracks in pairs, ORing the trigless-lock
+masks stock skips (TRAC+0x10, MTRA+0x10 = blob+0x48e0+t*0x8b0); only a pair with a bit set has its rows read: for each set
+step (ff1 -- stock's own ISA_C opcode, 0x4004098e at every boot -- then bclr), the step's 32 lock bytes (audio
+TRAC+0x59+32*s, MIDI blob+0x4900+t*0x8b0+32*s; one byte per parameter, step-major, as patch_triglock.s's hardware-traced
+erase store shows), any byte != 0xFF -> content. At most 16 rows per call (PL_BUDGET): past it the pattern reads as stock
+reads it. Lock bytes on a step with no mask bit stay dark under `[BANK]` (lit under `[PTN]`, as before) -- kept that way
+on purpose: no panel gesture found makes them (Session 31 made them by hand-editing a file), and finding them needs the
+32 KB scan S119 removed. **MIDI +0x10 = the MIDI trigless-lock layer, now measured:** stock's `[FUNC]`+trig toggle
+0x40040f90 on a MIDI note trig gives +0x08, then +0x10, then +0x08 (the same cycle as audio's at 0x40041336). **Stale MIDI
+bit:** stock's MIDI LIVE erase FUN_40038668(mask, clear_trigs=1, all params) clears +0x00/+0x08 and the step's row but
+NOT +0x10 (audio's FUN_40038874 clears +0x10): the bit stays with a row of 0xFF, so it reads empty by construction
+(whether the trig row then shows a trigless lock on the unit: FLASHING §4 item 7).
+First cut 360 B with a separate per-side routine; a bug found by the gate (the ff1 scratch was d3 = the pattern's offset,
+so the MIDI side read garbage after an audio hit) and a prologue frame-offset slip in the 318 B rewrite were both caught by
+tools/led_trigless_matrix.py before any build left the worktree.
+
+**Gates (emulator, ot_emu):**
+- `tools/led_trigless_matrix.py` (new): 33 cases x `[PTN]` / `[BANK]`, audio + MIDI -- empty TL, TL + p-lock, lock bytes
+  without mask, trigless trig, sample trig, one-shot, recorder trig, swing/slide only, MIDI +0x08/+0x00/+0x18, mask-word
+  boundaries (steps 1/32/33/64, T1/T8, row bytes 0/15/31), a lock value of 0x00, the right row (empty TL on s6 + lock on
+  s10 w/o mask and vice versa), 5 / 15 / 16 empty TLs before a real one (16 = the budget -> dark), a real one first then
+  1,023 empty, 1,024 empty, pattern 16, all 16 patterns TL+lock / empty TL; plus stock's MIDI and audio LIVE erase and the
+  MIDI toggle; FINAL column = Session 119 behaviour, new column = the spec. ALL GOOD on the unit, BATCH_BUGFIXES, KYOTI V1.8
+  and V1.8C (predicate in DRAM there). `--sweep`: all 256 patterns + 16 banks of OT DEMO, kv1_mm_card/kyoti_testMM,
+  sctest6/test6 identical to the FINAL (none holds a trigless-lock-only pattern).
+- `tools/port_pattern_led.py --patched` and route A `tools/emu_pattern_led.py --patched`: ALL GOOD.
+- **Stall gate** `tools/led_bank_stall.py` (new; ot_emu with the `key` + new `icount` step verbs, private build, local patch
+  updated): 0.6 s windows, **transport running** (stopped, the grid paints once and never refreshes -- S119's report had
+  the sequencer playing), ColdFire instructions, unit image, FINAL -> new:
+
+  | bank content | idle | `[BANK]` held FINAL | `[BANK]` held new | calls | cave instr/call |
+  |---|---|---|---|---|---|
+  | OT DEMO | 39.80M | 41.16M | 41.35M (+0.46 %) | 1,921 | 6 -> 104 |
+  | all 256 patterns empty | 39.18M | 39.57M | 39.69M (+0.3 %) | 1,200 | 6 -> 104 |
+  | every pattern: 1 TL + p-lock | 39.18M | 39.57M | 39.27M (fewer calls: banks light at their first pattern) | 1,200 -> 75 | 86 |
+  | every pattern: 1,024 empty TLs (worst) | 40.45M | 41.20M | 42.13M (+2.3 %) | 2,400 | 6 -> 393 |
+
+  For scale: holding `[PTN]` over that worst project costs 42.42M with the FINAL already (the `[PTN]` path: 12,390
+  instructions per empty pattern, unchanged); Session 119's stall was 116.8M vs 44.5M idle. KYOTI V1.8C: demo 42.04M ->
+  42.23M, empty 40.20M -> 40.32M, worst 41.96M -> 42.89M (idle 40.58M / 39.83M / 41.24M).
+
+**Placement.** BATCH_BUGFIXES and 9 feature images: the preferred 0x400d6694 (VARISPEED: relocated to 0x400d71e4, as
+before). **VARISPEED_EMUS:** in its DRAM unit as before, but the DRAM image grows 2,546 -> 2,706 B and crosses the 4 KB
+staging boundary (raw <= 2,592 B fits one page from 0x40a955e0): **2 arena pages (12 KB) instead of 1** of the sample pool.
+**KYOTI V1.8 / V1.8C / V1.8BC:** the cave had 92 B left and SPRING's reclaim 204 B / 80 B, so `build_kyoti.py`
+`move_pattern_led()` puts the predicate in the DRAM payload (before Clyps, any image with VARISPEED; the standalone CLYPS
+image keeps it in the cave, 5,162 B free). Cave then 252 B left (this also leaves room for the VRG1 port's +104 B; its
+`move_for_varispeed` on `emus-guard` becomes a no-op). Pages: V1.8 11 -> 12 (+6 KB), V1.8C 1,709 and V1.8BC 1,720
+unchanged. Clyps' DRAM unit moves up 320 B (V1.8C 0x40a9658c -> 0x40a966cc; V1.8BC 0x40aa0e34 -> 0x40aa0f74): regenerate
+`CLYPS_SYMS` from the map before `diag_clyps_ui.py` (the 2026-11-19 trap). **V1.8BC trips seal()'s stock-SRAM check by
+coincidence:** 0x40119664 = 0x800076cd lies inside the PACKED DRAM stream; the depacked runtime (76,748 B) holds no word
+in 0x80006924..0x80007873 -- built with KYOTI_ALLOW_STOCK_SRAM=1 for that reason; a promotion would need the same (or a
+re-pack).
+
+**Builds (all WIP, none flashed):**
+
+| image | OS VERSION | mainos sha256 | syx sha256 | FINAL pin it replaces |
+|---|---|---|---|---|
+| unit `out/mainos_empty_pattern_led_fix.bin` | - | `074315c2…` | - | `0e50306d…` |
+| `out/BATCH_BUGFIXES/OCTATRACK_OS1.40C_BATCH_BUGFIXES.syx` | `140C_FIXL1` | `fa374dd8…` | `ff7a81a1…` | `0cf32835…` |
+| `out/KYOTI_WIP/KYOTI_V1.8C_LED1/OCTATRACK_OS1.40C_KYOTI_V1.8C.syx` | `KY18C LED1` | `df27ad31…` | `b3ec014d…` | `9d1a29c9…` |
+| KYOTI V1.8 (default name) | `KYOTI V1.8` | `5e7d93bd…` | `030a32a2…` | `8807feee…` |
+| KYOTI V1.8BC | `KYOTI1.8BC` | `5bc4c87d…` | `a8a224a0…` | `4c7fb0fe…` |
+| CLYPS | | `ac7c622f…` | `1a08e313…` | `94e41a22…` |
+| MUTE_MODES | | `316f01f7…` | `61d9a03b…` | `857d80d3…` |
+| QUANTIZE_LIVE_REC_TOGGLE | | `9b51ad03…` | `dd304411…` | `df4a2498…` |
+| SIDECHAIN_COMPRESSOR | | `2d5a4016…` | `900c2314…` | `4febe2e6…` |
+| ERASE_EMPTY_TRIGLESS_LOCKS | | `a6063880…` | `9ac65b61…` | `db348f68…` |
+| RELOAD_FROM_PROJECT | | `38f2f7de…` | `dbb79a8d…` | `188ec12c…` |
+| DIRECT_JUMP_KYOTI | | `79b422fd…` | `026cec8e…` | `c58591c0…` |
+| REC_TRIG_MUTE | | `f8ee2d55…` | `c54c8796…` | `dac87abd…` |
+| BLACKPYRAMIDS_303 | | `55285c33…` | `95ffa9d7…` | `6a124db1…` |
+| VARISPEED | | `8e3d8b3b…` | `a6e54e31…` | `c3af514f…` |
+| VARISPEED_EMUS | | `31aa8a20…` | `894604fb…` | `e2faf75d…` |
+
+No feature unit changes (only `build_empty_pattern_led_fix.py`'s). Not promoted; README's catalogue wording is in its own
+commit for the promotion. octabam: `manifest.py` PL_PINNED = the 318 B (checked equal to the built cave); octabam's own
+remixes not built here (its float zone may need checking for +160 B). Hardware: FLASHING §4 "EMPTY_PATTERN_LED_FIX
+`[BANK]` trigless locks (WIP, LED1)".
