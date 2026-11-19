@@ -137,6 +137,41 @@ ELSEWHERE = {"build_clyps.py": ["tools/build_kyoti.py", "--clyps-standalone"]}
 RESERVED = {"REC_TRIG_MUTE": [(0x400d7c3a, 2)]}       # RTM_MASK, RTM_TOAST (build_rec_trig_mute.py)
 
 
+def unit_dram(name, img, stock):
+    """A unit image that carries its own DRAM unit behind tools/dram/'s loader (VARISPEED_EMUS since
+    VEM11: its guard's UI section). One image has one loader, so the bug fixes' DRAM pieces must join
+    that unit: -> (the stock-length ROM image with the loader's edits undone, the unit's DRAM bytes).
+    The append must be exactly what dram.build gives for those bytes on that ROM image (checked).
+    Any other image: (img, b"")."""
+    if name != "VARISPEED_EMUS":
+        return img, b""
+    import json
+    sy = json.loads((ROOT / f"out/{name.lower()}_syms.json").read_text())
+    d = sy.get("dram")
+    if not d:
+        return img, b""
+    raw = (ROOT / d["raw"]).read_bytes()
+    if hashlib.sha256(raw).hexdigest() != d["sha256"] or d["base"] != dram.ARENA_BASE:
+        sys.exit(f"{name}: {d['raw']} is not the DRAM unit out/{name.lower()}_syms.json describes")
+    if len(img) <= len(stock):
+        sys.exit(f"{name}: its symbols name a DRAM unit, the base image carries none")
+    rom = bytearray(img[:len(stock)])
+    for at, st, new, what in dram.arena_writes(d["pages"]):
+        if bytes(rom[o(at):o(at) + 4]) != new:
+            sys.exit(f"{name}: 0x{at:08x} ({what}) is not the loader's edit for {d['pages']} page(s)")
+        rom[o(at):o(at) + 4] = st
+    if bytes(rom[o(dram.BOOT_SITE):o(dram.BOOT_SITE) + 6]) != b"\x4e\xb9" + dram.LOADER_AT.to_bytes(4, "big"):
+        sys.exit(f"{name}: the boot site does not call the loader")
+    rom[o(dram.BOOT_SITE):o(dram.BOOT_SITE) + 6] = dram.BOOT_STOCK
+    again = bytearray(rom)
+    app, _ = dram.build(raw, WORK / "_dram" / f"{name.lower()}_check", again)
+    if bytes(again) + app != bytes(img):
+        sys.exit(f"{name}: the base image's DRAM append is not tools/dram's own for its DRAM unit")
+    print(f"  base carries a DRAM unit: {len(raw):,} B at 0x{dram.ARENA_BASE:08x} -- the bug fixes' DRAM "
+          f"pieces are linked behind it, one loader")
+    return rom, raw
+
+
 def reserved(name, img=None):
     """RESERVED, plus, for VARISPEED and VARISPEED_EMUS, EVERY zero byte inside the unit (cave ..
     end, from the builder's symbols): the runtime state -- vem_depth, rk_acc, rp_pb, vg_key,
@@ -357,6 +392,7 @@ def compose(name, builder, basepath, verstr, blurb, stock, rebuild=True):
     if name != "BATCH_BUGFIXES":
         feature_exclusions.check(name.split("+"), who=f"feature_image {name}: ")
     print(f"════════════ {name} (with the three bug fixes) ════════════")
+    unit_raw = b""
     if builder is None:
         img = bytearray(stock)
     else:
@@ -366,6 +402,7 @@ def compose(name, builder, basepath, verstr, blurb, stock, rebuild=True):
         if not base.exists():
             sys.exit(f"{name}: missing unit image {base} -- run KYOTI_UNIT=1 tools/{builder}")
         img = bytearray(base.read_bytes())
+    img, unit_raw = unit_dram(name, img, stock)
     outdir = ROOT / "out" / name
     outdir.mkdir(parents=True, exist_ok=True)
     feat_d = delta(stock, img)
@@ -381,7 +418,7 @@ def compose(name, builder, basepath, verstr, blurb, stock, rebuild=True):
             already.append(stem)
             addrs[stem] = resolve_present(img, stem)     # honour where IT put it
     runs = free_runs(img)
-    dram_at, dram_pieces = dram.ARENA_BASE, []
+    dram_at, dram_pieces = (dram.ARENA_BASE + len(unit_raw) + 3) & ~3, []
     res = reserved(name, bytes(img))        # (from the base, before any fix is written)
     for at, n in res:                       # carve out runtime-written bytes
         cut = []
@@ -453,14 +490,16 @@ def compose(name, builder, basepath, verstr, blurb, stock, rebuild=True):
     left = sum(r[1] - r[0] for r in free_runs(img))
     print(f"  cave zone: {left} B still free")
 
-    if dram_pieces:                     # after the interlock proof (it compares stock-length images)
-        raw = bytearray()
+    if dram_pieces or unit_raw:         # after the interlock proof (it compares stock-length images)
+        raw = bytearray(unit_raw)       # the unit's own DRAM unit first, where it was linked
         for stem in dram_pieces:
             off = addrs[stem] - dram.ARENA_BASE
             raw += bytes(off - len(raw)) + link(stem, addrs[stem])[0]
         append, r = dram.build(bytes(raw), WORK / "_dram" / name.lower(), img)
         img.extend(append)
-        print(f"  DRAM: {', '.join(dram_pieces)} -- {r['raw']:,} B linked at 0x{r['base']:08x}; "
+        who = (["the unit's own"] if unit_raw else []) + dram_pieces
+        print(f"  DRAM: {', '.join(who)} -- "
+              f"{r['raw']:,} B linked at 0x{r['base']:08x}; "
               f"{r['pages']} arena page(s) = {r['reserve_bytes']:,} B of the sample pool; "
               f"loader + payload {r['append']:,} B at 0x{dram.LOADER_AT:08x}")
     mainos = outdir / f"mainos_{name.lower()}.bin"
