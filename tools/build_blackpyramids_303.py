@@ -133,6 +133,10 @@ DETOURS = (
     # one BLKPYRAMD per DSP core on every path (2026-11-17): TRACK PASTE refused, the UI task's net
     (0x4002B988, H("7004b0b9460d0ffa"), "ot_paste_hook", "jmp", 8),      # the TRACK PASTE wrapper's entry
     (0x40062D1C, H("4ab946c7c72c"), "bp_uitail", "jsr", 6),             # the UI loop's tail (V1.8BC: Clyps' site, SUPERSEDE)
+    # SRC page copy / paste keeps the machine (2026-11-18, B3): VARISPEED owns the paste itself (0x40027e4c)
+    (0x40026314, H("4fefffe848d70c3c"), "ot_pgcopy_hook", "jmp", 8),     # the page copy (clipboard or undo buffer)
+    (0x40028FC4, H("2f2f00102f2f0010"), "ot_pgpaste_hook", "jmp", 8),    # the page paste from the clipboard
+    (0x40028F94, H("4879460bf218"), "ot_pgundo_hook", "jsr", 6),         # the page UNDO's buffer push
 )
 POKES = (
     (0x40079248, H("48780005"), H("48780006"), "machine chooser has six rows, OT-303 the last"),

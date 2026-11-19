@@ -17,7 +17,7 @@
         .global ot_live_req_hook, ot_live_midi_hook, ot_live_chrom_hook, ot_live_rel_hook, ot_oneshot_hook
         .global ot_rec_chrom_hook, ot_rec_midi_hook, ot_idle_hook
         .global ot_plock_hook
-        .global ot_paste_hook, bp_uitail, ot_reject_name
+        .global ot_paste_hook, bp_uitail, ot_reject_name, ot_pgcopy_hook, ot_pgpaste_hook, ot_pgundo_hook
         .global ot_led_hook, ot_slices_hook, ot_slots_hook, ot_oct_hook, ot_chrom_key_hook, ot_chrom_limit_hook, ot_chrom_img_hook, ot_page_key_hook
 
         .equ    OT_ROW, 5
@@ -567,6 +567,49 @@ ot_paste_hook:
 1:      moveq   #4,%d0
         cmp.l   (0x460d0ffa).l,%d0
         jmp     (0x4002b990).l          | its beq follows on these flags
+
+| SRC page copy / paste (control.c ot_pgcopy / ot_pgpaste). The page copy 0x40026314(buffer, part, track, page,
+| midi): what the page is copied from, then the displaced lea/movem.
+ot_pgcopy_hook:
+        move.l  20(%sp),-(%sp)          | midi
+        move.l  20(%sp),-(%sp)          | page
+        move.l  20(%sp),-(%sp)          | track
+        move.l  20(%sp),-(%sp)          | part
+        move.l  20(%sp),-(%sp)          | the buffer
+        jsr     ot_pgcopy
+        lea     20(%sp),%sp
+        lea     -24(%sp),%sp
+        movem.l %d2-%d5/%a2-%a3,(%sp)
+        jmp     (0x4002631c).l
+| The page paste 0x40028fc4(part, track, page, midi), from the clipboard: d0 = 0 refused (nothing pasted), else
+| the displaced two pushes and on.
+ot_pgpaste_hook:
+        move.l  16(%sp),-(%sp)          | midi
+        move.l  16(%sp),-(%sp)          | page
+        move.l  16(%sp),-(%sp)          | track
+        move.l  16(%sp),-(%sp)          | part
+        pea     (0x460c8122).l          | the clipboard
+        jsr     ot_pgpaste
+        lea     20(%sp),%sp
+        tst.l   %d0
+        bne.s   1f
+        rts
+1:      move.l  16(%sp),-(%sp)
+        move.l  16(%sp),-(%sp)
+        jmp     (0x40028fcc).l
+| The page UNDO 0x40028f40, at its `pea 0x460bf218` (0x40028f94, before the jsr 0x40027e4c with part, track, page,
+| midi already pushed): restore the machine the page was saved from, then leave the pea's long on the stack.
+ot_pgundo_hook:
+        move.l  16(%sp),-(%sp)          | midi
+        move.l  16(%sp),-(%sp)          | page
+        move.l  16(%sp),-(%sp)          | track
+        move.l  16(%sp),-(%sp)          | part
+        pea     (0x460bf218).l          | the undo buffer
+        jsr     ot_pgpaste
+        lea     20(%sp),%sp
+        move.l  (%sp)+,%a1
+        pea     (0x460bf218).l
+        jmp     (%a1)
 
 | The UI task's message loop, common tail 0x40062d1c (`tst.l 0x46c7c72c`, then stock's beq.w on its flags): the
 | standalone image's jsr from there; KYOTI V1.8BC's Clyps owns the site (cl_uitail) and calls this first. The fast

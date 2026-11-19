@@ -405,6 +405,47 @@ unsigned ot_paste_ok(const volatile uint8_t *clip, unsigned pattern, unsigned t)
     bp_toast();
     return 0;
 }
+/* SRC page copy / paste (the author, 2026-11-18, B3): a page holds one machine's twelve bytes and that machine
+ * (0x40026314 copies them into the clipboard 0x460c8122 or the undo buffer 0x460bf218, kind 26 at +0x8ed8 for SRC;
+ * 0x40027e4c writes them back with the machine byte). An OT-303 is FLEX in those bytes, so a FLEX page pasted onto
+ * one left it an OT-303 with FLEX's numbers (VOL 0 ...), and an OT-303's page pasted elsewhere made a FLEX with the
+ * OT-303's. Now the page carries what it was copied from (bp_pg[]: machine.s ot_pgcopy_hook) and a paste turns the
+ * track into that: onto an OT-303 from any other page, the track leaves the OT-303 first (FLEX's values back, the
+ * knobs parked) and then takes the pasted values; an OT-303's page onto another machine makes it an OT-303 with the
+ * copied knobs, refused with the toast when another track on its core in that Part is one (ot_pgpaste_hook: the
+ * page paste 0x40028fc4 returns 0, as stock's when nothing is pasted; the key handler then clears the undo state).
+ * An UNDO of a page paste (0x40028f40, machine.s ot_pgundo_hook) restores the same way, never refused (a refusal
+ * there makes the key handler paste instead); the track stays FLEX if its core has another one then. */
+#define UNDO_BUF 0x460bf218u
+#define PG_KIND 0x8ed8u
+uint8_t bp_pg[2] = {0, 0};                               /* the clipboard's / the undo buffer's SRC page is an OT-303's */
+void ot_pgcopy(uint32_t buf, unsigned part, unsigned t, unsigned page, unsigned midi) {
+    unsigned v = 0;
+    if (!page && !midi && part < 4 && U32(BANK))
+        v = signed_track((const volatile uint8_t *)(uintptr_t)(U32(BANK) + PART_OFF + part * PART_STRIDE), t);
+    if (buf == CLIP) bp_pg[0] = (uint8_t)v;
+    else if (buf == UNDO_BUF) bp_pg[1] = (uint8_t)v;
+}
+unsigned ot_pgpaste(uint32_t buf, unsigned part, unsigned t, unsigned page, unsigned midi) {
+    uint32_t bank = U32(BANK);
+    if (page || midi || part >= 4 || t >= 8 || !bank || U32(buf + PG_KIND) != 26) return 1;
+    volatile uint8_t *p = (volatile uint8_t *)(uintptr_t)(bank + PART_OFF + part * PART_STRIDE);
+    unsigned src = bp_pg[buf == UNDO_BUF], is = signed_track(p, t);
+    if (src && !is) {
+        if (!ot_admit_track(p, t)) {
+            if (buf == UNDO_BUF) return 1;
+            ++bp_refusals;
+            bp_toast();
+            return 0;
+        }
+        ot_assign(p, t, 1);
+    } else if (!src && is)
+        ot_assign(p, t, 0);
+    else
+        return 1;
+    bp_wake = 1;
+    return 1;
+}
 /* KYOTI V1.8BC: Clyps' FULL loads (patch_clyps.s cl_bpgate, before anything is loaded or cued). dst = the Part the
  * loads land in; src[t] = the Part track t's slice will come from (this load's, or a FULL load still cued for t),
  * 0 = t keeps its own; mask = the tracks of this load. 1 = refused (the toast here): after it a core would hold two
