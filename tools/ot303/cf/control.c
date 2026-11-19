@@ -54,6 +54,7 @@ static volatile uint8_t *part_base(void) {
     return (volatile uint8_t *)(uintptr_t)(U32(BANK) + PART_OFF + (U8(PART_IDX) & 3) * PART_STRIDE);
 }
 /* One voice per DSP core: refuse a second OT-303 among tracks 1-4 or 5-8. */
+static const volatile uint8_t *play_part(unsigned t);   /* the Part a track's sound comes from (ot_render) */
 unsigned ot_admit_track(const volatile uint8_t *part, unsigned track) {
     if (track >= 8) return 0;
     for (unsigned t = track & 4; t < (track & 4) + 4; ++t)
@@ -773,7 +774,7 @@ int ot_live_midi(unsigned t, unsigned note, unsigned vel) {
  * (MT21 on the unit: the first two were missed). 1: render it (machine.s ot_idle_hook). */
 int ot_idle_feed(unsigned t, unsigned end) {
     if (end != 16 || t >= 8 || (dsp_ready(0) && dsp_ready(4))) return 0;
-    return !dsp_ready(t) && signed_track(part_base(), t);
+    return !dsp_ready(t) && signed_track(play_part(t), t);
 }
 /* the frame builder found a release (0x40) in the track's mailbox (0x4000b4f6) */
 void ot_live_release(unsigned t) {
@@ -870,8 +871,48 @@ static unsigned take(unsigned track, struct ot_qn *out) {
  * continuous words from the knobs (page 1 live: p-locks, LFOs, scenes; then SETUP), at a trig the
  * note (its queued gate and slide), and the next chunk of the voice's tables. (Stock w0 is the high half of a source
  * count, 0; w2 the high half of a bounded ring position, never $0909: octabam REVIEW.md.) */
+/* The Part a track's sound comes from (OCTABAM40 on the unit, 2026-11-19: a cued Part switch dropped the outgoing
+ * voice mid-note with a quiet pop, and the outgoing pattern's last-step note never sounded). Stock moves the UI Part
+ * (0x100b14cf) about 7 ticks before the boundary, but each track keeps playing its old Part's sound until its own
+ * first trig in the new pattern: the frame builder keeps that Part per track, bank 0x8000182a + t and Part
+ * 0x80001832 + t, written at the track's trig (0x4000bf62 / 0x4000bf6a) and by a full Part apply, 0xff after PLAY
+ * or a load until the next trig. The renderer asks that Part whether the track is an OT-303, as every stock machine
+ * carries its sound; 0xff: the UI Part. So an outgoing OT-303 rings over the boundary like a carried FLEX sample and
+ * plays its last step, and an incoming one takes the voice at its own first trig. */
+static const volatile uint8_t *play_part(unsigned t) {
+    unsigned b = U8(0x8000182au + t), p = U8(0x80001832u + t);
+    if (b >= 16 || p >= 4) return part_base();
+    return (const volatile uint8_t *)(uintptr_t)(0x400e21e0u + b * 0x9b340u + PART_OFF + p * PART_STRIDE);
+}
+/* One voice a core: while a track still carries the voice from the old Part, another track on its core can be an
+ * OT-303 too. Who keeps the voice, by what each track plays: 2 its own trig in the engine's Part (0x80000002 /
+ * 0x80000003) has come -- the incoming track, from its first trig; 1 it plays another Part -- the outgoing track,
+ * carrying; 0 no trig since PLAY or a load (0xff), which the UI Part's early move alone makes an OT-303 (the engine
+ * Part moves early too, so it decides nothing alone). A tie: the lower track. The other renders as FLEX (its stock
+ * record frees the voice on the DSP). */
+static unsigned play_rank(unsigned t) {
+    unsigned b = U8(0x8000182au + t), p = U8(0x80001832u + t);
+    if (b >= 16 || p >= 4) return 0;
+    return b == U8(0x80000002u) && p == U8(0x80000003u) ? 2u : 1u;
+}
+static unsigned yields(unsigned t) {
+    unsigned r = play_rank(t);
+    for (unsigned u = t & 4; u < (t & 4) + 4; ++u) {
+        if (u == t || !signed_track(play_part(u), u)) continue;
+        unsigned ru = play_rank(u);
+        if (ru > r || (ru == r && u < t)) return 1;
+    }
+    return 0;
+}
+/* The DSP serves a core's tracks in order: when the track that held the voice in the last frame is a higher one, it
+ * frees the voice only after this track's record, so this track's first note is held one frame (16 samples). */
+static uint8_t own_cur[2] = {8, 8}, own_prev[2] = {8, 8};
+struct ot_dfr { uint32_t gl; uint8_t ev, acc, have; };
+static struct ot_dfr dfr[8] = {{0, 0, 0, 0}};
+uint32_t ot_handovers = 0, ot_yields = 0;
 int ot_render(unsigned track, unsigned ping, unsigned start, unsigned end) {
-    if (track >= 8 || !signed_track(part_base(), track))
+    const volatile uint8_t *pp = track < 8 ? play_part(track) : 0;
+    if (track >= 8 || !signed_track(pp, track) || (yields(track) && (++ot_yields, 1)))
         return ((int (*)(unsigned, unsigned, unsigned, unsigned))FLEX_RENDER)(track, ping, start, end);
     ++ot_render_calls;
     volatile uint32_t *cursor = (volatile uint32_t *)(uintptr_t)U32(0x80001c80u);
@@ -882,8 +923,13 @@ int ot_render(unsigned track, unsigned ping, unsigned start, unsigned end) {
         /* MT32: one count a frame. The packer renders the tracks in order, so a frame starts where the track
          * number does not rise; before, every OT-303 track counted, and with two the frame windows below
          * (a voice's estimated end, MT20 / MT21's, the live note's TTL) ran at half length */
-        if (track <= fr_last) ++ot_frames;
+        if (track <= fr_last) {
+            ++ot_frames;
+            own_prev[0] = own_cur[0]; own_prev[1] = own_cur[1]; own_cur[0] = own_cur[1] = 8;
+        }
         fr_last = track;
+        unsigned core = track >= 4, held = own_prev[core] < 8 && own_prev[core] > track;
+        own_cur[core] = (uint8_t)track;
         uint8_t p[12];
         for (unsigned k = 0; k < 12; ++k) p[k] = k < 6 ? (uint8_t)(fp[k] >> 8) : (uint8_t)knob_now(track, k);
         /* the packer's fixed slot, not this call's cursor (the first call can still be stock FLEX) */
@@ -897,7 +943,7 @@ int ot_render(unsigned track, unsigned ping, unsigned start, unsigned end) {
          * LFO never does -- the live byte and the base word show a step's lock while it plays). A sequencer
          * note is accented only by its step's ACC p-lock, at lock x scale / 127; a live note by MIDI
          * velocity (at the scale) or by a lock the preview carries in fp; anything else is not. */
-        volatile uint8_t *pb = part_base();
+        volatile uint8_t *pb = (volatile uint8_t *)pp;
         unsigned acc_scale = *knob(pb, track, OT_ACC);
         acc_scale = acc_scale > 127u ? 127u : acc_scale;
         unsigned acc_lane = p[OT_ACC];
@@ -954,6 +1000,14 @@ int ot_render(unsigned track, unsigned ping, unsigned start, unsigned end) {
                 trace(2, track, 0xff, (unsigned)U8(0x46104d0cu + track) << 8 | qd);
             }
         }
+        if (held && (ev & OT_EV_NOTE)) {                 /* the voice is still the higher track's: next frame */
+            dfr[track].ev = (uint8_t)ev; dfr[track].gl = gl; dfr[track].acc = p[OT_ACC]; dfr[track].have = 1;
+            ev = 0; gl = 0;
+            ++ot_handovers;
+        } else if (!held && !ev && dfr[track].have) {
+            ev = dfr[track].ev; gl = dfr[track].gl; p[OT_ACC] = dfr[track].acc;
+        }
+        if (!held) dfr[track].have = 0;
         if (ev & OT_EV_NOTE) acc_now[track] = p[OT_ACC];  /* the sounding note's accent (its release) */
         if (ev) { ot_evptch[ot_evn & 31] = p[OT_PTCH]; ot_evacc[ot_evn & 31] = p[OT_ACC]; ot_evlog[ot_evn++ & 31] = track << 28 | ev << 24 | (gl & 0xffffffu); }
         volatile uint16_t *amp = (volatile uint16_t *)(uintptr_t)(0x80000110u + 0x200u * (ping & 1u) + 64u * track);
