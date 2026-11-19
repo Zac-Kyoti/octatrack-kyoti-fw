@@ -236,7 +236,8 @@ def check(name, s):
         for f in (12, 13, 14):
             e = cp[f"edge{f}"]
             t.eq(f"frame {f}: PTCH or QUAN in the slot, TSNS 30", (e.p1(0, FL) in (70, 64), e.p2(0, FL)), (True, 30))
-        t.eq("left (BEAT): PTCH back, QUAN parked, TSNS as edited (127), NEIGHBOR byte untouched", q(c), (70, 127, 109, SENT))
+        t.eq("left (BEAT): PTCH back, QUAN parked with bit 7 (VARIG2: remembered), TSNS as edited (127), NEIGHBOR byte "
+             "untouched", q(c), (70, 127, 0x80 | 109, SENT))
         t.eq("left: rp_prev, captions", (c.rp(0, FL), c.name(NAME0[FL]), c.name(NAME11[FL])), (0, "PTCH", TSNS_FL))
         t.eq("left: live PTCH / base / live TSNS", (c.live[0], c.base[0:2], c.live[0x25]), (70, b"\x46\x00", 127))
         t.eq("back in VARI: QUAN / TSNS / PTCH park / NEIGHBOR byte", q(dd), (109, 127, 70, SENT))

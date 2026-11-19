@@ -1286,7 +1286,7 @@ def check(name, s):
             e = cp[f"edge{f}"]
             pair = (e.p1(0, FL), e.p2(0, FL))
             t.eq(f"frame {f}: the two pairs together", pair in ((70, 30), (64, 1)), True)
-        t.eq("left (BEAT): PTCH / TSNS back, QUAN / EMUS parked", (c.p1(0, FL), c.p2(0, FL), c.park(0, 1, FL), c.park(0, 2, FL)), (70, 30, 109, 127))
+        t.eq("left (BEAT): PTCH / TSNS back, QUAN (bit 7: remembered, VARIG2) / EMUS parked", (c.p1(0, FL), c.p2(0, FL), c.park(0, 1, FL), c.park(0, 2, FL)), (70, 30, 0x80 | 109, 127))
         t.eq("left: rp_prev, captions", (c.rp(0, FL), c.name(NAME0[FL]), c.name(NAME11[FL])), (0, "PTCH", "TSNS"))
         t.eq("left: live PTCH / TSNS", (c.live[0], c.base[0:2], c.live[0x25]), (70, b"\x46\x00", 30))
         t.eq("back in VARI: QUAN / EMUS / parks", (dd.p1(0, FL), dd.p2(0, FL), dd.park(0, 1, FL), dd.park(0, 2, FL)), (109, 127, 70, 30))
