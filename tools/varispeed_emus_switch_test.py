@@ -118,7 +118,7 @@ CASES["mix_max_s2"] = dict(CASES["mix_max"], b_trigs={4: [9], 5: [9], 6: [2], 7:
 # carry_fit with other engines: four carried S950 voices into a Part that has them on OT, and four
 # carried SP12 voices into a Part that has them on S950 (the clamp's other two steps)
 CASES["carry_s950_ot"] = dict(CASES["carry_fit"], a_emus=ALL("S950"))
-# a cue into ANOTHER bank (bank 2, pattern 1, its Part 2): not priced at the cue (the cued Part is not
+# a cue into ANOTHER bank (0-based bank 1, pattern 1, its Part 1): not priced at the cue (the cued Part is not
 # the working bank's), but from the bank / PART_B move to the apply (message 21 / 20, ~7 ticks)
 CASES["own_xbank"] = dict(CASES["own_step1"], b_bank=1)
 CASES["mix_xbank"] = dict(CASES["mix_max"], b_bank=1)
