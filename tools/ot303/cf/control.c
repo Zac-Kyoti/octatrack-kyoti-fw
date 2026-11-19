@@ -585,9 +585,9 @@ int ot_validate_part(uint8_t *part) {
  * long at +0, bit s - 32),
  * the length and scale of the pattern (+0x8e53/+0x8e54) or, in PER TRACK mode (+0x8e55), the
  * track's (+0x50/+0x51); ticks per step 0x400aba50[scale], tempo 0x80001814 = BPM x 24. */
-struct ot_qn { uint32_t gl; uint8_t step, slide, call, acc; };
+struct ot_qn { uint32_t gl, sl; uint8_t step, slide, call, acc, len, toend; };
 #define QN 4u
-static struct ot_qn q[8][QN] = {{{0, 0, 0, 0, 0}}};
+static struct ot_qn q[8][QN] = {{{0, 0, 0, 0, 0, 0, 0, 0}}};
 static uint8_t qn[8] = {0}, qcall[8] = {0}, qlast[8] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff}, qlen[8] = {0};
 static uint32_t qctx[8] = {0};          /* the step being scheduled: 1 << 24 | bank << 16 | pattern << 8 | step */
 static struct ot_voice voice[8] = {{{0}, 0, {0}, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}};
@@ -661,8 +661,40 @@ static unsigned step_len(uintptr_t base, uintptr_t trk, uint32_t *sl) {
     *sl = U8(0x400aba50u + 4 * sc + 3) * 2646000u / t24;
     return len;
 }
+/* Ties across a pattern change (the author on OCTABAM41, 2026-11-19: a note tied to the end of a pattern was cut at a
+ * cued change although the next pattern starts with ties). A note's gate is worked out when it starts, its ties
+ * counted on to the end of its pattern and wrapped to that pattern's own first steps: right while the pattern loops,
+ * not when another pattern follows. When the step handler schedules another pattern's first step after the last
+ * step (a step ahead), the gate of a note whose ties reach that last step is worked out again from the incoming
+ * pattern's first steps -- longer through its ties, or ending in the last step where the outgoing pattern's own first
+ * steps had made it run on -- and sent as a slide to the same pitch, which moves an open gate's end without a
+ * retrigger (host.asm: a slide into an open gate takes the note words, GL included, and no restart). Not for a
+ * DIRECT JUMP landing (the author: a jump into a tie keeps the old rule). */
+static uint32_t nt_frame[8] = {0}, nt_sl[8] = {0}, gate_end[8] = {0};
+static uint8_t nt_step[8] = {0}, nt_len[8] = {0}, nt_toend[8] = {0}, nt_ptch[8] = {0};
+static int32_t xt_rem[8] = {0};
+static uint32_t xt_frame[8] = {0};
+static uint8_t xt_have[8] = {0};
+uint32_t ot_tie_xfers = 0, ot_tie_sent = 0;
+static void tie_xfer(unsigned track, uintptr_t trk, unsigned len, uint32_t sl) {
+    if (!nt_toend[track]) return;
+    int32_t old_rem = (int32_t)(gate_end[track] - ot_frames) * 16;
+    if (old_rem < 48 || old_rem > 0x3fffffff) return;          /* the gate closing now (or held live) */
+    int32_t b = (int32_t)(nt_frame[track] - ot_frames) * 16 + (int32_t)((nt_len[track] - nt_step[track]) * nt_sl[track]);
+    if (b < 0 || b > 2 * (int32_t)nt_sl[track]) return;      /* not in the outgoing pattern's last step */
+    unsigned k = 0;
+    while (k < len && !step_bit(trk, 0x00, k) && (step_bit(trk, 0x08, k) | step_bit(trk, 0x10, k))) ++k;
+    unsigned hold = k < len && step_bit(trk, 0x00, k) && step_bit(trk, 0x48, k);
+    unsigned g = knob_now(track, OT_GATE);
+    int32_t nr = !k ? b - (int32_t)nt_sl[track] + (int32_t)ot_gate_samples(g, nt_sl[track])
+               : hold ? b + (int32_t)((k + 1) * sl) : b + (int32_t)((k - 1) * sl + ot_gate_samples(g, sl));
+    if (nr > old_rem - 16 && nr < old_rem + 16) return;
+    xt_rem[track] = nr; xt_frame[track] = ot_frames; xt_have[track] = 1;
+    ++ot_tie_xfers;
+}
 void ot_step(unsigned track, unsigned bank, unsigned pattern, unsigned s) {
     if (track >= 8) return;
+    uint32_t prev = qctx[track];
     qctx[track] = 0;
     if (bank >= 16 || pattern >= 16 || s >= 64) return;
     uintptr_t base = pattern_at(bank, pattern), trk = base + track * 0x91au;
@@ -673,6 +705,8 @@ void ot_step(unsigned track, unsigned bank, unsigned pattern, unsigned s) {
     uint32_t sl;
     unsigned len = step_len(base, trk, &sl);
     unsigned last = qlast[track], same = s == last;
+    if (prev && !same && s == 0 && last + 1u == qlen[track] && (prev >> 8 & 0xffffu) != (bank << 8 | pattern))
+        tie_xfer(track, trk, len, sl);                       /* another pattern follows the last step */
     if (!same && !(s == last + 1u || (s == 0 && last + 1u == qlen[track]))) { if (qn[track]) ++ot_qclears; qn[track] = 0; }
     qlast[track] = (uint8_t)s; qlen[track] = (uint8_t)len;
     if (!same) {
@@ -701,7 +735,8 @@ void ot_note(unsigned track) {
     uint32_t gl = hold ? (count + 1) * sl : (count - 1) * sl + ot_gate_samples(knob_now(track, OT_GATE), sl);
     gl = gl < 1 ? 1 : gl > 0x7ffffeu ? 0x7ffffeu : gl;
     unsigned acc = U8(trk + 0x59 + 32u * s + OT_ACC);      /* MT27: the step's ACC p-lock (0xff: none) */
-    struct ot_qn e = {gl, (uint8_t)s, (uint8_t)step_bit(trk, 0x48, s), qcall[track], (uint8_t)(acc > 127 ? 0 : acc)};
+    struct ot_qn e = {gl, sl, (uint8_t)s, (uint8_t)step_bit(trk, 0x48, s), qcall[track], (uint8_t)(acc > 127 ? 0 : acc),
+                      (uint8_t)len, (uint8_t)(s + count >= len)};   /* toend: its ties reach the pattern's last step */
     unsigned k = qn[track];
     if (k && q[track][k - 1].step == s && q[track][k - 1].call == qcall[track]) q[track][k - 1] = e;   /* the same call again */
     else {
@@ -992,6 +1027,8 @@ int ot_render(unsigned track, unsigned ping, unsigned start, unsigned end) {
                 ++ot_trigs;
                 ev = OT_EV_NOTE | (e.slide ? OT_EV_SLIDE : 0);
                 gl = e.gl;
+                nt_frame[track] = ot_frames; nt_step[track] = e.step; nt_len[track] = e.len; nt_sl[track] = e.sl;
+                nt_toend[track] = e.toend; nt_ptch[track] = p[OT_PTCH]; xt_have[track] = 0;
                 p[OT_ACC] = (uint8_t)acc_amount(e.acc, acc_scale);
                 live[track].sounding = 0;                    /* a sequencer note takes the voice */
                 trace(2, track, e.step, (unsigned)U8(0x46104d0cu + track) << 8 | qd);
@@ -999,6 +1036,13 @@ int ot_render(unsigned track, unsigned ping, unsigned start, unsigned end) {
                 ++ot_strayflags;
                 trace(2, track, 0xff, (unsigned)U8(0x46104d0cu + track) << 8 | qd);
             }
+        }
+        if (!ev && xt_have[track]) {                     /* a tie's gate across a pattern change (tie_xfer) */
+            int32_t r = xt_rem[track] - (int32_t)(ot_frames - xt_frame[track]) * 16;
+            xt_have[track] = 0;
+            if (r < 16) ev = OT_EV_OFF;
+            else { ev = OT_EV_NOTE | OT_EV_SLIDE; gl = r > 0x7ffffe ? 0x7ffffeu : (uint32_t)r; p[OT_PTCH] = nt_ptch[track]; }
+            ++ot_tie_sent;
         }
         if (held && (ev & OT_EV_NOTE)) {                 /* the voice is still the higher track's: next frame */
             dfr[track].ev = (uint8_t)ev; dfr[track].gl = gl; dfr[track].acc = p[OT_ACC]; dfr[track].have = 1;
@@ -1008,7 +1052,10 @@ int ot_render(unsigned track, unsigned ping, unsigned start, unsigned end) {
             ev = dfr[track].ev; gl = dfr[track].gl; p[OT_ACC] = dfr[track].acc;
         }
         if (!held) dfr[track].have = 0;
-        if (ev & OT_EV_NOTE) acc_now[track] = p[OT_ACC];  /* the sounding note's accent (its release) */
+        if (ev & OT_EV_NOTE) {
+            acc_now[track] = p[OT_ACC];                   /* the sounding note's accent (its release) */
+            gate_end[track] = gl >= OT_GL_HELD ? ot_frames + 0x40000000u : ot_frames + gl / 16u;
+        } else if (ev & OT_EV_OFF) gate_end[track] = ot_frames;
         if (ev) { ot_evptch[ot_evn & 31] = p[OT_PTCH]; ot_evacc[ot_evn & 31] = p[OT_ACC]; ot_evlog[ot_evn++ & 31] = track << 28 | ev << 24 | (gl & 0xffffffu); }
         volatile uint16_t *amp = (volatile uint16_t *)(uintptr_t)(0x80000110u + 0x200u * (ping & 1u) + 64u * track);
         if ((amp[0x1e] & 0x10u) && (int32_t)(snd_until[track] - ot_frames) > 0) {
