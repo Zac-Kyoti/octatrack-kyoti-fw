@@ -39183,3 +39183,77 @@ Side bug: the frame hook read the Part at PART_B, which UI message 20 moves ~7 t
   after the apply -- only no longer 145 ms early); (e) plain VARISPEED keeps the early change (left
   byte-identical); (f) an edit made while voices are still carried after the switch is priced on
   the settings alone, as before.
+
+## 2026-11-18 cont. (`emus-guard`) — VARISPEED_EMUS VEM11 second round = `140C_VEMG2` (WIP, NOT flashed)
+
+The author listened to the VEMG1 pack (little audible difference) and decided: clamp only when needed; no side
+effects from a cancelled cue; price only real carry and clamp old notes before downgrading the new Part; a held VARI
+note keeps its speed until its own next trig; edits in the 7-tick window stay priced on settings (unchanged).
+VEMG1 (`d782ea56…`) is superseded.
+
+- **Fact found (C, objdump + ot_emu):** stock keeps, per track, the Part its live bytes came from: bank
+  `0x8000182a + t`, part `0x80001832 + t` (= `0x80000110 + t + 0x171a / 0x1722`), written at the track's trig
+  (0x4000bf62 / 0x4000bf6a, after the trig handler's own APPLIED comparison) and for every track by the heavy apply
+  (0x40009396 / 0x4000939e); the light apply (a sequencer switch) does not write it, so a carried track keeps the old
+  Part's pair until its own first trig in the new Part (carry_fit: T5-T8 change at f8268, the step-9 trigs). Reset to
+  0xff by 0x40004768 (the PLAY / load path), rewritten at the next trig. The step handler reads the trig word of step
+  s at track + 0x89a + 2s (0x4009d3ae; condition = bits 6-0 into 0x400a5164); conditions 1-8 Fill .. !1st, 9-29
+  probabilities, 30-64 A:B (labels 0x400b2588).
+- **Frame hook (cave).** `vf_win` now compares that per-track pair with the DB's bank / PART_B: a track is frozen (no
+  DB poll, its last verdict `vf_eng`) from PART_B's move until ITS first trig in the new Part -- so fix 3 and the
+  author's decision 4 are one rule: a held VARI note keeps its engine and speed until its own next trig (into a
+  non-VARI Part too), and a held non-VARI note into a VARI Part changes at its own trig (it was already so in FINAL:
+  rev_vari identical). The VEMG1 tag (`vf_tag`) and its always-on clamp are gone. Pending state in the unit:
+  `vgx_tgt` (the incoming Part, -1 none), `vgx_cl[t]` (a carried note's clamp), `vgx_ovr[t]` (the incoming Part's
+  engine cap). The carry path clamps once on the first carried frame under `vgx_tgt` (3 instructions when none is
+  pending); a trig whose live-bytes pair is `vgx_tgt` latches min(its EMUS, the cap) -- the boundary trigs included,
+  before the Part data says so.
+- **UI task (DRAM, `.vemui`).** `vgx_tick` per pass: a pending decision whose switch has come (APPLIED == vgx_tgt) is
+  COMMITTED: the capped tracks' EMUS -> OT in the Part (TSNS slot, SRAM copy, dirty flags; the live byte only of a
+  track that has already switched), the toast. A switch on its way (as VEMG1: the cue in the working bank, or the
+  window after PART_B / bank moved -- cross-bank cues here, the same commit-at-switch rule): price and publish (masked)
+  -- `vgx_cert` (a note trig on the new pattern's step 1, no trig-type layer, no swing, trig word 0: no condition,
+  probability, micro-timing or retrig; anything else counts as carrying), `vgx_olde` (each carried note's engine: the
+  latched one, or the live EMUS an old-Part trig may still latch), `vgx_est` (sure tracks: new alone; others max(old,
+  new)), stage 1 `vgx_stage` on the carried engines (clamp to OT), stage 2 on the next Part's (cap at OT), each in the
+  net's order, skipping steps that do not lower the estimate. Nothing on its way and a decision pending: dropped (a
+  cancelled or changed cue). Nothing is written before the switch; in the window the existing net still steps a Part
+  that is over on its own (as FINAL: own_step1 / own_late78 toast at f5114 as FINAL). `vg_entered` moved to the UI
+  section too (the cave needed the room for trigscale).
+- **Sizes.** Cave unit 5,692 B (0x400d6500..0x400d7b3c); DRAM unit 1,982 B; feature image: pattern_led 0x400d7b3c,
+  trigscale 0x400d7bdc, partreapply in DRAM, 2,386 B = 1 arena page, 127 B of the cave free. octabam reference (one
+  section) `44ed2c56…`.
+- **Gates** (`varispeed_emus_switch_test.py`, 28 cases, unit AND feature image vs FINAL; ALL PASS). Model est max /
+  frames over, FINAL -> VEMG2: mix_late 3,681 / 2,756 -> 3,307 / 0 (T5 / T6 clamped on the switch frame, the Part
+  unchanged, toast at f5513); mix_never 3,681 / 6,086 -> 3,307 / 0; mix_max 4,001 / 2,756 -> 3,253 / 0 (clamps + T7 / T8
+  capped, committed at f5512); mix_max_s2 4,001 / 2,411 -> 3,253; mix_xbank 3,627 / 2,756 -> 3,253 (decided in the
+  window, committed at the switch); cert_fill 3,841 / 3,486 -> 3,280 / 0; cert_prob 3,574 / 3,486 -> 3,200; cert_micro
+  3,841 / 14 -> 3,280 (the uncertain trig costs a cap for the whole Part: the rule); mix_nonvari 3,253 -> 3,253 (clamp
+  to OT on the switch, VARI speed kept to f8268). Byte-for-byte FINAL (engines, increments, steps, toasts):
+  ref_clean, carry_fit_step1, carry_fit, carry_s950_ot, carry_sp12_s950, own_late78, own_step1 (+ cue5100 / midipc /
+  chg4), cancel_mix_max, change_mix_max, cert_sure; nothing written: those + mix_late. No early change: mix_nonvari,
+  nonvari_fit (speed and engine kept to the own trig), rev_vari; own_xbank differs from FINAL only because FINAL drops
+  every voice to plain OT 400 frames before a cross-bank switch. No step before the switch, every toast with a step
+  or a commit.
+- **Suites.** varispeed_emus_test.py 44/45 (widget, pre-existing); net_part now expects a second toast: after the
+  net's step its transition is still 3,397 > 3,350, so the switch clamps a carried note (the test models it). Every
+  test variant builds. DSP boot check PASS both payloads; payloads FINAL's bytes. Equivalence vs FINAL: OTDEMO 35/35;
+  MMTESTDT 3/35 raw -- the larger DRAM payload ends the emulated load at another frame phase, so the harness's "frame N
+  after the transport start" pokes land 3 frames later relative to the sequencer (traced: the reaction to each poke is
+  1 frame in both images); with the base's pokes shifted +3 frames (`--base-shift 3`) 34/35 (tempo_edge_720 as always).
+- **Cost** (--coverage, 6,000 frames, 4 x SP12): UI pass idle (running, nothing on its way) 636.3 -> 663.2 (+27; VEMG1
+  +23); while a cue is on its way +~1,710 per pass (140 pricings x 1,662 + 50 per pass; VEMG1 ~840: two stages and the
+  certainty scan); frame hook body 320.1 -> 386.6 per frame (+66, ~17 per engaged VARI track; VEMG1 +73).
+- **A/B pack** out/ab_emus_guard2/ (A = FINAL feature image, B = VEMG2, each channel aligned to the sample): mix_late,
+  mix_max, mix_nonvari, nonvari_fit, cert_fill, own_xbank, rev_vari (identical), carry_fit (identical), cancel_mix_max
+  (identical), ref_clean (identical). MANIFEST.md / manifest.json.
+- **Build (WIP, NOT flashed):** `KYOTI_ALLOW_WIP=1 KYOTI_VERSTR=140C_VEMG2 python3 tools/build_varispeed_emus.py`:
+  out/VARISPEED_EMUS/OCTATRACK_OS1.40C_VARISPEED_EMUS.syx `12220cf0…`, CF .bin `1b56f4e7…`, mainos `e2faf75d…`; unit
+  `d23d9e63…`. Every other FINAL image unchanged (VARISPEED c3af514f, KYOTI V1.8 / V1.8C, CLYPS, the other features).
+- **For the author:** a clamp-only decision also raises the toast (at the switch); an uncertain first-step trig is
+  priced as carrying for the whole Part (cert_micro: a cap for a 14-frame carry); the net still steps a Part that is
+  over on its own when PART_B moves (FINAL's timing, after the commit point).
+- **The plain-VARISPEED port (not done):** see the report of this session; in short, the frame-hook half only (vf_win
+  on the per-track pair, .vf_frz, vf_eng: ~90 B, ~15 instructions per polled VARI track per frame) in the shared
+  source's VEM_EMUS = 0 path; re-pins VARISPEED's unit / feature image and KYOTI V1.8 / V1.8C (and V1.8BC on its
+  branch); KYOTI's CAVE has 92 B left beside it, so a UI piece moves zone; octabam's varispeed module reference.

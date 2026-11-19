@@ -120,7 +120,7 @@ unit that boots; if it doesn't, use §3b.
 | BLACKPYRAMIDS_303 | `140C_BP303` |
 | VARISPEED | `140C_VARI1` |
 | VARISPEED_EMUS | `140C_VEM10` |
-| VARISPEED_EMUS VEM11 (WIP, the Part-switch guard) | `140C_VEMG1` |
+| VARISPEED_EMUS VEM11 (WIP, the Part-switch guard) | `140C_VEMG2` |
 | ERASE_EMPTY_TRIGLESS_LOCKS and the BATCH_BUGFIXES builds | `1.40C` (stock string — check by behaviour) |
 | a feature + BATCH_BUGFIXES | `BUG_` + the feature (`BUG_MUTEDT`, `BUG_DJV7`, `BUG_SC3X`, `BUG_RL3`, `BUG_QLREC`, `BUG_TRIGLK`, `BUG_RTM`, `BUG_BP303`, `BUG_VARI`, `BUG_VEM10`) |
 
@@ -261,29 +261,31 @@ quick check for each:
   crunchier. FX menus no longer offer SPRING REVERB. Put `SP12` on all four tracks of one core
   with a heavy FX stack: a turn or an FX choice that would overload the DSP is refused with
   `MAX DSP: EMU LIMIT`.
-- **VARISPEED_EMUS VEMG1 walk-through** (WIP, NOT promoted; `out/VARISPEED_EMUS/OCTATRACK_OS1.40C_VARISPEED_EMUS.syx`,
-  sha256 `d782ea56…`; NOTES 2026-11-18 `emus-guard`). A Part switch is now priced as the mix it plays.
-  Set up on T5-T8 (one DSP core) STATIC or FLEX tracks with long held samples, TSTR `VARI`. Pattern 1 on
-  Part 1, pattern 2 on Part 2; Part 2's tracks trig only from step 9.
-  1. **The clamp.** Part 1: EMUS `SP12` on T5-T8. Part 2: the same tracks on `OT`. Play pattern 1,
-     cue pattern 2: the held SP12 notes turn OT **on the downbeat** (VEM10: they stayed SP12 until
-     step 9). The same with Part 1 on `S950`, and with Part 2 on `S950` (SP12 -> S950 on the downbeat).
-  2. **The transition toast.** Part 1: T5 / T6 `SP12` with DJ EQ on both FX slots, T7 / T8 `OT` and no
-     FX. Part 2 the other way round (T7 / T8 `SP12` + DJ EQ x2, T5 / T6 `OT`, no FX). Each Part on its
-     own plays clean. Cue pattern 2: `MAX DSP: EMU LIMIT` shows **at the cue**; Part 2's T7 / T8 EMUS
-     now read `OT`. At the switch and in the bar after it (T5 / T6 still holding their Part 1 notes): no
-     crackle, no dropouts. (VEM10 played SP12 x4 + DJ EQ x8 for that bar.)
-  3. **No early pitch jump.** Part 1: T5 / T6 `VARI` on a loop whose ATTR TEMPO differs from the project
-     tempo (so VARI changes its speed), notes held over the bar line. Part 2: T5 / T6 TSTR `OFF`. Cue:
-     the held notes keep their VARI speed and engine up to the downbeat and change there, not ~0.15 s
-     (7 ticks) before it.
-  4. **Another bank.** Step 2 with pattern 2 in another bank: the toast comes shortly before the switch
-     (not at the cue), still no crackle.
-  5. **Nothing to do.** A pattern change inside the same Part, and a switch into a lighter Part with
-     every track trigging on step 1: no toast, nothing changes. With the transport stopped a cue
-     applies at once, as before (the toast only if the Part itself is over).
-  6. The VARISPEED_EMUS checks above (EMUS and FX refusals, TSTR onto VARI) unchanged. FREE MEM in the
-     audio pool as with the FINAL image (one 6 KB arena page, as before).
+- **VARISPEED_EMUS VEMG2 walk-through** (WIP, NOT promoted; `out/VARISPEED_EMUS/OCTATRACK_OS1.40C_VARISPEED_EMUS.syx`,
+  sha256 `12220cf0…`; NOTES 2026-11-18 `emus-guard` cont.). A Part switch is priced as the mix it plays; nothing
+  changes unless that mix would overload the DSP. Set up on T5-T8 (one DSP core) STATIC or FLEX tracks with long held
+  samples, TSTR `VARI`. Pattern 1 on Part 1, pattern 2 on Part 2; Part 2's tracks trig only from step 9 unless said.
+  1. **Nothing when it fits.** Part 1 EMUS `SP12` on T5-T8, Part 2 the same tracks on `OT` (light FX): the held
+     SP12 notes stay SP12 until their own step-9 trigs, as VEM10. No toast.
+  2. **The clamp when it does not.** Part 1: T5 / T6 `SP12` with DJ EQ on FX1 and DARK on FX2, T7 / T8 `OT`, no FX.
+     Part 2 the other way round (T7 / T8 `SP12` + DJ EQ + DARK, trigs on step 1; T5 / T6 `OT`, no FX). Each Part on
+     its own plays clean. Cue pattern 2: no toast yet. On the downbeat T5 / T6's held notes turn OT and
+     `MAX DSP: EMU LIMIT` shows; Part 2's EMUS still read `SP12` everywhere (the clamp is temporary). No crackle.
+  3. **The step-down, committed at the switch.** As 2 with DJ EQ on BOTH FX slots of the heavy tracks: on the downbeat
+     the held notes turn OT, Part 2's T7 / T8 play OT, the toast shows, and only now do Part 2's T7 / T8 EMUS read `OT`.
+  4. **A cancelled cue leaves nothing.** Set up 3, cue pattern 2, then cue pattern 1 again before the bar ends: no
+     toast, nothing changes, Part 2's EMUS still `SP12` (VEMG1 lowered them at the cue).
+  5. **Sure first-step trigs.** Part 2 light enough on its own, every Part 2 track trigs on step 1 with no condition:
+     the switch is clean, no toast. Put a `FILL` condition (or 50 %, or a micro-timing nudge) on two of those
+     step-1 trigs whose tracks hold heavy notes from Part 1: they now count as carrying -- the toast and the clamp
+     on the downbeat.
+  6. **No early pitch change.** Part 1: T5 / T6 `VARI` on a loop whose ATTR TEMPO differs from the project tempo,
+     notes held over the bar line. Part 2: T5 / T6 TSTR `OFF`. Cue: the held notes keep their VARI speed through the
+     downbeat and change at their own next trig (VEM10: ~0.15 s before the downbeat). The reverse (Part 1 `NORM`,
+     Part 2 `VARI`): the held notes change only at their own next trig too.
+  7. **Another bank.** Step 3 with pattern 2 in another bank: the same on the downbeat.
+  8. With the transport stopped a cue applies at once, as before. The VARISPEED_EMUS checks above (EMUS and FX
+     refusals, TSTR onto VARI) unchanged. FREE MEM in the audio pool as with the FINAL image (one 6 KB arena page).
 - **MIDI_PLAYS_FREE_FIX** — a PLAYS FREE MIDI track, trig quantize DIRECT, SCALE MODE PER
   TRACK, notes on steps 1 and 2: a manual trig keeps it running instead of stalling.
 - **EMPTY_PATTERN_LED_FIX** — a pattern whose only content is a p-lock on a MIDI track:

@@ -158,15 +158,16 @@ are lowercase-hyphen, because octabam requires a module's name to equal its fold
 
 > Check this against the tree before trusting it; it has gone stale before.
 
-- **2026-11-18: VARISPEED_EMUS VEM11 (WIP, NOT flashed, branch `emus-guard`)** — the load guard across a
-  Part switch (the author's "full fix, plus pitch-jump fix"): the transition is priced before the switch
-  (`vgx_tick`, the next Part's EMUS stepped to OT until the mix fits, toast at the cue), a carried engine
-  is clamped once on the real switch frame (APPLIED_B / APPLIED_P), and a playing VARI voice keeps its
-  engine and speed until that frame. The guard's UI-task code is a DRAM unit (`.vemui`); the frame path
-  stays in the cave. Emulator: every switch case fits (`tools/varispeed_emus_switch_test.py`, 20 cases x
-  unit + feature image), A/B pack in that worktree's out/ab_emus_guard/. Image `140C_VEMG1`: syx
-  `d782ea56…`, mainos `75a8f888…`. FLASHING §4 "VARISPEED_EMUS VEMG1"; NOTES 2026-11-18 (`emus-guard`).
-  Open: the author's by-ear check, the decisions listed in NOTES, octabam pin / PR (its CAVE placement).
+- **2026-11-18: VARISPEED_EMUS VEM11 = `140C_VEMG2` (WIP, NOT flashed, branch `emus-guard`)** — the load guard across
+  a Part switch, the author's second round (VEMG1 superseded): the transition is priced before the switch with only real
+  carry (a track sure to trig on the new pattern's first step switches at once); over budget, carried notes are clamped
+  first (temporary), the new Part's EMUS stepped only if that is not enough; nothing is written until the switch (the
+  frame hook applies the decisions on the APPLIED switch frame, the UI then commits and toasts; a cancelled cue leaves
+  nothing); a held VARI note keeps its speed (and, when it fits, its engine) until its own next trig, read from stock's
+  per-track live-bytes pair 0x8000182a/32. Emulator: `tools/varispeed_emus_switch_test.py` (28 cases x unit + feature
+  image, all gates pass), A/B pack in that worktree's out/ab_emus_guard2/. Image: syx `12220cf0…`, mainos `e2faf75d…`.
+  FLASHING §4 "VARISPEED_EMUS VEMG2"; NOTES 2026-11-18 (`emus-guard`) cont. Open: the author's by-ear check; the
+  plain-VARISPEED port (NOTES); octabam pin / PR.
 
 - **2026-11-16: DIRECT JUMP V7.3 FINAL** (the author flashed `KY18C DJR1`: the three by-ear checks pass) — the last restart (PLAY or any stock
   pattern switch) is a jump's time origin, for its landing and its trig conditions (detour 0x400a4850 `dj_swres`).
