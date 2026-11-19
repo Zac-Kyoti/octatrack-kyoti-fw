@@ -544,6 +544,18 @@ def apply_clyps(argv):
     print(f"  {TAG}: {', '.join(FEATURES)}  ->  OS VERSION {VERSTR!r}, {OUTDIR.relative_to(ROOT)}\n")
 
 
+def move_for_varispeed():
+    """VARISPEED grew by its per-track freeze (VARIG1, 2026-11-18: a held VARI note keeps its speed through
+    a Part switch until its own next trig; ~100 B) and stays CAVE's first piece at 0x400d6500 (frame ISR).
+    CAVE had 92 B left, so EMPTY_PATTERN_LED_FIX's predicate -- UI task only (the pattern LED painters),
+    158 B -- moves to SPRING REVERB's dead descriptor record, the reclaim zone QUANTIZE_LIVE_REC_TOGGLE's
+    key handlers already run from on the unit (204 B left there). Only in an image that carries VARISPEED
+    and gives up SPRING (SIDE-CHAIN): the standalone CLYPS image keeps its placement, byte for byte."""
+    if "VARISPEED" in FEATURES and "SPRING" in RECLAIM_WHOLE and "patch_pattern_led" in PLAN["CAVE"]:
+        PLAN["CAVE"].remove("patch_pattern_led")
+        PLAN["SPRING"].append("patch_pattern_led")
+
+
 def main():
     global VERSTR
     if sum(f in sys.argv for f in ("--with", "--without", "--clyps", "--clyps-standalone")) > 1:
@@ -552,6 +564,7 @@ def main():
     apply_without(sys.argv)
     apply_clyps(sys.argv)
     VERSTR = os.environ.get("KYOTI_VERSTR") or VERSTR   # a WIP test image's own OS VERSION (2026-11-13)
+    move_for_varispeed()
     # pairs that must never share an image (tools/feature_exclusions.py, the user 2026-11-07): Clyps
     # with RELOAD_FROM_PROJECT never; Clyps with DIRECT_JUMP_KYOTI only as the integrated pair, i.e.
     # while SUPERSEDE makes the shared site Clyps' and chains dj_land (asserted again after the build)
