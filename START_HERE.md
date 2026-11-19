@@ -158,6 +158,16 @@ are lowercase-hyphen, because octabam requires a module's name to equal its fold
 
 > Check this against the tree before trusting it; it has gone stale before.
 
+- **2026-11-18: VARISPEED_EMUS VEM11 (WIP, NOT flashed, branch `emus-guard`)** — the load guard across a
+  Part switch (the author's "full fix, plus pitch-jump fix"): the transition is priced before the switch
+  (`vgx_tick`, the next Part's EMUS stepped to OT until the mix fits, toast at the cue), a carried engine
+  is clamped once on the real switch frame (APPLIED_B / APPLIED_P), and a playing VARI voice keeps its
+  engine and speed until that frame. The guard's UI-task code is a DRAM unit (`.vemui`); the frame path
+  stays in the cave. Emulator: every switch case fits (`tools/varispeed_emus_switch_test.py`, 20 cases x
+  unit + feature image), A/B pack in that worktree's out/ab_emus_guard/. Image `140C_VEMG1`: syx
+  `d782ea56…`, mainos `75a8f888…`. FLASHING §4 "VARISPEED_EMUS VEMG1"; NOTES 2026-11-18 (`emus-guard`).
+  Open: the author's by-ear check, the decisions listed in NOTES, octabam pin / PR (its CAVE placement).
+
 - **2026-11-16: DIRECT JUMP V7.3 FINAL** (the author flashed `KY18C DJR1`: the three by-ear checks pass) — the last restart (PLAY or any stock
   pattern switch) is a jump's time origin, for its landing and its trig conditions (detour 0x400a4850 `dj_swres`).
   Emulator: the restart REF-LOCK scenarios FAIL on V7.2.2 and PASS on V7.3; RELOAD / Clyps loads after a jump keep their

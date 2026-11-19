@@ -39087,3 +39087,99 @@ step 9 (its PLAY phase) while A02 was on step 5, and set its A:B counters from P
   JUMP lands "since PLAY, or since the last normal pattern change"; trig conditions stay in step.
 - Next: octabam #1146 moves to this pin (fifth detour 0x400a4850, unit 3938 B 51478a67…); Modwerk DJK 0.2.0 rebuilt with
   V7.3 for a fresh MKI test image.
+
+## 2026-11-18 (`emus-guard`) — VARISPEED_EMUS VEM11 (WIP, NOT flashed): the load guard across a Part switch
+
+The author's decision ("full fix, plus pitch-jump fix") on the emulator repro of the Part-switch gap
+(djk-octabam-pin `out/emus-partswitch-repro/`): stock moves a track to the new Part's live FX ids at
+THAT track's first trig in the new Part (0x4000c40e / 0x4000c41e) and VEM's engine latch moves at the
+same trig, so the old Part's carried tracks and the new Part's triggered ones play mixed. Each Part
+fit; the mix did not (FINAL: mix_max 4,001 for 1 s, mix_never 3,681 for as long as the Part plays).
+Side bug: the frame hook read the Part at PART_B, which UI message 20 moves ~7 ticks (400 frames,
+145 ms) before the apply, so a playing VARI voice left VARI early (engine and speed: a pitch jump).
+
+- **Fix 1, the transition** (`vgx_tick`, called from `vg_tick` after the net; UI task). While a switch
+  is on its way -- the transport runs (`0x800065b8 == 1`, C: 0x400a05aa) and either a cue waits in
+  PEND (`0x800065bf/c0` set, not PLAY `0x800065bd/be`, C: the commit 0x400a44d0) in the working bank
+  for a pattern whose Part (blob + pat x 0x8ed8 + 0x8e57, C: 0x400a4568) is not the current one, or
+  PART_B / the bank has moved ahead of the apply (APPLIED_B/P != DB bank / PART_B) -- price per core
+  `base + sum over its tracks of max(old, new)`: old = the live FX ids (0x80000ec4/ecc) + the engine
+  it runs after the clamp, min(carried -- render state 0x80004898 + 40t, +36 bits 2-3, C: the voice
+  loop 0x4000d386 / 0x4000d536 -- or the live EMUS an old-Part trig may still latch, and the next
+  engine); new = the next Part's FX + engine. Over the budget: the NEXT Part's EMUS to OT in the net's
+  order (SP12 first, then S950, highest track first), skipping a step that does not lower the
+  transition (the old Part's live FX dominate that track), toast. Cued Part (not current): EMUS read
+  from / written to its TSNS slot (rp_prev forgotten), its DB block + SRAM copy (same bank only) + its
+  dirty flags, never a live byte; vg_scan / vg_fix's helpers are not touched (rp_gate_a lands in
+  rp_gate_m's body with the block given). Current Part in the window: vg_scan / vg_step_ot as the net.
+  A cue into another bank is priced in the window (bank + PART_B moved). Nothing kept: it prices on
+  every UI pass while a switch is on its way (a fingerprint of the same inputs costs about as much).
+  With every engine on OT the transition is at most base + 8 x the dearest stock FX: 477 + 8 x 347 =
+  3,253 < 3,350 (core 0), 574 + 2,776 = 3,350 < 3,930 (core 1): every switch can be made to fit.
+- **Fix 2, the clamp** (`vem_frame`): each latch is tagged with the APPLIED word (`vf_tag`); the first
+  carried frame under another APPLIED pair makes the engine min(carried, the new Part's EMUS), once
+  (`.vf_clamp`, db_tsns + emus_idx; emus_mode's identity asserted by the builder). A carried voice whose
+  new Part does not put it on VARI takes the stock path (OT). Keyed on APPLIED: lands on the switch
+  frame (emulator: f5512, the light apply's own frame).
+- **Fix 3, no early jump** (`vem_frame`): `vf_win` (APPLIED vs DB bank / PART_B); in the window the hook
+  does not poll the DB, a candidate keeps its last poll's verdict (`vf_eng`), no clamp.
+- **Placement.** Frame path in the classic cave: unit 5,720 B at 0x400d6500..0x400d7b58 (was 5,796).
+  The guard's UI-task code -- `vg_sig` (moved out of the cave) and the transition, 1,196 B -- is the
+  source's `.vemui` section (`as --defsym VEM_UI_SECTION=1`), linked at the DRAM arena base 0x40a955e0
+  behind tools/dram/'s loader (reference/kb/caves.md §5). The unit image carries the loader;
+  feature_image.py (kyoti-v1 thread, `unit_dram`) strips it, re-checks it, and links the bug fixes'
+  DRAM pieces behind it, one loader. Feature image: pattern_led now in the cave (0x400d7b58),
+  trigscale 0x400d7bf8, partreapply in DRAM (0x40a95a8c); DRAM 1,598 B = 1 arena page (FINAL: 1 page);
+  95 B of the cave left. octabam assembles the file without the symbol: one unit, 6,916 B (manifest
+  reference `7fbf2a3b…`; octabam pin / PR not done -- its CAVE placement may no longer fit).
+- **Gates** (`tools/varispeed_emus_switch_test.py run|check|cost|pack`, private ot_emu = octabam
+  a67a1112 + tools/varispeed_emus_ot_emu.patch + the per-pair stamp, built in out/emu/; card MMTESTDT;
+  every case on the unit AND the feature image, against the FINAL unit / feature image). Model est
+  max / frames over budget / datasheet cycles per sample max, FINAL -> VEM11 (unit = feature):
+  mix_late 3,681 / 2,756 (999.9 ms) / 3,690 -> 3,307 / 0 / 3,510; mix_never 3,681 / 6,086 (2.2 s, run
+  end) / 3,690 -> 3,307 / 0 / 3,510; mix_max 4,001 / 2,756 / 4,027 -> 3,253 / 0 / 3,661 (B's T8, T7 to OT
+  at the cue, toast); mix_max_s2 4,001 / 2,411 / 3,756 -> 3,253 / 0 / 3,394; mix_xbank (mix_max, cue
+  into bank B) 3,627 / 2,756 / 3,847 -> 3,253 / 0 / 3,661 (stepped in the window, 2 frames after
+  PART_B's move). Fit before and after: own_step1, own_late78, carry_fit, carry_fit_step1,
+  carry_s950_ot, carry_sp12_s950, mix_nonvari, ref_clean, own_xbank and the timing variants
+  (cue5100 / cue5120 / cue5500 / midipc / chg4 / stopped). Steps move from PART_B's move (f5113;
+  cue5120 / 5500: f10626) to the cue (f100 / 5100 / 5133 / 5500; chg4 f979 -> f100); stopped
+  unchanged. Every step has its toast in the same UI pass. mix_nonvari: T5 / T6 leave VARI at f5512
+  (FINAL: f5112, 145 ms early). Controls ref_clean / carry_fit_step1: engines and increments of T5-T8
+  identical to FINAL, no step, no toast. The datasheet max 3,661 is DJ EQ x 8 on OT engines -- a stock
+  load (the guard's table prices DJ EQ 347; in situ it costs more, IMPL §10.4).
+- **The clamp changes the sound** where a voice is carried with a dearer engine than the new Part's
+  (carry_fit / carry_s950_ot / carry_sp12_s950 / own_late78 / mix_late / mix_never / mix_max): the
+  held note takes the new engine on the downbeat instead of at its own next trig.
+- **A/B pack** (out/ab_emus_guard/, not published; `pack` verb): 9 comparisons, A = FINAL feature
+  image, B = VEM11, main out T5-T8 (core 0 TX 2/3), 24-bit stereo 44.1 kHz, 1.0 s before the switch to
+  the render's end, B aligned on A to the sample: carry_fit, carry_s950_ot, carry_sp12_s950,
+  own_late78, mix_late, mix_max, mix_nonvari (first difference 0.856 s = A's early jump), controls
+  ref_clean and carry_fit_step1 (bit-identical). MANIFEST.md / manifest.json there.
+- **Existing suites.** varispeed_emus_test.py 44/45 (widget fails exactly as on FINAL: it expects KNOB
+  where the rotary switches draw -- pre-existing); every --build-variants test build builds; DSP
+  boot check PASS both payloads; the DSP payloads are FINAL's bytes. The harness vs the shipped
+  predecessor could not run (its oracle image is not on this machine); instead
+  `tools/varispeed_emus_equiv.py` runs its whole matrix on VEM11 and FINAL VEM10: OTDEMO 35/35
+  identical, MMTESTDT 34/35 (tempo_edge_720: nothing compared, the known harness limit; its voice
+  passes parse identical).
+- **Cost** (ot_emu --coverage, 6,000 frames, 4 x SP12 on T5-T8): UI pass while the transport runs and
+  nothing is on its way 636.3 -> 659.3 instructions (+23: vgx_tick's tests; stopped +5); while a
+  switch is on its way +~840 per pass (141 pricings x 803 + the tests) until the commit. Frame hook
+  body 320.1 -> 392.9 per frame (+73, ~18 per engaged VARI track; whole ColdFire 34,019 -> 34,092,
+  +0.2 %); nothing on a track that is no VARI candidate.
+- **Every other FINAL image unchanged** (feature_image.py without the opt-in: MUTE_MODES, QLR,
+  SIDECHAIN, TRIGLESS, RELOAD, DJK, RTM, VARISPEED, BATCH_BUGFIXES; build_kyoti default / --clyps /
+  --clyps-standalone). BLACKPYRAMIDS_303 not rebuilt.
+- **Build (WIP, NOT flashed):** `KYOTI_ALLOW_WIP=1 KYOTI_VERSTR=140C_VEMG1 python3
+  tools/build_varispeed_emus.py`: out/VARISPEED_EMUS/OCTATRACK_OS1.40C_VARISPEED_EMUS.syx `d782ea56…`
+  (CF .bin `95fd8617…`, mainos `75a8f888…`), OS VERSION `140C_VEMG1`; unit out/mainos_varispeed_emus.bin
+  `066700f9…`. FLASHING §4 "VARISPEED_EMUS VEMG1".
+- **For the author:** (a) the clamp acts where the mix would have fitted too (carry_fit); a clamp only
+  when needed is possible; (b) a cue whose transition does not fit steps (and saves) the cued Part's
+  EMUS at once, even if the cue is cancelled; (c) every track is priced as if it could carry, also
+  one that trigs on the new pattern's first step; (d) a carried VARI voice whose new Part has that
+  track off VARI plays at stock speed from its old live bytes until its trig (FINAL does the same
+  after the apply -- only no longer 145 ms early); (e) plain VARISPEED keeps the early change (left
+  byte-identical); (f) an edit made while voices are still carried after the switch is priced on
+  the settings alone, as before.
