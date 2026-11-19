@@ -1498,7 +1498,8 @@ def toast_ctx(t, log):
     if "str_emu_limit" not in S:                 # an older build (VEM5): no such toast
         return []
     ours = [h for h in notify_hits(log) if h[1] == S["str_emu_limit"]]
-    bad = [h for h in ours if not (S["vg_tick"] <= h[0] < S["vg_sig"] and UI_STACK[0] <= h[3] < UI_STACK[1])]
+    tick_end = min(v for k, v in S.items() if v > S["vg_tick"] and not k.startswith("."))   # VEM11: vg_sig may
+    bad = [h for h in ours if not (S["vg_tick"] <= h[0] < tick_end and UI_STACK[0] <= h[3] < UI_STACK[1])]  # be elsewhere
     t.eq("every MAX DSP: EMU LIMIT came from vg_tick, on the UI task's stack", [hex(h[0]) for h in bad], [])
     t.eq("... with 1.2 s (0x48)", sorted({h[2] for h in ours}), [0x48] if ours else [])
     txt = img_str(S["str_emu_limit"])
