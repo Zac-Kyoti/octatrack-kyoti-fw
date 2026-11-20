@@ -39643,3 +39643,133 @@ and then looped forever in `while state()["cur"] != q: tap(DOWN)`. Regenerate it
 there): an octabam test image for the author to flash first, then the pin PR to Sam (octabam PR checklist). Modwerk's
 form stays parked (#1542). Clyps' owner told: tools/clyps/* has the V1.8BC-only BP_CLASH / BP_UITAIL blocks (Clyps and
 V1.8C byte-identical without them).
+
+## 2026-11-19 cont. (2) (`emus-guard`) — VRG3: VARISPEED keeps its state in bytes of its own, beside BLACKPYRAMIDS_303 (VARISPEED VRG3, VARISPEED_EMUS VEMG4, KYOTI V1.8 / V1.8C / V1.8BC; WIP, NOT flashed)
+
+The author's direction after the bc-park probe (out/bcpark in the bc-park-probe worktree): give each feature its own
+bytes (VARISPEED moves), migrate old projects, defend both sides, keep everything else; aim at a promotable build.
+Merged origin/main (KYOTI V1.8BC FINAL) into emus-guard first (0a3162e; build_kyoti.py kept both sides).
+
+**The clash (probe, V1.8BC FINAL):** VARISPEED parked STATIC's PTCH in NEIGHBOR page-1 byte 0 and FLEX's in byte 5
+(VARISPEED_EMUS also page-2 bytes 3 / 5); BLACKPYRAMIDS_303 uses all twelve NEIGHBOR bytes (signature 'O','T',1, the
+FLEX stash, its mark 0x50 and parked knobs). Reachable: S1 FLEX VARI -> BP -> FLEX back TSTR OFF, PTCH lost; S6/S7
+STATIC PTCH +12 -> +16 (0x50 written over the park, also by browsing the BLKPYRAMD row); S2 an ex-BP track enters VARI
+at 5/4; S4b an ATTR TIMESTRETCH edit broke a real BP's signature; S3 / S5 / S4c rarer. Separately VARIG2's off-VARI
+memory (0x80 | QUAN) was zeroed by stock's Part validator on every load.
+
+**Research: where can a value live (stock image, ot_emu; scripts out/bytehome/ in this worktree).**
+- Stock's Part validator 0x40002318 (every load) clamps each machine slot to its descriptor's [min, min + count):
+  every '---' slot has count 128 -> 0..127 kept, >= 128 zeroed (measured on the new bytes: 0..127 kept, 0x80 / 0xc5 /
+  0xff -> 0). The bank read/write 0x4008c4xx..0x4008ceb2 copies the page blocks raw (with its checksum).
+- **Every SETUP-page '---' slot is editable** (THRU p2 0..5, NEIGHBOR p2 0..5, PICKUP p2 0..3): on that machine's SRC
+  SETUP page, and from the SRC SETUP machine chooser with the cursor on that row, on ANY track (that is S7's mechanism,
+  and it also edits VARISPEED_EMUS's old TSNS parks in NEIGHBOR p2). Page-1 '---' slots are not: THRU p1 slots 2 / 5
+  and NEIGHBOR p1 0..5 kept under every encoder on the SRC page, a held trig + encoder, MIDI CC 16..21 on all 16
+  channels (VOL / INAB moved there: the CCs arrived).
+- The slot record's THRU (+2) and NEIGHBOR (+3) bytes (0x2ca + 5t): no slot list, the validator only zeroes a negative
+  one; the slot lookup 0x40031d18 returns 0 for machines 2 / 3; the THRU / NEIGHBOR trig handlers (0x400043f4 /
+  0x4000463c via 0x400d6454) take the slot argument and ignore it.
+- Sweep (out/bytehome/ui_abcd.py): the machine chooser through all five machines with every SRC and SRC SETUP encoder
+  turned on each, chooser browsing with knobs on every row, a THRU and a NEIGHBOR track's pages: those four bytes kept
+  on all eight tracks, both copies. Readers while playing (a unique-PC read watch, a local ot_emu option
+  OT_WATCH_READ_UNIQ in out/emu/octabam, not committed): the validator, the copies, the bank I/O, the Part applies
+  (THRU p1 / p2 into the live lane, which the frame sends to the DSP).
+- Audio: T1 as THRU passing the tones input with a trig, THRU p1 slots 2 / 5, THRU p2 and both slot bytes poked
+  non-zero: the core-0 output bit for bit the same as with zeros (a positive control, THRU VOL 64 -> 100, changes it).
+- The one stock writer: SRC page paste of a THRU page (writes THRU p1 2 / 5 and THRU's slot byte) or a NEIGHBOR page
+  (NEIGHBOR's slot byte). Whole-track copies (TRACK PASTE, PART paste / reload, Clyps' slice, RELOAD's) carry them with
+  the rest of the track.
+
+**The byte home (VRG3), per track t, Part-relative:** VP_ST = 0x2a + 30t + 14 (THRU p1 slot 2), VP_FL = + 17 (THRU p1
+slot 5), VM_ST = 0x2ca + 5t + 2 (THRU's slot byte), VM_FL = + 3 (NEIGHBOR's slot byte). VP_m: the PTCH while machine m
+is on VARI (4..124), else 0 -- its being >= 4 says the bytes are on VARI (so no domain bit is needed). VM_m: off VARI
+the remembered QUAN + 1 (bits 0-3; 0 none -> 1/1), VARISPEED_EMUS's remembered EMUS stop + 1 (bits 4-5), and FLEX's
+bit 6 "BLACKPYRAMIDS_303 took the track on VARI"; on VARI VARISPEED_EMUS's parked TSNS (VARISPEED: 0). Every value <=
+127. The SRC page paste wrapper vh_srcpaste (VARISPEED's since O2) keeps the four bytes across the paste (vh_pgsave /
+vh_pgrest; an UNDO comes through it too) and clears the pasted machine's pair when a STATIC / FLEX page lands (those
+twelve bytes are another track's), unless the track is a BLKPYRAMD after it.
+
+**The swap (rp_swap_m), now deciding by the bytes:** gate on: PTCH parked -> nothing moves (a missed poll no longer
+re-enters); a transition -> the entry; first sight -> VARIG2's rp_unent (a pasted VARI page adopted). Gate off: PTCH
+parked -> the exit, also at first sight (a gate that went off while nothing polled the track); a transition from on over
+nothing kept under a QUAN stop -> the exit with PTCH 0 (VARIG2's pasted-page case); else nothing. Byte moves in
+rp_xfer, offsets in rp_offs.
+
+**Migration (rp_migrate, at first sight; and in vh_bptake before the voice overwrites NEIGHBOR):** NEIGHBOR's bytes
+are an older build's VARISPEED park only when page-1 bytes 1-4 and page-2 bytes 0-2 and 4 are all 0 (VARISPEED never
+wrote them; BLACKPYRAMIDS_303 writes all twelve). Then page-1 byte 0 / 5 is STATIC's / FLEX's old PTCH park: gate on and
+4..127 -> VP (the bytes are on VARI); gate off -> dropped (VARIG2's rule: an old park off VARI is no memory);
+VARISPEED_EMUS also moves page-2 byte 5 / 3 (gate on: the TSNS park; off: the parked EMUS, remembered). The old bytes
+are cleared. With BLACKPYRAMIDS_303's bytes present only STATIC's byte 0 is still determinable: if it is neither 0x50 nor
+the signature it is the park V1.8BC FINAL wrote over the voice's mark -> it moves in and 0x50 goes back (the voice's
+parked knobs count again); FLEX's byte 5 is the voice's then (stash / parked DEC): not read. Residual: a V1.8BC FINAL
+track whose FLEX entered VARI after a BP round trip keeps the PTCH FINAL had (unknowable); a parked-knob block that is
+all zero (PTCH C0, CUT 0, RES 0, ENV 0, WAVE 0, TUNE 0, SLID 0, VOL 0) would read as VARISPEED's.
+
+**Mitigations.** VARISPEED never touches a signed BLKPYRAMD track (FLEX + 'O','T',1) on either machine: rp_bpt in
+rp_gate_m (gate 0: its VOL 4 is no VARI) and in rp_swap_m (nothing moves, rp_prev untouched) -- the frame poll,
+rp_poll_all (the ATTR editor's tail), the widgets and vgx all go through them. BLACKPYRAMIDS_303 (control.c, only
+when build_kyoti passes KYOTI_VARI_TAKE / _BACK = VARISPEED's vh_bptake / vh_bpback, V1.8BC): ot_assign calls take
+before it stashes FLEX (both machines' old park migrated; FLEX off VARI: PTCH back in its slot, QUAN remembered; a TSTR
+of VARI remembered in VM bit 6) and back after FLEX is put back (TSTR VARI again; the next poll enters with the
+remembered QUAN); both forget rp_prev. The voice's park_defaults / stash / stale clear write only NEIGHBOR's and
+FLEX's bytes, none of VARISPEED's. STATIC's bytes are not the voice's: a STATIC VARI track keeps its state through a BP
+round trip as it is.
+
+**Size / placement.** Plain unit 3,092 -> 3,900 B standalone (octabam reference 3aa1d430…); VARISPEED_EMUS cave unit
+5,176 B (was 5,688: UI-task code moved to its DRAM .vemui section, 3,536 B; octabam reference 25de0d63…). The UI-task
+code (the ATTR hooks, the formatters, QUAN's dial / step / qdials, rp_poll_all, the bulk writers' holds, the page-paste
+guard, vh_bptake / vh_bpback) is the source's UI section (`VEM_UI_SECTION`); the frame path stays in the cave
+(varispeed_buildlib.FRAME_PATH, checked for both builds). KYOTI: build_varispeed links that section apart
+(link_split) as a new piece `patch_varispeed_ui` in KYOTI's DRAM payload (before Clyps; V1.8 1,390 B, V1.8BC 1,610 B
+with VEM_BP); the cave keeps 2,004 B (was 2,584) and EMPTY_PATTERN_LED_FIX's predicate goes back to CAVE in every image
+(`move_for_varispeed()` removed): CAVE 476 B left in V1.8 / V1.8C / V1.8BC, SPRING as before VRG1 (204 B / 82 B left).
+This fixes the merged V1.8BC, which no longer built (SPRING could not hold pattern_led beside patch_triglock_bp).
+Arena: V1.8C 1,709 pages (as FINAL), V1.8BC 1,721, V1.8 12. BLACKPYRAMIDS_303's runtime 43,176 -> 43,192 B in V1.8BC.
+
+**BLACKPYRAMIDS_303 standalone: unchanged** -- the control.c hooks are compiled only with KYOTI_VARI_TAKE; the
+standalone unit and feature image rebuild to their pins without the opt-in (unit b3327bd3…, image 6a124db1…). No
+140C_BPVR1 was needed.
+
+**Gates (emulator).**
+- QUAN entry (tools/varispeed_quan_entry_test.py, now 18 cases + the switch; new: mem_reload, mem_power, final_vari,
+  final_off -- the last two save on the main checkout's FINAL VARISPEED / VARISPEED_EMUS and load here): 19/19 on
+  140C_VRG3, 140C_VEMG4, KY18 VRG3, KY18C VRG3 (KY18BC VR3: see below).
+- The bc-park scenarios (out/bcpark in this worktree, BC_RUNS=runs_vr3 / runs_vr3b): S1 FLEX VARI -> BP -> FLEX: TSTR
+  VARI, QUAN 1/1, PTCH +12 parked, BEAT +12 (FIXED); S2 / S2r ex-BP -> STATIC -> VARI: 1/1, BEAT gives the original
+  PTCH, BP's CUT 100 back on its return (FIXED); S3 / S3b no stale clear, PTCH +15 / 0 back (FIXED); S4b the real BP's
+  signature intact through the ATTR edits (FIXED); S4c VOL 4: no swap, PTCH knob 40 kept (FIXED); S5 / S5b no phantom
+  (FIXED); S6 / S7 STATIC PTCH +12 back (FIXED); S8 page / track paste cases: as V1.8BC FINAL's paths, the refused
+  BP-onto-VARI paste leaves the VARI track's PTCH +12; S9 3/2 memory beside two BPs; partsw, reload (ex-BP track enters
+  1/1, FIXED), vol4 as above. Migration from V1.8BC FINAL saves (out/bcpark/mig_bc.py): M1 a never-BP STATIC VARI
+  track (QUAN 3/2): VP 76 moved in, BEAT +12, 3/2 remembered; M2 BP -> STATIC -> VARI (FINAL wrote the park over the
+  mark): PTCH +12 back, the mark restored (BP's CUT 100 back on BLKPYRAMD); M3 STATIC VARI beside a real BP: migrated,
+  the BP untouched. In S8 synthetic pokes without a poll the end state is the bytes as poked (no poll ran): harmless.
+- VARISPEED suites: varispeed_test.py (KYOTI_UNIT=1) unit 10/11, VARISPEED_EMUS varispeed_emus_test.py unit 44/45
+  (widget, pre-existing in both, as VRG2 / FINAL); expectations moved to the new bytes (o2rev: the pasted page now
+  clears the old park).
+- BLACKPYRAMIDS_303 / V1.8BC: verify_one_per_core ALL GOOD, verify_page_paste ALL GOOD, kyoti_bc_check_onepercore ALL
+  GOOD, kyoti_bc_check_erase ALL GOOD, kyoti_bc_check_mute as before (muted tracks start 0 notes in OTFX-T / DT-T),
+  kyoti_bc_check_voice every line as V1.8BC FINAL (only the core-1 DARK REV stopwatch 3267 vs 3252 and PLATE given up;
+  the flex round trip changes no byte outside NEIGHBOR's), kyoti_bc_check_fx2 as FINAL (COMPRESSOR +22, PHASER / DARK
+  jitter).
+- Clyps UI (diag_clyps_ui --only ABCDY, symbols regenerated from the new maps: Clyps moved behind the VARISPEED UI
+  piece) PASS on KY18C VRG3 and KY18BC VR3.
+- Every other FINAL image rebuilds to its pin without the opt-in (feature_image.py: MUTE_MODES, QLR, SIDECHAIN,
+  TRIGLESS, RELOAD, DJK, RTM, BLACKPYRAMIDS_303, BATCH_BUGFIXES; build_kyoti --clyps-standalone 94e41a22).
+
+**Builds (WIP, NOT flashed):** VARISPEED `out/VARISPEED/OCTATRACK_OS1.40C_VARISPEED.syx` 38b1f1ed… (.bin 84745b39…,
+mainos 94e4ac0f…; unit mainos 2e365957…), `140C_VRG3`; VARISPEED_EMUS `out/VARISPEED_EMUS/OCTATRACK_OS1.40C_VARISPEED_EMUS.syx`
+951368de… (.bin cc94e463…, mainos 1ed792d9…; unit mainos b54e7246…), `140C_VEMG4`; KYOTI V1.8 `KY18 VRG3` syx 8d64d787…
+(.bin e00607ec…, mainos d79d86e4…); V1.8C `KY18C VRG3` syx 05b431f1… (.bin b00a0f88…, mainos 48455649…); V1.8BC
+`KY18BC VR3` syx d7457e8d… (.bin 9c1656b0…, mainos afb82323…).
+
+**Merge with `led-fix` (foreseen):** build_kyoti.py's main() -- led-fix adds `move_pattern_led()` where VRG1 had
+`move_for_varispeed()` (removed here): keep led-fix's (pattern_led, 318 B there, goes to DRAM; CAVE then has ~640 B
+left). led-fix's DRAM insert puts pattern_led before Clyps, i.e. after `patch_varispeed_ui` -- no textual overlap in
+PLAN. Its docstring's "the classic cave had 92 B left" no longer holds (476 B).
+
+**Not verified / the author's call:** anything on hardware; octabam's ledger for the varispeed modules now claims the
+four new bytes (part_window) while rp_migrate may clear an older build's NEIGHBOR park -- beside octabam's
+blackpyramids-303 module that is BP's window (no octabam image built); a FLEX VARI track taken by BP through a path
+that does not run ot_assign (TRACK PASTE of a BP slice, Clyps FULL, a load) carries that slice's own bytes, as before.

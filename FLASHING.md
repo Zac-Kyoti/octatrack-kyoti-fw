@@ -125,6 +125,9 @@ unit that boots; if it doesn't, use §3b.
 | VARISPEED VRG2 (WIP: VRG1's Part-switch speed + QUAN enters VARI at 1/1) | `140C_VRG2` |
 | VARISPEED_EMUS VEMG3 (WIP: VEM11 + QUAN enters VARI at 1/1) | `140C_VEMG3` |
 | KYOTI V1.8 / V1.8C with VARISPEED VRG2 (WIP) | `KY18 VRG2` / `KY18C VRG2` |
+| VARISPEED VRG3 (WIP: VRG2 + its own track bytes, beside BLACKPYRAMIDS_303) | `140C_VRG3` |
+| VARISPEED_EMUS VEMG4 (WIP: VEMG3 + the same bytes) | `140C_VEMG4` |
+| KYOTI V1.8 / V1.8C / V1.8BC with VARISPEED VRG3 (WIP) | `KY18 VRG3` / `KY18C VRG3` / `KY18BC VR3` |
 | ERASE_EMPTY_TRIGLESS_LOCKS and the BATCH_BUGFIXES builds | `1.40C` (stock string — check by behaviour) |
 | a feature + BATCH_BUGFIXES | `BUG_` + the feature (`BUG_MUTEDT`, `BUG_DJV7`, `BUG_SC3X`, `BUG_RL3`, `BUG_QLREC`, `BUG_TRIGLK`, `BUG_RTM`, `BUG_BP303`, `BUG_VARI`, `BUG_VEM10`) |
 
@@ -403,6 +406,40 @@ quick check for each:
   `c99ff40a…`; NOTES 2026-11-19 `emus-guard` cont.) = VEM11 + the QUAN fix. The VRG2 walk-through's item 7 on this
   image, plus: entering VARI gives EMUS `OT` unless the track had another EMUS when it last left VARI (as before);
   the VEMG2 checks 1-8 unchanged (the guard, the clamp, no early pitch change).
+- **VARISPEED VRG3 walk-through** (WIP, NOT promoted; `out/VARISPEED/OCTATRACK_OS1.40C_VARISPEED.syx`, sha256
+  `38b1f1ed…`; VARISPEED_EMUS VEMG4 `out/VARISPEED_EMUS/OCTATRACK_OS1.40C_VARISPEED_EMUS.syx` `951368de…`; KYOTI
+  `out/KYOTI/OCTATRACK_OS1.40C_KYOTI_V1.8.syx` `KY18 VRG3` (`8d64d787…`), `..._V1.8C.syx` `KY18C VRG3` (`05b431f1…`),
+  `..._V1.8BC.syx` `KY18BC VR3` (`d7457e8d…`); NOTES 2026-11-19 cont. (2) `emus-guard`). VRG3 = VRG2 + VARISPEED keeps
+  what it remembers in bytes of its own (it shared NEIGHBOR's with BLACKPYRAMIDS_303 before). The VRG2 checks 1-7
+  hold on every one of these images. Then:
+  1. **QUAN memory across a save, off VARI.** A track on VARI, QUAN `3/2`; TSTR to `BEAT` (PTCH comes back); SAVE
+     PROJECT, RELOAD PROJECT (or power off and on); TSTR back to `VARI`: `3/2` (VRG2 lost it there: `1/1`).
+  2. **An older project.** A project saved by the FINAL VARISPEED / VARISPEED_EMUS / KYOTI (V1.8, V1.8C, V1.8BC) with a
+     track on VARI, QUAN `3/2`, PTCH `+12` before: it loads on VARI at `3/2`; TSTR to `BEAT` gives PTCH `+12`; back to
+     `VARI`: `3/2`. A track that was off VARI there enters `1/1` (the old builds' memory off VARI is not kept). On a
+     V1.8BC project a track that once was a BLKPYRAMD: its STATIC PTCH comes back as you had it, and BLKPYRAMD again
+     shows the 303 knobs you left (FINAL had overwritten its mark: they came back as defaults).
+  3. KYOTI V1.8BC only (BLKPYRAMD beside VARI), each on a STATIC and a FLEX track:
+     a. FLEX on `VARI` (QUAN `3/2`, PTCH `+12`) -> machine chooser `BLKPYRAMD` -> back to FLEX: TSTR `VARI`, QUAN
+        `3/2`; `BEAT`: PTCH `+12`. (FINAL: TSTR came back `OFF`, PTCH lost.)
+     b. STATIC on `VARI` (PTCH `+12`) -> `BLKPYRAMD` -> `STATIC` -> `BEAT`: PTCH `+12` (FINAL: `+16`). Also just
+        opening the machine chooser on a STATIC VARI track, the cursor on the BLKPYRAMD row, turning a knob, `[NO]`,
+        then `BEAT`: PTCH `+12`.
+     c. A track that has been a BLKPYRAMD (any knobs) -> `STATIC` -> TSTR `VARI`: QUAN `1/1` (FINAL: `5/4`); SAVE /
+        RELOAD keeps it so.
+     d. A real BLKPYRAMD track (any VOL, also VOL `4`) and the audio editor's ATTR TIMESTRETCH changed on the STATIC
+        sample of that track's slot: it stays a BLKPYRAMD with its knobs; no "phantom" BLKPYRAMD on another track.
+     e. Two BLKPYRAMD (T1, T5), T2 STATIC VARI: QUAN `3/2` / `BEAT` / `VARI` cycles as on any track; one per core
+        refusals as before (TRACK PASTE of a BLKPYRAMD onto a VARI track on its core: refused, the VARI track keeps its
+        QUAN and PTCH).
+     f. SRC page copy of a VARI page onto a BLKPYRAMD track / a BLKPYRAMD page onto a VARI track: the pasted page as
+        V1.8BC FINAL does it; a later `BEAT` on the pasted VARI page gives PTCH `0` (the page carries no PTCH).
+  4. **THRU / NEIGHBOR pages** (where the bytes live): on a VARI track (PTCH `+12`) switch the machine to THRU and
+     NEIGHBOR, turn every knob on their SRC and SRC SETUP pages, copy a THRU page from another track and paste it here,
+     then back to the old machine and `BEAT`: PTCH `+12`. THRU still passes its inputs as before.
+  5. KYOTI images: the V1.8 / V1.8C / V1.8BC checks unchanged (Clyps, DIRECT JUMP, RELOAD, MUTE MODE, SIDE-CHAIN, QLR,
+     the pattern LEDs; BLACKPYRAMIDS_303's one-per-core items on V1.8BC). VARISPEED's UI code now runs from the DRAM
+     payload (FREE MEM in the audio pool: one arena page more on V1.8 if the payload crossed a page).
 - **MIDI_PLAYS_FREE_FIX** — a PLAYS FREE MIDI track, trig quantize DIRECT, SCALE MODE PER
   TRACK, notes on steps 1 and 2: a manual trig keeps it running instead of stalling.
 - **EMPTY_PATTERN_LED_FIX** — a pattern whose only content is a p-lock on a MIDI track:
