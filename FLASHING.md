@@ -142,7 +142,14 @@ quick check for each:
   two on a core was not tried (the author's choice). Seen once, not reproduced (by the author or in ot_emu): after
   pasting a BLKPYRAMD track into another Part's pattern, the sequencer would not advance from step 1 on PLAY.
   Found: a Flex SRC page pasted onto a BLKPYRAMD track left it a BLKPYRAMD with Flex's numbers (VOL 0 ...): fixed,
-  item 11. The FINAL (mainos `4c7fb0fe…`, syx `25bd7a24…`) flashed 2026-11-19: item 11 as intended.
+  item 11. That build (mainos `4c7fb0fe…`, syx `25bd7a24…`) flashed 2026-11-19: item 11 as intended. Then, in the
+  octabam form (OCTABAM40-43, the same BLACKPYRAMIDS_303 runtime, remixes/test/blackpyramids-303), 2026-11-19:
+  OCTABAM40 all pass but a quiet pop at a cued Part switch into a Part whose BLKPYRAMD is on another track with no
+  trig on step 1, and the outgoing last-step note silent (fixed: item 12); OCTABAM41 all pass, and a note tied to
+  the end of a pattern was cut at a change to a pattern starting with ties (fixed: item 13); OCTABAM42 the ties
+  carry, but the first note after a load (or into another Part) was a blip / cut short (fixed: item 14);
+  OCTABAM43 (syx `92801b0f…`) all pass. The FINAL (mainos `0704647c…`, syx `32c3f8ce…`) is that code, not
+  flashed as this image.
   KYOTI V1.8C plus BLACKPYRAMIDS_303;
   SPRING REV **and PLATE REV** are given up for the voice and SIDE-CHAIN's DSP code. Run V1.8C's own checks
   (Clyps, DIRECT JUMP, MUTE MODE, SIDE-CHAIN, QUANTIZE LIVE REC, REC TRIG MUTE, VARISPEED) as usual, then:
@@ -195,6 +202,15 @@ quick check for each:
      with the pasted values. Copy a BLKPYRAMD track's SRC page and paste it onto a Flex track on the other core:
      a BLKPYRAMD with the same knobs; onto a track on its own core: refused with `ONE 303 PER CORE!`, nothing
      changes.
+  12. **A cued Part switch carries the voice:** Part 1 with a BLKPYRAMD on T2 playing a note every step, Part 2
+     with a BLKPYRAMD on T3 whose first trig is not on step 1 (also the reverse, T4 into T2): no pop; Part 1's
+     last-step note sounds and rings over the change; T3 takes the voice at its first trig. The same with no
+     BLKPYRAMD in Part 2: the last note rings out.
+  13. **Ties across a pattern change:** a note tied to the end of a pattern, then a pattern (same Part) starting
+     with trigless locks: the note holds on, no retrigger. The next pattern starting with a note: that note
+     plays. Starting with nothing: the note ends in the last step.
+  14. **The first note's GATE:** LOAD PROJECT, PLAY: the first note is full length, not a blip. A switch into a
+     Part with another GATE (BLKPYRAMD on the same track in both): the first step already has the new GATE.
 
 - **KYOTI V1.7 walk-through** (FINAL 2026-11-02, flashed: all of it passed; `out/KYOTI/OCTATRACK_OS1.40C_KYOTI_V1.7.syx`).
   V1.6's features unchanged; only addresses move (NOTES 2026-11-01).
