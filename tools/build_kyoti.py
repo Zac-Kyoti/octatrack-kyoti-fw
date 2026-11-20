@@ -666,6 +666,20 @@ def dsp_module_ranges():
     return out
 
 
+def move_pattern_led():
+    """EMPTY_PATTERN_LED_FIX's predicate grew from 158 to 318 B (2026-11-19: the [BANK] grid reads the
+    trigless-lock steps). In an image carrying VARISPEED + SIDE-CHAIN + MUTE_MODES the classic cave had 92 B
+    left, and SPRING's reclaim 204 B (V1.8 / V1.8C) or 80 B (V1.8BC): it fits no ROM zone. It runs on the
+    UI task only (the pattern-LED painters and the [BANK] grid's bank_has_content), so it joins the DRAM
+    payload, before Clyps (which stays last: its buffers follow it), as it already runs from DRAM in the
+    VARISPEED_EMUS feature image (tools/feature_image.py). Any image with VARISPEED; the standalone CLYPS
+    image keeps it in the cave (5 KB free there)."""
+    if "VARISPEED" in FEATURES and "patch_pattern_led" in PLAN["CAVE"]:
+        PLAN["CAVE"].remove("patch_pattern_led")
+        d = PLAN["DRAM"]
+        d.insert(d.index("patch_clyps_dram") if "patch_clyps_dram" in d else len(d), "patch_pattern_led")
+
+
 def main():
     global VERSTR
     if sum(f in sys.argv for f in ("--with", "--without", "--clyps", "--clyps-standalone", "--clyps-bp", "--bc")) > 1:
@@ -674,6 +688,7 @@ def main():
     apply_without(sys.argv)
     apply_clyps(sys.argv)
     VERSTR = os.environ.get("KYOTI_VERSTR") or VERSTR   # a WIP test image's own OS VERSION (2026-11-13)
+    move_pattern_led()
     # pairs that must never share an image (tools/feature_exclusions.py, the user 2026-11-07): Clyps
     # with RELOAD_FROM_PROJECT never; Clyps with DIRECT_JUMP_KYOTI only as the integrated pair, i.e.
     # while SUPERSEDE makes the shared site Clyps' and chains dj_land (asserted again after the build)

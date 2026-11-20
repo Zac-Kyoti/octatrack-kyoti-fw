@@ -129,6 +129,8 @@ unit that boots; if it doesn't, use §3b.
 | VARISPEED_EMUS VEMG4 (WIP: VEMG3 + the same bytes) | `140C_VEMG4` |
 | KYOTI V1.8 / V1.8C / V1.8BC with VARISPEED VRG3 (WIP) | `KY18 VRG3` / `KY18C VRG3` / `KY18BC VR3` |
 | ERASE_EMPTY_TRIGLESS_LOCKS and the BATCH_BUGFIXES builds | `1.40C` (stock string — check by behaviour) |
+| BATCH_BUGFIXES with the `[BANK]` trigless-lock change (WIP) | `140C_FIXL1` |
+| KYOTI V1.8C with the `[BANK]` trigless-lock change (WIP) | `KY18C LED1` |
 | a feature + BATCH_BUGFIXES | `BUG_` + the feature (`BUG_MUTEDT`, `BUG_DJV7`, `BUG_SC3X`, `BUG_RL3`, `BUG_QLREC`, `BUG_TRIGLK`, `BUG_RTM`, `BUG_BP303`, `BUG_VARI`, `BUG_VEM10`) |
 
 PERSONALIZE is reset by every flash, so features are off until you re-enable them. A
@@ -461,6 +463,25 @@ quick check for each:
 - **EMPTY_PATTERN_LED_FIX** — a pattern whose only content is a p-lock on a MIDI track:
   its LED lights under `[PTN]`. Hold `[BANK]` for a few seconds: the grid stays lit and
   responsive.
+- **EMPTY_PATTERN_LED_FIX `[BANK]` trigless locks (WIP, LED1)** — `out/BATCH_BUGFIXES/OCTATRACK_OS1.40C_BATCH_BUGFIXES.syx`
+  (OS VERSION `140C_FIXL1`) or KYOTI V1.8C `KY18C LED1` (`out/KYOTI_WIP/KYOTI_V1.8C_LED1/OCTATRACK_OS1.40C_KYOTI_V1.8C.syx`, worktree `led-fix`); not flashed. Change: under `[BANK]`, a
+  bank holding a pattern whose only content is trigless locks lights when one of them carries a locked parameter
+  (it stayed dark before; `[PTN]` lit it already). Use a bank whose 16 patterns are empty (a new project's bank B).
+  Place a trigless lock with GRID REC: `[FUNC]` + a trig until it shows as a trigless lock (not a trigless trig).
+  | # | pattern 1 of the empty bank holds only… | `[PTN]` LED | `[BANK]` LED |
+  |---|---|---|---|
+  | 1 | an audio trigless lock, nothing locked | off | off |
+  | 2 | the same step with one parameter locked (hold its trig, turn FILTER FREQ) | lit | **lit** (new) |
+  | 3 | the trigless lock removed again (GRID REC: press its trig) | off | off |
+  | 4 | a MIDI-track trigless lock, nothing locked | off | off |
+  | 5 | a MIDI-track trigless lock with a locked NOTE or CC value | lit | **lit** (new) |
+  | 6 | a trigless trig (one `[FUNC]` + trig), audio or MIDI | lit | lit (as stock) |
+  | 7 | the pattern from 5, then LIVE REC `[NO]` + `[TRACK]` on that MIDI track until the playhead has passed | off | off |
+  | 8 | case 2 in pattern 16 instead of pattern 1 | lit | lit |
+  7 erases the step's locks but stock leaves the MIDI trigless-lock flag set (emulator): it must stay dark; note
+  whether the trig row still shows a trigless lock on that step. **Stall check (S119):** with the sequencer playing
+  and a few banks holding trigless-lock-only patterns, hold `[BANK]` for ~10 s: grid and controls responsive,
+  timing steady; `[BANK]` + `[TRACK]` (RELOAD, KYOTI V1.8) toasts at once.
 - **PART_CHANGE_CARRYOVER_FIX** — a track that is PICKUP on one Part and FLEX on
   another: switching patterns across the Parts plays the FLEX sample, not the old loop.
 - **KYOTI CL36 walk-through** (WIP; `out/KYOTI_WIP/KYOTI_V1.7_WITH_CLYPS/OCTATRACK_OS1.40C_KYOTI_V1.7_WITH_CLYPS.syx`)

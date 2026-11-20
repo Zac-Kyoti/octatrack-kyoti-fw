@@ -7,7 +7,7 @@ instrument do what it already meant to do.
 | # | fix | size | sites |
 |---|---|---|---|
 | 1 | MIDI Plays-Free trig (`MIDI_PLAYS_FREE_FIX`) | 62 B | `0x4009b6f2` (18-byte splice) |
-| 2 | Empty-pattern LED (`EMPTY_PATTERN_LED_FIX`) | 158 B | `0x4009a464` |
+| 2 | Empty-pattern LED (`EMPTY_PATTERN_LED_FIX`) | 318 B | `0x4009a464` |
 | 3 | Part-change carryover (`PART_CHANGE_CARRYOVER_FIX`) | 402 B | `0x40062216` + `0x400621da` |
 
 ## Contents
@@ -31,11 +31,22 @@ Hardware-confirmed 2026-08-28.
 
 **Bug 2 — Empty-pattern LED.** A pattern whose only content is parameter locks — on a
 MIDI track, or trigless locks on an audio track, with no trig anywhere — showed as an
-unused slot, its grid LED unlit under `[PTN]`. The fix scans the lock arrays only after
-stock's own trig test says "empty", and not at all for the `[BANK]` grid, which asks about
-all 256 patterns on every LED refresh: scanning there starved the CPU while `[BANK]` was
-held. Under `[BANK]` a bank whose only content is p-locks therefore still reads empty,
-exactly as in stock.
+unused slot, its grid LED unlit under `[PTN]`. The fix runs stock's own trig test first.
+When that says "empty":
+
+- under `[PTN]` (and the chain view) it scans the lock arrays for any locked value;
+- under `[BANK]` — whose grid asks about the patterns of all 16 banks on every LED refresh,
+  where a full scan starved the CPU (2026-09-30) — it reads only the trigless-lock step masks
+  stock skips (audio and MIDI `+0x10`) and, for each step set there, that step's 32 lock
+  bytes: a bank holding a pattern with a trigless lock that carries a locked parameter lights.
+  At most 16 such steps are checked per pattern; past that the pattern reads as stock reads it.
+
+A trigless lock with nothing locked lights neither grid. Lock values on a step with no trig
+and no trigless-lock flag (a project edited off the unit can hold them) light `[PTN]` only. Measured in the
+emulator with the sequencer playing and `[BANK]` held: ~0.5 % more ColdFire work than the
+`[BANK]` grid without this check on a real project; ~2.3 % in a contrived worst case where
+every pattern of every bank is nothing but empty trigless locks (less than holding `[PTN]` on
+that same project costs today).
 
 **Bug 3 — Part-change carryover.** After a pattern-triggered Part change, stale
 per-track state from the old Part leaked into the new one. Reported on Elektronauts

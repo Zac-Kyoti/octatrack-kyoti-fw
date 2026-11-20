@@ -349,8 +349,9 @@ Three fixes to stock bugs. Every image here carries all three; this build is the
 
 - **MIDI_PLAYS_FREE_FIX** — a Plays-Free MIDI track with trig quantize *Direct* and
   pattern scale *Per Track* no longer stalls after its first step on a manual trig.
-- **EMPTY_PATTERN_LED_FIX** — a pattern whose only content is parameter locks now lights
-  its grid LED under `[PTN]`, instead of showing as an unused slot.
+- **EMPTY_PATTERN_LED_FIX** — a pattern whose only content is parameter locks — trigless
+  locks with a locked parameter included — lights its LED under `[PTN]` and `[BANK]`, instead
+  of showing as an unused slot; a trigless lock with nothing locked does not.
 - **PART_CHANGE_CARRYOVER_FIX** — after a pattern-triggered Part change, a track leaving
   PICKUP for FLEX no longer keeps playing the old Part's pickup loop, and a switch into a
   PICKUP track no longer marks the Part edited when nothing changed.
