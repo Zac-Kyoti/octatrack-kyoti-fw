@@ -451,8 +451,7 @@ def build_units(src, work):
     if t1[m:m + 3] != bytes([0, 1, 2]):
         sys.exit(f"emus_mode is {t1[m:m + 3].hex()}, not the identity the clamp relies on")
     # the frame path stays in the cave: nothing vem_frame reaches may sit in the DRAM unit
-    for k in ("vem_frame", "vf_win", "rp_swap", "rp_swap_m", "rp_gate_m", "rp_sync", "rp_forget",
-              "db_tsns", "emus_idx", "part_base", "db_mach", "caption_m", "rp_apply1", "rp_apply2"):
+    for k in L.FRAME_PATH + ("db_tsns", "emus_idx"):
         if not CAVE <= s1[k] < end:
             sys.exit(f"{k} (frame path) is not in the cave unit")
     print(f"  cave unit {len(t1)} B @ 0x{CAVE:08x}..0x{end:08x}  ({L.CAVE_END - end} B of the classic cave "
@@ -486,7 +485,7 @@ def main():
     print("=== ColdFire: varispeed_emus.s (VEM_EMUS = 1) ===")
     blob, ui, syms, end = build_units(SRC, WORK)
     # ---- context bytes, detours, pokes: all asserted against stock first ------------
-    L.splice(img, blob, syms, DETOURS, POKES, CONTEXT, RETURNS)
+    L.splice(img, blob, syms, DETOURS, POKES, CONTEXT, RETURNS, ui=(dram.ARENA_BASE, ui))
 
     # ---- DSP -----------------------------------------------------------------------
     print("\n=== DSP: the S950/SP12 kernel (SPRING REVERB donor) ===")

@@ -131,6 +131,41 @@ def link_unit(src, work, cpu, at, tag, asdefs=(), incdir=None, tools_inc=True):
     return b.read_bytes(), syms
 
 
+def link_split(src, work, cpu, at, ui_at, tag, asdefs=()):
+    """VRG3, KYOTI: the unit with its UI section apart (`as --defsym VEM_UI_SECTION=1`): .text at `at`,
+    .vemui at `ui_at` (KYOTI's DRAM arena). The UI-task code there reaches the unit, and the unit it, by
+    absolute address only. -> (text bytes, ui bytes, {symbol: address})."""
+    work.mkdir(parents=True, exist_ok=True)
+    o, e = work / f"vem_{tag}.o", work / f"vem_{tag}.elf"
+    run("m68k-elf-as", f"-mcpu={cpu}", "--defsym=VEM_UI_SECTION=1", *[f"--defsym={n}={v}" for n, v in asdefs],
+        "-I", ROOT / "tools", "-o", o, src)
+    run("m68k-elf-ld", "-e", "vem_frame", f"-Ttext=0x{at:x}", f"--section-start=.vemui=0x{ui_at:x}", "-o", e, o)
+    out = []
+    for sec in (".text", ".vemui"):
+        b = work / f"vem_{tag}{sec}.bin"
+        run("m68k-elf-objcopy", "-O", "binary", "-j", sec, e, b)
+        out.append(b.read_bytes())
+    hdr = run("m68k-elf-objdump", "-h", e).stdout
+    for sec, a in ((".text", at), (".vemui", ui_at)):
+        row = [l.split() for l in hdr.splitlines() if f" {sec} " in f" {l} "]
+        if len(row) != 1 or int(row[0][3], 16) != a:
+            sys.exit(f"{sec} is not linked at 0x{a:08x}: {row}")
+    syms = {}
+    for line in run("m68k-elf-nm", e).stdout.splitlines():
+        f = line.split()
+        if len(f) != 3:
+            sys.exit(f"unresolved symbol in {e.name}: {line}")
+        syms[f[2]] = int(f[0], 16)
+    return out[0], out[1], syms
+
+
+# the frame path (the render hook and everything it reaches) stays in the unit at the cave: never in
+# the UI section (checked for every split link, VARISPEED and VARISPEED_EMUS)
+FRAME_PATH = ("vem_frame", "vf_win", "rp_swap", "rp_swap_m", "rp_gate_m", "rp_gate_blk", "rp_sync",
+              "rp_forget", "part_base", "db_mach", "caption_m", "rp_apply1", "rp_apply2", "rp_offs",
+              "rp_xfer", "rp_unent", "rp_bpt", "rp_migrate", "rk_bucket")
+
+
 def pc_targets(img, a):
     """PC-relative targets of an instruction that might start at image offset a."""
     op = int.from_bytes(img[a:a + 2], "big")
@@ -179,11 +214,17 @@ def build_unit(src, work, asdefs=()):
     return blob, syms, end
 
 
-def splice(img, blob, syms, detours, pokes, context, returns):
+def splice(img, blob, syms, detours, pokes, context, returns, ui=None):
     """Assert every context span, detour site and poke against stock (img must be stock),
     then write the unit, the detours and the pokes, and check each body's jump back.
-    Returns the set of image offsets written."""
+    ui = (address, bytes): the unit's UI section linked elsewhere (a DRAM unit, VRG3), where a
+    body may sit. Returns the set of image offsets written."""
     o = lambda a: a - BASE
+
+    def rd(a, n):
+        if ui and ui[0] <= a < ui[0] + len(ui[1]):
+            return bytes(ui[1][a - ui[0]:a - ui[0] + n])
+        return bytes(img[o(a):o(a) + n])
     end = CAVE + len(blob)
     if any(img[o(CAVE):o(end)]):
         sys.exit(f"cave 0x{CAVE:08x}..0x{end:08x} is not zero in stock")
@@ -236,8 +277,7 @@ def splice(img, blob, syms, detours, pokes, context, returns):
     for sym, back in returns.items():
         a = syms[sym]
         # lea -N(sp),sp (4) ; movem.l regs,(sp) (4) ; jmp abs.l (6)
-        if img[o(a) + 8:o(a) + 10] != b"\x4e\xf9" or \
-                int.from_bytes(img[o(a) + 10:o(a) + 14], "big") != back:
+        if rd(a + 8, 2) != b"\x4e\xf9" or int.from_bytes(rd(a + 10, 4), "big") != back:
             sys.exit(f"{sym} does not jump back to 0x{back:08x}")
     print(f"  {len(detours)} detours, {len(pokes)} descriptor pokes")
     for site, (hexb, sym, kind) in detours.items():

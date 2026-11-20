@@ -267,6 +267,19 @@ unsigned ot_setup_edit_row(unsigned t) {
     }
     return NEIGHBOR;
 }
+/* KYOTI V1.8BC carries VARISPEED too (build_kyoti.py passes its two entries; unset, as standalone, none of this is
+ * compiled). VARISPEED keeps a track's PTCH / QUAN in four bytes of its own (VRG3) and never touches an OT-303 track;
+ * the two meet in FLEX's bytes, which the voice stashes. Before the voice takes a track, VARISPEED takes FLEX off VARI
+ * (PTCH back in its slot, QUAN remembered) and remembers a TSTR of VARI, which the stash's two TSTR bits cannot hold;
+ * after FLEX is put back, VARISPEED sets TSTR to VARI again when it was (its next poll enters VARI with the QUAN it
+ * remembered). Called per Part copy: (the Part as here, track). */
+#ifdef KYOTI_VARI_TAKE
+#define VARI_TAKE(p, t) ((void (*)(volatile uint8_t *, unsigned))KYOTI_VARI_TAKE)(p, t)
+#define VARI_BACK(p, t) ((void (*)(volatile uint8_t *, unsigned))KYOTI_VARI_BACK)(p, t)
+#else
+#define VARI_TAKE(p, t) ((void)0)
+#define VARI_BACK(p, t) ((void)0)
+#endif
 /* machine.s's commits: sign = 1 makes track t of this Part an OT-303 (FLEX stashed, its parked knobs
  * or the defaults seeded), 0 makes it something else (FLEX put back, its knobs parked); both copies (the
  * Part and its SRAM mirror); nothing changes when the track already is / is not one. */
@@ -277,6 +290,7 @@ void ot_assign(volatile uint8_t *part, unsigned t, unsigned sign) {
         unsigned is = s[0] == 'O' && s[1] == 'T' && s[2] == 1;
         uint8_t v[12];
         if (sign && !is) {
+            VARI_TAKE(p, t);
             for (unsigned k = 0; k < 12; ++k) v[k] = (uint8_t)parked_value(p, t, k);
             flex_stash(p, t);
             for (unsigned k = 0; k < 12; ++k) *knob(p, t, k) = v[k];
@@ -286,6 +300,7 @@ void ot_assign(volatile uint8_t *part, unsigned t, unsigned sign) {
             flex_restore(p, t);
             for (unsigned k = 0; k <= OT_VOL; ++k) *parked(p, t, k) = v[k];
             s[0] = PARK_MARK;
+            VARI_BACK(p, t);
         }
     }
 }

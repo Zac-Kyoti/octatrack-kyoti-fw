@@ -123,8 +123,29 @@ DESC = (0x400d3000, 0x300)                       # STATIC/FLEX descriptor heads 
 NAME0 = {0: 0x400d3032, 1: 0x400d31c4}
 NAME11 = {0: 0x400d3074, 1: 0x400d3206}
 FL, ST, PU, THRU = 1, 0, 4, 2
-PARK1 = {ST: 18, FL: 23}
-PARK2 = {ST: 23, FL: 21}
+# VRG3: VARISPEED's own bytes. park 1 = VP_m (THRU page 1 slot 2 / 5: the PTCH park), park 2 = VM_m (THRU's /
+# NEIGHBOR's slot byte: the TSNS park on VARI; off VARI the remembered QUAN + 1 | the EMUS stop + 1 << 4),
+# park 3 = the NEIGHBOR page-2 byte VARISPEED_EMUS kept its TSNS park in until VEMG3 (migration only)
+PARK1 = {ST: 14, FL: 17}
+PARK2 = {ST: 2, FL: 3}                           # + O_SLOT5 + 5t
+PARK3 = {ST: 23, FL: 21}
+
+
+def park_off(t, which, m):
+    return {1: O_P1 + 30 * t + PARK1[m], 2: O_SLOT5 + 5 * t + PARK2[m], 3: O_P2 + 30 * t + PARK3[m]}[which]
+
+
+EMV = {"OT": 0, "S950": 1, "SP12": 2}
+
+
+def vm_emus(e, q=None):
+    """VM off VARI with EMUS e remembered (and QUAN index q, else none)"""
+    return (EMV[e] + 1) << 4 | (0 if q is None else q + 1)
+
+
+def mem(q, e=None):
+    """VM off VARI: QUAN index q remembered (+ EMUS stop e: 0 OT, 1 S950, 2 SP12)"""
+    return q + 1 + (0 if e is None else (e + 1) << 4)
 # the test stubs: in the zero cave tail behind the unit (the classic cave ends 0x400d7c3c)
 _STUB_AT = os.environ.get("VEM_STUB_AT")         # VEM10: elsewhere (the Bugbuild's cave is full)
 _TAIL = int(_STUB_AT, 0) if _STUB_AT else max(0x400d7800, (json.loads(SYMS.read_text())["end"] + 0x3f) & ~0x3f)
@@ -163,7 +184,7 @@ def p2(t, m, slot, v, live=True):
 
 
 def park(t, which, m, v):
-    return part_byte((O_P1 + 30 * t + PARK1[m]) if which == 1 else (O_P2 + 30 * t + PARK2[m]), v)
+    return part_byte(park_off(t, which, m), v)
 
 
 def poke(frame, items):
@@ -266,7 +287,7 @@ class CP:
         return self.part[O_P2 + 30 * t + 6 * m + s]
 
     def park(self, t, which, m):
-        return self.part[(O_P1 + 30 * t + PARK1[m]) if which == 1 else (O_P2 + 30 * t + PARK2[m])]
+        return self.part[park_off(t, which, m)]
 
     def rp(self, t, m):
         return self.prev[2 * t + m]
@@ -722,7 +743,7 @@ def scenarios():
               (mm_byte(O_P2 + 30 * 5 + 6 * FL + 5, EM[fl_emus]) if fl_emus else []))
         return [poke(100, mm_byte(O_MACH + 5, FL)), call(100, SET_MACHINE3, 0, 5, ST),
                 poke(200, mm_byte(O_P2 + 30 * 5 + 4, 4) + mm_byte(O_P2 + 30 * 5 + 5, EM["SP12"]) +
-                     mm_byte(O_P2 + 30 * 5 + PARK2[ST], EM["SP12"]))], pk
+                     mm_byte(park_off(5, 2, ST), vm_emus("SP12")))], pk
     for name, menu, vv in (("net_slotmach_rev_order", "src", False), ("net_slotmach_ae_order", "ae", False),
                            ("net_slotmach_vv_order", "src", True)):
         steps, pk = fl_first(4 if vv else 0, "OT" if vv else None)
@@ -1075,7 +1096,7 @@ def track_cfg(t, part, emus=None, tstr=4, park=None, slot=None, m=ST, live=False
         if live:
             pk.append(b(LIVE_P2 + 72 * t + 5, EM[emus]))
     if park is not None:
-        pk += mm_byte(O_P2 + 30 * t + PARK2[m], EM[park], part)
+        pk += mm_byte(park_off(t, 2, m), vm_emus(park), part)
     sl = G_SLOT[t] if slot is None else slot
     pk += mm_byte(O_SLOT5 + 5 * t + m, sl, part)
     if live:
@@ -1096,8 +1117,9 @@ def fx_cfg(fx1, fx2, part=0, live=False):
 def part1_setup(fx1, fx2):
     """part 1 (not playing), consistent as a saved Part: T5 not VARI (PTCH 70, QUAN 109
     parked; TSNS 30, EMUS 127 parked), T6-T8 VARI SP12, FX1 / FX2 as given"""
-    pk = mm_byte(O_P1 + 30 * 4 + 0, 70, 1) + mm_byte(O_P1 + 30 * 4 + PARK1[ST], 109, 1)
+    pk = mm_byte(O_P1 + 30 * 4 + 0, 70, 1) + mm_byte(park_off(4, 1, ST), 0, 1)
     pk += track_cfg(4, 1, tstr=0, park="SP12") + mm_byte(O_P2 + 30 * 4 + 5, 30, 1)
+    pk += mm_byte(park_off(4, 2, ST), vm_emus("SP12", 7), 1)    # VRG3: QUAN 3/2 + EMUS SP12 remembered (VM)
     for t in (5, 6, 7):
         pk += track_cfg(t, 1, emus="SP12")
     pk += [x for t in GT for x in mm_byte(O_MACH + t, ST, 1)]
@@ -1286,7 +1308,7 @@ def check(name, s):
             e = cp[f"edge{f}"]
             pair = (e.p1(0, FL), e.p2(0, FL))
             t.eq(f"frame {f}: the two pairs together", pair in ((70, 30), (64, 1)), True)
-        t.eq("left (BEAT): PTCH / TSNS back, QUAN / EMUS parked", (c.p1(0, FL), c.p2(0, FL), c.park(0, 1, FL), c.park(0, 2, FL)), (70, 30, 109, 127))
+        t.eq("left (BEAT): PTCH / TSNS back, nothing parked, QUAN 3/2 + EMUS SP12 remembered (VM, VRG3)", (c.p1(0, FL), c.p2(0, FL), c.park(0, 1, FL), c.park(0, 2, FL)), (70, 30, 0, mem(7, 2)))
         t.eq("left: rp_prev, captions", (c.rp(0, FL), c.name(NAME0[FL]), c.name(NAME11[FL])), (0, "PTCH", "TSNS"))
         t.eq("left: live PTCH / TSNS", (c.live[0], c.base[0:2], c.live[0x25]), (70, b"\x46\x00", 30))
         t.eq("back in VARI: QUAN / EMUS / parks", (dd.p1(0, FL), dd.p2(0, FL), dd.park(0, 1, FL), dd.park(0, 2, FL)), (109, 127, 70, 30))
@@ -1294,7 +1316,7 @@ def check(name, s):
     elif name == "fresh0":
         i, o = cp["in"], cp["out"]
         t.eq("TSNS 0 -> EMUS enters as OT (1), 0 parked", (i.p2(0, FL), i.park(0, 2, FL)), (1, 0))
-        t.eq("left: TSNS back verbatim (0)", (o.p2(0, FL), o.park(0, 2, FL)), (0, 1))
+        t.eq("left: TSNS back verbatim (0), QUAN 1/1 + EMUS OT remembered", (o.p2(0, FL), o.park(0, 2, FL)), (0, mem(4, 0)))
     elif name == "adopt":
         a = cp["a"]
         t.eq("adopted: slots and parks unchanged", (a.p1(0, FL), a.p2(0, FL), a.park(0, 1, FL), a.park(0, 2, FL)), (109, 127, 70, 30))
@@ -1388,9 +1410,9 @@ def check(name, s):
     elif name == "o2rev":
         r0, r1 = cp["r0"], cp["r1"]
         t.eq("r0: T1 VARI, rp_prev 1", (r0.p2(0, FL, 4), r0.p1(0, FL), r0.p2(0, FL), r0.rp(0, FL)), (4, 109, 127, 1))
-        t.eq("pasted over: T1 = T2's page (AUTO, 50, 20), parks untouched, adopted 0",
+        t.eq("pasted over: T1 = T2's page (AUTO, 50, 20), the old parks cleared (VRG3: the page is another track's), adopted 0",
              (r1.p2(0, FL, 4), r1.p1(0, FL), r1.p2(0, FL), r1.park(0, 1, FL), r1.park(0, 2, FL), r1.rp(0, FL)),
-             (1, 50, 20, 70, 30, 0))
+             (1, 50, 20, 0, 0, 0))
     elif name == "o2late":
         l = cp["late"]
         t.eq("T2 after its trigs: QUAN / EMUS kept, parks untouched, rp_prev 1",
@@ -1477,7 +1499,7 @@ def toast_px(text):
 
 def emus_at(part, t, m=ST):
     """the byte in track t's machine-m TSNS slot (EMUS on VARI) and its park"""
-    return part[O_P2 + 30 * t + 6 * m + 5], part[O_P2 + 30 * t + PARK2[m]]
+    return part[O_P2 + 30 * t + 6 * m + 5], part[park_off(t, 2, m)]
 
 
 def notify_hits(log):
@@ -1602,9 +1624,9 @@ def net_check(t, s, d, log):
             p1 = (d / "p1_8300.part").read_bytes()
             got = {k + 1: EM_NAME.get(emus_at(p1, k)[0], emus_at(p1, k)[0]) for k in (5, 6, 7)}
             t.eq("part 1's EMUS after the switch", got, {k + 1: nm(want[k]) for k in (5, 6, 7)})
-            t.eq("part 1's T5 (not VARI): PTCH 70 / QUAN 109 parked, TSNS 30 / EMUS 127 parked, untouched",
-                 (p1[O_P1 + 30 * 4], p1[O_P1 + 30 * 4 + PARK1[ST]], p1[O_P2 + 30 * 4 + 5], p1[O_P2 + 30 * 4 + PARK2[ST]]),
-                 (70, 109, 30, 127))
+            t.eq("part 1's T5 (not VARI): PTCH 70, nothing parked, TSNS 30, QUAN 3/2 + EMUS SP12 remembered, untouched",
+                 (p1[O_P1 + 30 * 4], p1[park_off(4, 1, ST)], p1[O_P2 + 30 * 4 + 5], p1[park_off(4, 2, ST)]),
+                 (70, 0, 30, vm_emus("SP12", 7)))
             p0 = (d / "p0_8300.part").read_bytes()
             t.eq("part 0 untouched (EMUS SP12 x4)", [EM_NAME.get(emus_at(p0, k)[0]) for k in GT], ["SP12"] * 4)
             ui = (d / "ui.end").read_bytes()

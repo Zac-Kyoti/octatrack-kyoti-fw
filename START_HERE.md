@@ -158,6 +158,38 @@ are lowercase-hyphen, because octabam requires a module's name to equal its fold
 
 > Check this against the tree before trusting it; it has gone stale before.
 
+- **2026-11-19: VRG3 -- VARISPEED's own track bytes, beside BLACKPYRAMIDS_303 (WIP, NOT flashed, branch `emus-guard`,
+  origin/main 07f47d1 merged)** -- VARISPEED kept its PTCH parks in NEIGHBOR's bytes, which BLACKPYRAMIDS_303 owns (the bc-park
+  probe's S1-S10). Now four bytes of its own that stock never edits or shows: THRU page-1 slots 2 / 5 (PTCH parks) and
+  THRU's / NEIGHBOR's slot bytes (remembered QUAN / EMUS, BP's "was VARI"), all <= 127 so the Part validator keeps
+  them (VARIG2's bit-7 memory was zeroed on load). Older projects migrate at first sight (NEIGHBOR read only where BP
+  left nothing; V1.8BC FINAL's STATIC park over BP's mark recovered); VARISPEED never touches a BLKPYRAMD track; in
+  V1.8BC BP's ot_assign calls VARISPEED before / after its stash (FLEX off VARI, TSTR VARI remembered). BP standalone
+  unchanged (pins kept). KYOTI: VARISPEED's UI-task code is a DRAM piece (`patch_varispeed_ui`), pattern_led back in
+  CAVE (`move_for_varispeed` gone; the merged V1.8BC builds again). Images `140C_VRG3` (syx `38b1f1ed…`), `140C_VEMG4`
+  (`951368de…`), `KY18 VRG3` (`8d64d787…`), `KY18C VRG3` (`05b431f1…`), `KY18BC VR3` (`9d519304…`). FLASHING §4 "VARISPEED
+  VRG3"; NOTES 2026-11-19 cont. (2). Open: the author's hardware check; promotion re-pins VARISPEED / VARISPEED_EMUS
+  (unit + feature), KYOTI V1.8 / V1.8C / V1.8BC, octabam references; the led-fix merge (its `move_pattern_led` should merge cleanly; re-run its matrix and the KYOTI builds).
+
+- **2026-11-19: VARIG2 -- QUAN enters VARI at 1/1 (WIP, NOT flashed, branch `emus-guard`)** -- the author's report on
+  `KY18C VRG1` (QUAN `5/4` on entering VARI). Not a regression: the same on every FINAL VARISPEED / VARISPEED_EMUS /
+  KYOTI (the swap took the PTCH slot's domain from RAM `rp_prev`, re-adopted from the gate after every forget, and took
+  any park >= 4 as a remembered QUAN: PTCH +12 = 76 = `5/4`). Fix in the shared `varispeed_emus.s`: the park carries
+  the domain (remembered QUAN = bit 7; on VARI it holds PTCH >= 4), first sight checks the bytes (`rp_unent`).
+  Images `140C_VRG2` (syx `4710a2d2…`), `140C_VEMG3` (syx `c99ff40a…`), `KY18 VRG2` (syx `6f436dfe…`), `KY18C VRG2`
+  (syx `69b3b9e4…`); VRG1 / VEMG2 superseded as test images. Gate: `tools/varispeed_quan_entry_test.py`. FLASHING §4
+  "VARISPEED VRG2" item 7 + "VARISPEED_EMUS VEMG3"; NOTES 2026-11-19 cont. Open: the author's check; promotion would
+  re-pin VARISPEED (unit + feature), VARISPEED_EMUS (unit + feature), KYOTI V1.8 / V1.8C, octabam references; V1.8BC
+  (FINAL on main since 1f43bd3) needs VRG1 + VARIG2 merged and its BP303 gates rerun (BP's signature shares NEIGHBOR
+  byte 18 = STATIC's PTCH park).
+
+- **2026-11-19: VARISPEED VRG1 (WIP, NOT flashed, branch `emus-guard`)** — the VEMG2 freeze ported to plain VARISPEED:
+  a held VARI note keeps its speed through a Part switch until its own next trig (FINAL changed it ~7 ticks early,
+  and a cross-bank cue dropped it briefly). Images `140C_VRG1` (syx `2aae3558…`), `KY18 VRG1` (syx `07df9d49…`),
+  `KY18C VRG1` (syx `eba5cf5d…`); in KYOTI, EMPTY_PATTERN_LED_FIX's predicate moves CAVE -> SPRING (build_kyoti
+  `move_for_varispeed`). VARISPEED_EMUS VEMG2 unchanged. FLASHING §4 "VARISPEED VRG1"; NOTES 2026-11-19. Open: the
+  author's check; V1.8BC (kyoti-bp) gets it at its merge -- SPRING there also holds patch_triglock_bp.
+
 - **2026-11-19: VARISPEED_EMUS VEM11 FINAL** (the author flashed `140C_VEMG2`: all 8 FLASHING §4 checks pass; the final is
   that code as `140C_VEM11`: unit `d23d9e63…`, feature mainos `e2faf75d…`) — the load guard across
   a Part switch, the author's second round (VEMG1 superseded): the transition is priced before the switch with only real

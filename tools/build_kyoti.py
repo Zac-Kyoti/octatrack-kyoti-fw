@@ -225,6 +225,7 @@ PLAN = {
     "DRAM":  ["patch_reload3",                     # RELOAD_FROM_PROJECT (V1.2-V1.3, V1.5-V1.8; not in V1.8C)
               "patch_directjump_v7",               # V1.7: out of CAVE (2,026 B), into the same arena page
               "bp_runtime",                        # V1.8BC: BLACKPYRAMIDS_303's runtime (before Clyps)
+              "patch_varispeed_ui",                # VRG3: VARISPEED's UI-task code (the cave keeps its frame path)
               "patch_clyps_dram"],                 # V1.8C: LAST (its CL_BSS_SIZE buffers follow it)
     "CAVE":  ["patch_varispeed",                   # first: 0x400d6500, VARISPEED's own address (frame ISR)
               "patch_softmute", "patch_partreapply",
@@ -273,7 +274,8 @@ FEATURES = {
     # FINAL 2026-10-15. Its builder takes no placement: the plan puts its unit at its own
     # address (asserted after the allocation).
     "VARISPEED": ("build_varispeed.py", "mainos_varispeed.bin", "prep",
-                  {"patch_varispeed": "vari_build/vem_5407.bin"}),
+                  {"patch_varispeed": "vari_build/vem_5407.bin",
+                   "patch_varispeed_ui": "vari_build/vem_ui.bin"}),   # VRG3: its UI-task code, in DRAM
 }
 # --clyps (V1.8C, reference/handoffs/CLYPS_SCOPE.md §1.10): CLYPS replaces RELOAD_FROM_PROJECT (it carries
 # the card reloads); one all-DRAM unit, tick hooks included (the loader runs from the boot site before any
@@ -351,6 +353,11 @@ def flags_for(feat):
             f["bp_donor_ids"] = [0x14, 0x15]
             if "MUTE_MODES" in FEATURES:         # the voice drops a silenced track's notes as MUTE_MODES does
                 f["bp_mm_keymask"] = MM_KEYMASK_SIZING   # pass 2: MUTE_MODES' own KEYMASK (built before it)
+    if "BLACKPYRAMIDS_303" in FEATURES and "VARISPEED" in FEATURES:   # V1.8BC: the two meet in FLEX's bytes
+        if feat == "VARISPEED":
+            f["vem_bp"] = True                   # vh_bptake / vh_bpback, which the voice's ot_assign calls
+        if feat == "BLACKPYRAMIDS_303":          # pass 1 sizes with these; pass 2 gives VARISPEED's (built before it)
+            f.update(bp_vari_take=0x40a95008, bp_vari_back=0x40a9500c)
     if feat == "VARISPEED" and "SIDECHAIN_COMPRESSOR" in FEATURES:
         # QUAN's rotary switch is SIDE-CHAIN's ui_switch unit (no copy in VARISPEED's unit:
         # the proven cave cannot hold it). A stand-in address while sizing (a jmp's size does
@@ -783,6 +790,9 @@ def main():
             p.update({k: v for k, v in dsp_place.items() if k.startswith("sc_" if feat[0] == "S" else "bp_")})
         if "bp_mm_keymask" in p:                   # MUTE_MODES is built before it (FEATURES order)
             p["bp_mm_keymask"] = syms["patch_softmute_dt"]["KEYMASK"]
+        if "bp_vari_take" in p:                    # VARISPEED is built before it (FEATURES order)
+            p.update(bp_vari_take=syms["vari_build/vem_5407"]["vh_bptake"],
+                     bp_vari_back=syms["vari_build/vem_5407"]["vh_bpback"])
         if "uis_sw9_at" in p:
             p["uis_sw9_at"] = uis_sw9
         if feat == "CLYPS" and "DIRECT_JUMP_KYOTI" in FEATURES:     # built after DJ: its real entries

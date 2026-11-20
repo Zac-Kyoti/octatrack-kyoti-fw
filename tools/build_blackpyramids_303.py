@@ -59,6 +59,10 @@ RT_IN_KYOTI = bool(kyoti_place.at("bp_runtime_dram", False))
 #   bp_mm_keymask    MUTE_MODES' KEYMASK byte in the combined image: the renderer then drops a silenced track's
 #                    notes as MUTE_MODES drops its trigs (control.c KYOTI_MM_GATE); unset = none of it is compiled
 MM_KEYMASK = kyoti_place.at("bp_mm_keymask", None)
+#   bp_vari_take / bp_vari_back   KYOTI V1.8BC: VARISPEED's vh_bptake / vh_bpback, which ot_assign calls (control.c
+#                    KYOTI_VARI_TAKE / _BACK: FLEX off VARI before the stash, TSTR VARI back after); unset = none of it
+VARI_TAKE = kyoti_place.at("bp_vari_take", None)
+VARI_BACK = kyoti_place.at("bp_vari_back", None)
 # PLATE REV (id 0x14): its dispatch entries per payload (X:$215 / X:$235, read off our image) and its
 # descriptor pointer as the FX tables store it (E 0x400d5594 + 0x38)
 PLATE = dict(fx_id=0x14, p=0x400d5594 + 0x38, A=(0x01000, 0x01055), B=(0x00dc0, 0x00e15))
@@ -169,6 +173,8 @@ def build_cf():
     for src in (CF / "control.c", CF / "record.c", CF / "params.c", WORK / "ytab.c"):
         objs.append(str(WORK / (src.stem + ".o")))
         mm = [] if MM_KEYMASK is None else ["-DKYOTI_MM_GATE=1", f"-DKYOTI_MM_KEYMASK=0x{MM_KEYMASK:x}u"]
+        if VARI_TAKE is not None:
+            mm += [f"-DKYOTI_VARI_TAKE=0x{VARI_TAKE:x}u", f"-DKYOTI_VARI_BACK=0x{VARI_BACK:x}u"]
         run("m68k-elf-gcc", *CFLAGS, *mm, f"-I{CF}", "-c", str(src), "-o", objs[-1])
     run("m68k-elf-as", "-mcpu=5407", "-o", str(WORK / "machine.o"), str(CF / "machine.s"))
     (WORK / "runtime.ld").write_text(f"""SECTIONS {{
