@@ -141,21 +141,62 @@ _STOCK = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))
                       "out", "raw", "section_3_MAIN_OS.bin")
 
 
+_IMG_BASE = 0x40000400
+_LOADER_AT = 0x4010FDF0            # tools/dram/dram.py: the append starts at the byte after the stock image
+_ARENA_BASE = 0x40A955E0           # ... and every DRAM runtime is linked there
+_PACKED = b"OCTA" + b"GKA3"        # dram.SIGNATURE + pack.PACKED_MAGIC
+
+
+def packed_payloads(img):
+    """The DRAM payloads tools/dram/ appends after the stock image: [(start, end, runtime)] -- the image
+    offsets of each packed blob ('OCTA' + GKA3 stream) and the runtime it depacks to (linked at the
+    arena base). Its length comes from the loader's own payload table (blob address, blob length), so
+    a coincidental 'OCTAGKA3' is not taken for one. [] for an image with no append."""
+    if len(img) <= _LOADER_AT - _IMG_BASE:
+        return []
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "dram"))
+    import depack
+    out, i = [], _LOADER_AT - _IMG_BASE
+    while True:
+        p = img.find(_PACKED, i)
+        if p < 0:
+            return out
+        t = img.find((_IMG_BASE + p).to_bytes(4, "big"), _LOADER_AT - _IMG_BASE, p)
+        n = int.from_bytes(img[t + 4:t + 8], "big") if t >= 0 else 0
+        if t < 0 or t % 2 or not 8 < n <= len(img) - p:
+            i = p + 1
+            continue
+        out.append((p, p + n, depack.depack(img[p + 4:p + n])))
+        i = p + n
+
+
 def stock_sram_refs(img):
     """Every 32-bit word the build changed or appended (vs stock) that points into
-    STOCK_SRAM: [(image offset, value, what)]. Stock's own references are left alone."""
+    STOCK_SRAM: [(address, value, what)]. Stock's own references are left alone.
+
+    A DRAM payload travels packed: its bytes are a compressed bit stream, not code, so a match
+    there is a coincidence (KYOTI V1.8BC, 2026-11-19: 0x800076cd at 0x40119664, inside the packed
+    stream). The scan skips each packed blob and reads the runtime it depacks to instead (the
+    code that actually runs, at its DRAM address) -- stricter than before, not looser: the
+    packed bytes used to hide whatever the runtime held."""
     import re
     with open(_STOCK, "rb") as f:
         stock = f.read()
+    blobs = packed_payloads(img)
+
+    def scan(buf, base, ref, skip=()):
+        for m in re.finditer(rb"\x80\x00[\x69-\x78]", buf):
+            i = m.start()
+            if i % 2 or i + 4 > len(buf) or any(a - 3 <= i < b for a, b in skip):
+                continue
+            v = int.from_bytes(buf[i:i + 4], "big")
+            for lo, hi, what in STOCK_SRAM:
+                if lo <= v < hi and buf[i:i + 4] != ref[i:i + 4]:
+                    hits.append((base + i, v, what))
     hits = []
-    for m in re.finditer(rb"\x80\x00[\x69-\x78]", img):
-        i = m.start()
-        if i % 2 or i + 4 > len(img):
-            continue
-        v = int.from_bytes(img[i:i + 4], "big")
-        for lo, hi, what in STOCK_SRAM:
-            if lo <= v < hi and img[i:i + 4] != stock[i:i + 4]:
-                hits.append((i, v, what))
+    scan(img, _IMG_BASE, stock, [(a, b) for a, b, _ in blobs])
+    for _, _, raw in blobs:
+        scan(raw, _ARENA_BASE, b"")
     return hits
 
 
@@ -167,7 +208,7 @@ def _check_stock_sram(builder, image):
         hits = stock_sram_refs(f.read())
     if not hits:
         return
-    lines = [f"0x{0x40000400 + i:08x}: 0x{v:08x}  ({what})" for i, v, what in hits[:12]]
+    lines = [f"0x{a:08x}: 0x{v:08x}  ({what})" for a, v, what in hits[:12]]
     out = sys.stdout if os.environ.get(STOCK_SRAM_ENV) == "1" else sys.stderr
     _banner([f"{os.path.basename(builder)}  --  points into stock-owned SRAM"] + lines, out)
     if os.environ.get(STOCK_SRAM_ENV) != "1":

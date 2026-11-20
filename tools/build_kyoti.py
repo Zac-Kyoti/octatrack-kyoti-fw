@@ -673,7 +673,10 @@ def move_pattern_led():
     UI task only (the pattern-LED painters and the [BANK] grid's bank_has_content), so it joins the DRAM
     payload, before Clyps (which stays last: its buffers follow it), as it already runs from DRAM in the
     VARISPEED_EMUS feature image (tools/feature_image.py). Any image with VARISPEED; the standalone CLYPS
-    image keeps it in the cave (5 KB free there)."""
+    image keeps it in the cave (5 KB free there).
+    After the merge with VRG3 (release-1119, 2026-11-19: VARISPEED's UI code is its own DRAM piece) the cave
+    has 636 B left with the predicate in DRAM, so it would fit there again; it stays in DRAM -- the layout every
+    RC1 gate ran on (moving it back would move Clyps' unit and every CAVE piece behind it once more)."""
     if "VARISPEED" in FEATURES and "patch_pattern_led" in PLAN["CAVE"]:
         PLAN["CAVE"].remove("patch_pattern_led")
         d = PLAN["DRAM"]

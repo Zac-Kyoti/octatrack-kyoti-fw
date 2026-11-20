@@ -428,15 +428,32 @@ def compose(name, builder, basepath, verstr, blurb, stock, rebuild=True):
             else:
                 cut.append(r)
         runs = sorted(cut)
-    for stem in sorted(need, key=lambda s: -len(link(s, BUGFIX[s][0])[0])):
-        size = len(link(stem, BUGFIX[stem][0])[0])
-        at = place(runs, size, BUGFIX[stem][0])
-        if at is None:                      # the cave is full: a DRAM unit (above)
-            if stem == "patch_trigscale":
-                sys.exit(f"{name}: no cave run fits {stem} ({size} B), and it is step-handler code")
-            at, dram_at = dram_at, (dram_at + size + 3) & ~3
-            dram_pieces.append(stem)
-        addrs[stem] = at
+    # Largest first. If that leaves the step-handler piece (trigscale, cave only) without a run -- VARISPEED_EMUS
+    # with the 318 B pattern_led beside its smaller VEMG4 cave unit (2026-11-19, release-1119) -- place it first
+    # instead: the UI-task pieces can go to DRAM. Only that retry changes an order, so every image that placed
+    # before keeps its addresses.
+    runs0, dram_at0 = [r[:] for r in runs], dram_at
+    by_size = sorted(need, key=lambda s: -len(link(s, BUGFIX[s][0])[0]))
+    orders = [by_size, sorted(by_size, key=lambda s: s != "patch_trigscale")]
+    for order in orders:
+        runs, dram_at, dram_pieces, placed, ok = [r[:] for r in runs0], dram_at0, [], {}, True
+        for stem in order:
+            size = len(link(stem, BUGFIX[stem][0])[0])
+            at = place(runs, size, BUGFIX[stem][0])
+            if at is None:                      # the cave is full: a DRAM unit (above)
+                if stem == "patch_trigscale":
+                    ok = False
+                    break
+                at, dram_at = dram_at, (dram_at + size + 3) & ~3
+                dram_pieces.append(stem)
+            placed[stem] = at
+        if ok:
+            break
+    else:
+        sys.exit(f"{name}: no cave run fits patch_trigscale, and it is step-handler code")
+    if order is not by_size:
+        print("  placement: patch_trigscale placed first (it is cave-only; largest-first left it no run)")
+    addrs.update(placed)
     moved = [f"{s} -> 0x{addrs[s]:08x} (preferred 0x{BUGFIX[s][0]:08x} was taken)"
              for s in need if addrs[s] != BUGFIX[s][0]]
     for m in moved:
