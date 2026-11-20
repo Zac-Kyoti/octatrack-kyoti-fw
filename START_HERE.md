@@ -158,6 +158,16 @@ are lowercase-hyphen, because octabam requires a module's name to equal its fold
 
 > Check this against the tree before trusting it; it has gone stale before.
 
+- **2026-11-19: RELEASE CANDIDATE RC1 (WIP, NOT flashed, NOT promoted, branch `release-1119`)** -- VRG3 (`emus-guard`)
+  + the `[BANK]` trigless-lock LED change (`led-fix`) in one release. Images `KY18BC RC1` (syx `0a8e18c7…`), `KY18C RC1`
+  (`281b10fa…`), `KY18 RC1` (`4edb7163…`), `140CVEMRC1` (`bbb2c863…`), `140C_VRRC1` (`f752032d…`), `140CFIXRC1`
+  (`283a1d29…`); copies in `out/rc1/`. Every other unit = its FINAL pin; LED-only images = led-fix's bytes; KYOTI's = the
+  union (out/rc1/relcmp.py). Merge fixes: feature_image.py trigscale-first retry (VARISPEED_EMUS did not build),
+  seal()'s stock-SRAM scan reads the depacked DRAM runtime (tools/kyoti_status_sram_test.py). All gates pass or match
+  FINAL; RELOAD quant PASS 32/32 (slow, ~85 min, not stuck); the MMTESTDT tempo_edge_7200 difference is frame phase
+  (FINAL shows it with its pokes shifted 3 frames). Next: the author flashes FLASHING §4 "RELEASE CANDIDATE RC1" (KY18BC,
+  KY18C, 140CVEMRC1, optional 140C_VRRC1); promotion re-pins everything in NOTES 2026-11-19 (`release-1119`)'s table.
+
 - **2026-11-19: VRG3 -- VARISPEED's own track bytes, beside BLACKPYRAMIDS_303 (WIP, NOT flashed, branch `emus-guard`,
   origin/main 07f47d1 merged)** -- VARISPEED kept its PTCH parks in NEIGHBOR's bytes, which BLACKPYRAMIDS_303 owns (the bc-park
   probe's S1-S10). Now four bytes of its own that stock never edits or shows: THRU page-1 slots 2 / 5 (PTCH parks) and

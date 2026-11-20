@@ -128,12 +128,100 @@ unit that boots; if it doesn't, use §3b.
 | VARISPEED VRG3 (WIP: VRG2 + its own track bytes, beside BLACKPYRAMIDS_303) | `140C_VRG3` |
 | VARISPEED_EMUS VEMG4 (WIP: VEMG3 + the same bytes) | `140C_VEMG4` |
 | KYOTI V1.8 / V1.8C / V1.8BC with VARISPEED VRG3 (WIP) | `KY18 VRG3` / `KY18C VRG3` / `KY18BC VR3` |
+| RELEASE CANDIDATE RC1 (WIP: VRG3 + the `[BANK]` trigless-lock LED change): KYOTI V1.8BC / V1.8C / V1.8, VARISPEED_EMUS, VARISPEED, BATCH_BUGFIXES | `KY18BC RC1` / `KY18C RC1` / `KY18 RC1`, `140CVEMRC1`, `140C_VRRC1`, `140CFIXRC1` |
 | ERASE_EMPTY_TRIGLESS_LOCKS and the BATCH_BUGFIXES builds | `1.40C` (stock string — check by behaviour) |
 | a feature + BATCH_BUGFIXES | `BUG_` + the feature (`BUG_MUTEDT`, `BUG_DJV7`, `BUG_SC3X`, `BUG_RL3`, `BUG_QLREC`, `BUG_TRIGLK`, `BUG_RTM`, `BUG_BP303`, `BUG_VARI`, `BUG_VEM10`) |
 
 PERSONALIZE is reset by every flash, so features are off until you re-enable them. A
 quick check for each:
 
+- **RELEASE CANDIDATE RC1** (WIP, NOT promoted, NOT flashed; branch `release-1119`, NOTES 2026-11-19 (`release-1119`)).
+  One release: VARISPEED VRG3 (its own track bytes beside BLACKPYRAMIDS_303, QUAN enters VARI at 1/1, the
+  QUAN memory across a save, the migration of older projects, a held VARI note keeps its speed through a Part
+  switch) **+** EMPTY_PATTERN_LED_FIX's `[BANK]` trigless-lock change. Every other feature is byte-for-byte its
+  FINAL. Files (all in the release worktree's `out/rc1/`, also in `out/KYOTI/`, `out/VARISPEED_EMUS/`, …):
+
+  | flash | file | OS VERSION | syx sha256 |
+  |---|---|---|---|
+  | **1** | `OCTATRACK_OS1.40C_KYOTI_V1.8BC.syx` | `KY18BC RC1` | `0a8e18c7…` |
+  | **2** | `OCTATRACK_OS1.40C_KYOTI_V1.8C.syx` | `KY18C RC1` | `281b10fa…` |
+  | **3** | `OCTATRACK_OS1.40C_VARISPEED_EMUS.syx` | `140CVEMRC1` | `bbb2c863…` |
+  | (4, optional) | `OCTATRACK_OS1.40C_VARISPEED.syx` | `140C_VRRC1` | `f752032d…` |
+  | not needed | `OCTATRACK_OS1.40C_KYOTI_V1.8.syx` `KY18 RC1` (`4edb7163…`), `OCTATRACK_OS1.40C_BATCH_BUGFIXES.syx` `140CFIXRC1` (`283a1d29…`) | | |
+
+  KYOTI V1.8 differs from V1.8C only by RELOAD in Clyps' place (RELOAD: emulator PASS, line for line as the FINAL);
+  the LED predicate is the same 318 bytes in every image, and VARISPEED's code the same as in KYOTI. Before flash 1,
+  **save a project on the FINAL V1.8BC (or V1.8C) you run now** with: T1 STATIC on `VARI`, QUAN `3/2`, its PTCH
+  `+12` before VARI; T2 off VARI (PTCH `-5`); T5 a BLKPYRAMD with knobs you will recognise; T6 STATIC that used to be
+  a BLKPYRAMD, now on `VARI`. It is item 1.3's migration test. Power-cycle once after each flash.
+
+  **Flash 1 — `KY18BC RC1`** (the full walk-through).
+  1. **VARISPEED, on a STATIC and on a FLEX track.**
+     1. TSTR to `VARI` on a track with PTCH `+12` (and one with `-5`): QUAN reads `1/1`; back to `BEAT`: PTCH
+        `+12` / `-5`. An AUTO track whose sample's ATTR TIMESTRETCH is `VARI`: `1/1`.
+     2. **QUAN memory:** on VARI set `3/2`, TSTR `BEAT`, back to `VARI`: `3/2`. Again `3/2` -> `BEAT`, SAVE PROJECT,
+        power off and on (or RELOAD PROJECT), back to `VARI`: `3/2`, and `BEAT` still gives PTCH `+12`. A Part
+        where that track is on VARI and back: each Part shows its own.
+     3. **The project saved on FINAL** (above) loads: T1 on VARI at `3/2`, `BEAT` gives `+12`, back to `VARI`:
+        `3/2`; T2 enters VARI at `1/1` (an old build's memory off VARI is not kept); T5 is the same BLKPYRAMD with
+        its knobs; T6 `BEAT` gives the PTCH you had, and choosing BLKPYRAMD on T6 again shows the knobs it had
+        (FINAL brought defaults).
+     4. **Speed through a Part switch:** Part 1 T5/T6 `VARI` on a loop whose ATTR TEMPO differs from the project's,
+        notes held over the bar line; Part 2 TSTR `OFF`, trigs from step 9. Cue pattern 2: the held notes keep their
+        VARI speed through the downbeat and change at their step-9 trigs. The same cue into another bank: nothing
+        changes before the downbeat. PLAY on a project of VARI tracks: the first note plays VARI.
+  2. **BLKPYRAMD beside VARI** (each on a STATIC and a FLEX track where it applies):
+     1. FLEX on `VARI` (QUAN `3/2`, PTCH `+12`) -> machine chooser `BLKPYRAMD` -> back to FLEX: TSTR `VARI`, QUAN
+        `3/2`; `BEAT`: PTCH `+12` (FINAL: TSTR `OFF`, PTCH lost).
+     2. STATIC on `VARI` (PTCH `+12`) -> `BLKPYRAMD` -> `STATIC` -> `BEAT`: `+12` (FINAL: `+16`). Also: open the
+        chooser on a STATIC VARI track, cursor on the BLKPYRAMD row, turn a knob, `[NO]`, `BEAT`: `+12`.
+     3. A track that has been a BLKPYRAMD -> `STATIC` -> TSTR `VARI`: QUAN `1/1` (FINAL: `5/4`); SAVE / RELOAD
+        keeps it.
+     4. A real BLKPYRAMD (any VOL, also VOL `4`), the audio editor's ATTR TIMESTRETCH changed on that slot's STATIC
+        sample: it stays a BLKPYRAMD with its knobs; no BLKPYRAMD appears on another track.
+     5. **THRU / NEIGHBOR pages** (where VARISPEED now keeps its bytes): on a VARI track (PTCH `+12`) switch to THRU
+        and NEIGHBOR, turn every knob of their SRC and SRC SETUP pages, paste another track's THRU page, back to the
+        old machine, `BEAT`: `+12`. THRU still passes its inputs.
+  3. **Pattern LEDs** — a new project's empty bank B; place a trigless lock with GRID REC (`[FUNC]` + trig until it
+     shows as a trigless lock, not a trigless trig):
+
+     | # | pattern 1 of the empty bank holds only… | `[PTN]` | `[BANK]` |
+     |---|---|---|---|
+     | 1 | an audio trigless lock, nothing locked | off | off |
+     | 2 | the same step with one parameter locked (hold the trig, turn FILTER FREQ) | lit | **lit** (new) |
+     | 3 | that trigless lock removed again (GRID REC: press its trig) | off | off |
+     | 4 | a MIDI-track trigless lock, nothing locked | off | off |
+     | 5 | a MIDI-track trigless lock with a locked NOTE or CC value | lit | **lit** (new) |
+     | 6 | a trigless trig (one `[FUNC]` + trig), audio or MIDI | lit | lit (as stock) |
+     | 7 | the pattern from 5, then LIVE REC `[NO]` + `[TRACK]` on that MIDI track until the playhead has passed | off | off |
+     | 8 | case 2 in pattern 16 instead of pattern 1 | lit | lit |
+
+     In 7 note whether the trig row still shows a trigless lock on that step (stock keeps the MIDI flag; it must
+     stay dark). **`[BANK]` held:** sequencer playing, a few banks holding trigless-lock-only patterns: hold
+     `[BANK]` ~10 s: grid and controls responsive, timing steady (emulator: +0.5 % on real content, +2 % worst).
+  4. **V1.8BC smoke:** OS VERSION `KY18BC RC1`; a BLKPYRAMD on T2 and on T6 plays, a second on T1–T4 is refused
+     (`ONE 303 PER CORE!`); FX2 chooser has no PLATE / SPRING REV, DARK REV rings; a Clyps load (plain and FULL)
+     plays at its landing; a DIRECT JUMP between two Parts lands in time; MUTE MODE DT-T on the BLKPYRAMD track;
+     a keyed COMPRESSOR ducks. Power-cycle at the end.
+
+  **Flash 2 — `KY18C RC1`** (smoke, ~10 min): OS VERSION; item 1.1 and 1.2 on one track; the project saved on
+  FINAL V1.8C (T1 VARI `3/2`, PTCH `+12`) loads at `3/2`, `BEAT` gives `+12`; LED items 2 and 5 under `[BANK]` and
+  the `[BANK]`-held check; Clyps: a plain and a FULL load, a `[CUE]` group; DIRECT JUMP on (hold `[PTN]`, `[YES]`),
+  a jump lands in time, a restart (STOP / PLAY) then a jump; MUTE MODE and SIDE-CHAIN as usual.
+
+  **Flash 3 — `140CVEMRC1`** (VARISPEED_EMUS): items 1.1–1.4 here, plus: entering VARI gives EMUS `OT` unless the
+  track had another EMUS when it last left VARI (S950 -> `BEAT` -> SAVE / reload -> `VARI`: `S950`); a project
+  saved on the FINAL VARISPEED_EMUS (`140C_VEM11`) with a track on VARI (QUAN `3/2`, EMUS `SP12`): loads as it was.
+  The VEM11 guard as before (four VARI tracks on S950 / SP12 and a cued Part switch: the toast, no crackle). The
+  bug fixes moved in this image (the LED predicate to DRAM, MIDI_PLAYS_FREE_FIX's step code to another cave
+  address): LED items 2 and 5, `[BANK]` held; a PLAYS FREE MIDI track with trig quantize DIRECT and notes on steps
+  1 and 2: a manual trig keeps it running.
+
+  **(Flash 4, optional — `140C_VRRC1`):** items 1.1–1.3 (the same code as in KYOTI, its UI part in the classic cave
+  instead of DRAM) and LED item 2.
+
+  Report each item pass / fail with the image's OS VERSION. Nothing here changes RELOAD, DIRECT JUMP, MUTE_MODES,
+  SIDE-CHAIN, QLR, ERASE, REC_TRIG_MUTE or the BLKPYRAMD voice itself (their bytes are their FINAL's).
 - **KYOTI V1.8BC walk-through** (FINAL 2026-11-19; `out/KYOTI/OCTATRACK_OS1.40C_KYOTI_V1.8BC.syx`, `python3
   tools/build_kyoti.py --clyps-bp`). **Results (the author's MKI):** the first image (mainos `b3df2058…`, syx
   `48d10402…`, 2026-11-18): items 1-10 pass, and of the BLACKPYRAMIDS_303 checks below TRACK PASTE (refused /
@@ -461,26 +549,9 @@ quick check for each:
 - **EMPTY_PATTERN_LED_FIX** — a pattern whose only content is a p-lock on a MIDI track:
   its LED lights under `[PTN]`. Hold `[BANK]` for a few seconds: the grid stays lit and
   responsive.
-- **EMPTY_PATTERN_LED_FIX `[BANK]` trigless locks (WIP)** — no image of its own: it ships in the combined release
-  with the VARISPEED / BLACKPYRAMIDS_303 clash fix (the author, 2026-11-19), so run this on those images
-  (BATCH_BUGFIXES, KYOTI V1.8C and V1.8BC at least). Change: under `[BANK]`, a bank holding a pattern whose only
-  content is trigless locks lights when one of them carries a locked parameter
-  (it stayed dark before; `[PTN]` lit it already). Use a bank whose 16 patterns are empty (a new project's bank B).
-  Place a trigless lock with GRID REC: `[FUNC]` + a trig until it shows as a trigless lock (not a trigless trig).
-  | # | pattern 1 of the empty bank holds only… | `[PTN]` LED | `[BANK]` LED |
-  |---|---|---|---|
-  | 1 | an audio trigless lock, nothing locked | off | off |
-  | 2 | the same step with one parameter locked (hold its trig, turn FILTER FREQ) | lit | **lit** (new) |
-  | 3 | the trigless lock removed again (GRID REC: press its trig) | off | off |
-  | 4 | a MIDI-track trigless lock, nothing locked | off | off |
-  | 5 | a MIDI-track trigless lock with a locked NOTE or CC value | lit | **lit** (new) |
-  | 6 | a trigless trig (one `[FUNC]` + trig), audio or MIDI | lit | lit (as stock) |
-  | 7 | the pattern from 5, then LIVE REC `[NO]` + `[TRACK]` on that MIDI track until the playhead has passed | off | off |
-  | 8 | case 2 in pattern 16 instead of pattern 1 | lit | lit |
-  7 erases the step's locks but stock leaves the MIDI trigless-lock flag set (emulator): it must stay dark; note
-  whether the trig row still shows a trigless lock on that step. **Stall check (S119):** with the sequencer playing
-  and a few banks holding trigless-lock-only patterns, hold `[BANK]` for ~10 s: grid and controls responsive,
-  timing steady; `[BANK]` + `[TRACK]` (RELOAD, KYOTI V1.8) toasts at once.
+- **EMPTY_PATTERN_LED_FIX `[BANK]` trigless locks (WIP)** — no image of its own: its hardware checks (the
+  `[PTN]` / `[BANK]` matrix, the `[BANK]`-held stall check) are in **RELEASE CANDIDATE RC1** at the top of this
+  list, run on the RC1 images.
 - **PART_CHANGE_CARRYOVER_FIX** — a track that is PICKUP on one Part and FLEX on
   another: switching patterns across the Parts plays the FLEX sample, not the old loop.
 - **KYOTI CL36 walk-through** (WIP; `out/KYOTI_WIP/KYOTI_V1.7_WITH_CLYPS/OCTATRACK_OS1.40C_KYOTI_V1.7_WITH_CLYPS.syx`)

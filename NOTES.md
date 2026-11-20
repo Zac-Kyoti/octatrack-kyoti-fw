@@ -40023,3 +40023,97 @@ longer has `move_for_varispeed`; it puts `patch_varispeed_ui` in PLAN["DRAM"] be
 ..., bp_runtime, patch_varispeed_ui, patch_pattern_led, patch_clyps_dram (mine inserts before Clyps after the static
 list). If VRG3's move frees enough CAVE, `move_pattern_led` could become fit-driven (move only when CAVE lacks 318 B);
 as is it always moves in images with VARISPEED, which is deterministic and needs no change.
+## 2026-11-19 (`release-1119`) — RELEASE CANDIDATE RC1: VRG3 + the `[BANK]` trigless-lock LED change in one release (WIP, NOT flashed, NOT promoted)
+
+Branch `release-1119` = origin/main 07f47d1 + `emus-guard` (bc026cf: VARISPEED VRG1 / VARIG2 / VRG3, VARISPEED_EMUS VEMG4) +
+`led-fix` (e6af6dc: EMPTY_PATTERN_LED_FIX 318 B; 228f4b8 its docs). Source-level: `git diff emus-guard` is exactly
+led-fix's files, `git diff led-fix` exactly emus-guard's; both merges textual-conflict-free. Nothing pushed or promoted.
+
+**Two fixes the merge needed (a809933, `Thread: kyoti-v1`).**
+- `feature_image.py`: VARISPEED_EMUS no longer built -- with VEMG4's smaller cave unit (5,176 B) the largest-first
+  placement put the 318 B predicate in the cave and left patch_trigscale (cave-only, step handler) no run. Now, only
+  when that order fails, the placement is retried with trigscale first (the UI-task pieces may go to DRAM); every
+  image that placed before keeps its addresses (all nine other feature images = led-fix's bytes). VARISPEED_EMUS RC1:
+  trigscale 0x400d7b00 (preferred), partreapply 0x400d7938 (cave), pattern_led DRAM 0x40a963b0 (2 arena pages, as on
+  led-fix), cave 411 B left.
+- `kyoti_status.py` stock-SRAM check: `stock_sram_refs()` now skips each packed DRAM blob (found through the loader's
+  own payload table: blob address + length) and scans the runtime it depacks to, reporting hits at their DRAM address.
+  The V1.8BC coincidence (0x800076cd in the packed stream on led-fix) is gone in RC1 anyway (the stream changed), but
+  it could recur in any image with a DRAM payload; and the runtime was not checked at all before (packing hid it).
+  `tools/kyoti_status_sram_test.py`: a hand-made GKA3 stream holding 80 00 70 cd whose runtime does not (old scan
+  hits, new does not), a runtime holding 0x80006a40 (reported at 0x40a957e0), an unlisted 'OCTAGKA3' (not a payload);
+  PASS; every RC1 and FINAL KYOTI image: clean under both scans. Promotion needs no KYOTI_ALLOW_STOCK_SRAM.
+- `build_kyoti.py`: docstring only -- after the merge CAVE has 636 B left with the predicate in DRAM (it would fit in
+  CAVE again); kept in DRAM, the layout every gate ran on.
+
+**Images (WIP; OS VERSIONs as briefed, but `140C_VEMRC1` / `140C_FIXRC1` are 11 characters, over the ELEK field's
+10: built as `140CVEMRC1` / `140CFIXRC1`). Copies of the flashable files in `out/rc1/`.**
+
+| image | OS VERSION | mainos | syx | .bin | FINAL pin |
+|---|---|---|---|---|---|
+| KYOTI V1.8BC | `KY18BC RC1` | `142c4610…` | `0a8e18c7…` | `92ce297e…` | `0704647c…` |
+| KYOTI V1.8C | `KY18C RC1` | `5e9c177c…` | `281b10fa…` | `467a4af9…` | `9d1a29c9…` |
+| KYOTI V1.8 | `KY18 RC1` | `a8c06c2f…` | `4edb7163…` | `311a876c…` | `8807feee…` |
+| VARISPEED_EMUS | `140CVEMRC1` | `f3b08c79…` | `bbb2c863…` | `19d94da6…` | `e2faf75d…` |
+| VARISPEED | `140C_VRRC1` | `fe4e7f50…` | `f752032d…` | `cac2b5a7…` | `c3af514f…` |
+| BATCH_BUGFIXES | `140CFIXRC1` | `fa374dd8…` | `283a1d29…` | `dbfb1d36…` | `0cf32835…` |
+| CLYPS | `CLYPS V1.0` | `ac7c622f…` | `1a08e313…` | `4bac4dfe…` | `94e41a22…` |
+| MUTE_MODES / QLR / SC / TRIGLESS / RELOAD / DJK / RTM / BP303 feature images | defaults | `316f01f7…` / `9b51ad03…` / `2d5a4016…` / `a6063880…` / `38f2f7de…` / `79b422fd…` / `f8ee2d55…` / `49ec8cee…` | = led-fix's | = led-fix's | `857d80d3…` / `df4a2498…` / `4febe2e6…` / `db348f68…` / `188ec12c…` / `c58591c0…` / `dac87abd…` / `b4b55638…` |
+| units | | VARISPEED `2e365957…`, VARISPEED_EMUS `b54e7246…` (= emus-guard's), LED `074315c2…` (= led-fix's); the other eight = their pins (BP `1d53ef7f…`) | | | |
+
+**Proof the merge added nothing (out/rc1/relcmp.py: piece by piece from the maps, DRAM runtimes depacked; a differing
+word whose two values point at the same piece + offset, or the same map symbol, is a relocation).**
+- LED-only images (the eight feature images above, BATCH_BUGFIXES, CLYPS, the LED unit): mainos byte-identical to
+  led-fix's builds (syx / .bin too, except BATCH's renamed OS VERSION). VARISPEED / VARISPEED_EMUS units = emus-guard's.
+- KYOTI V1.8 / V1.8C / V1.8BC vs emus-guard's VRG3 builds: every piece identical except patch_pattern_led (158 B CAVE ->
+  318 B DRAM, led-fix's bytes) and the CAVE pieces behind its old slot (patch_mutemode, rtm_mask, the personalize
+  arrays: identical modulo relocation); Clyps' DRAM unit identical modulo its own +0x140 shift (V1.8C / V1.8BC);
+  outside the pieces only relocations (the 0x4009a464 detour, rtm_mask users). vs led-fix's builds: patch_pattern_led
+  identical, the difference is VRG3's (patch_varispeed 2,388 -> 2,004 B, patch_varispeed_ui new in DRAM; 20 ROM sites =
+  VARISPEED symbols moved into the UI piece; V1.8BC also bp_runtime +16 B = the VARI_TAKE / BACK calls and its arena
+  geometry, one page more). Unexplained bytes: 0 in all six comparisons.
+- VARISPEED / VARISPEED_EMUS feature images: outside the three fixes + their detours every byte = the RC1 unit (=
+  emus-guard's); the fixes = led-fix's (pattern_led identical, partreapply identical modulo relocation, trigscale
+  identical). VARISPEED: same addresses as emus-guard's, only pattern_led 158 -> 318; VARISPEED_EMUS: pattern_led to
+  DRAM, trigscale 0x400d7b6c -> 0x400d7b00 (the placement retry above).
+
+**Gates (emulator; RC1 unless named).**
+- QUAN entry (`varispeed_quan_entry_test.py`, 19 cases): 19/19 on VRRC1, VEMRC1, KY18, KY18C, KY18BC.
+- `varispeed_test.py` (KYOTI_UNIT=1) 10/11, `varispeed_emus_test.py` 43/45 -- the same failures as emus-guard's runs
+  (widget; ref_fx_alone), pre-existing. Switch suite (unit / feature / vari / vari_feature vs the FINAL bases): `check`
+  ALL GATES PASS, `check --plain` ALL PLAIN GATES PASS.
+- bc-park scenarios on KY18BC (live_sc, step_sc, step_sc2, partsw, reload, vol4mm, mig_bc): every output line identical
+  to emus-guard's merged V1.8BC run.
+- BLACKPYRAMIDS_303: verify_part_carry / tie_xfer / first_gate / page_paste / one_per_core ALL GOOD on KY18BC and the
+  BP feature image; kyoti_bc_check_erase / onepercore ALL GOOD; mute identical; voice and fx2 exit FAIL as on FINAL --
+  the same lines (core-1 DARK REV 3267 vs 3252, PLATE given up, PHASER / COMPRESSOR), stopwatches within 1-5 cycles.
+- LED: `led_trigless_matrix.py --sweep` ALL GOOD on FIXRC1, KY18C, KY18BC, KY18 (each vs its FINAL; sweep of OT DEMO,
+  kyoti_testMM, test6 identical to FINAL). Stall gate `[BANK]` held, transport running, 0.6 s, FINAL -> RC1: V1.8C demo
+  42.04M -> 42.23M, empty 40.20M -> 40.32M, tl_lock 40.20M -> 39.90M, worst (1,024 empty TLs) 41.96M -> 42.89M (+2.2 %);
+  V1.8BC 43.88M -> 44.07M, 41.91M -> 42.02M, 41.91M -> 41.61M, 43.67M -> 44.60M (+2.1 %); cave/call 6 -> 104 / 86 / 393,
+  the numbers led-fix measured.
+- KYOTI smokes: Clyps UI ABCDY PASS (50 checks) on KY18C and KY18BC (CLYPS_SYMS from each map: Clyps 0x40a96c3c /
+  0x40aa22ec); DIRECT JUMP REF-LOCK c1 + RS1, A = FINAL V1.8C, B = KY18C RC1: every recorded field identical.
+- RELOAD quant (`diag_reload_quant.py`, OT DEMO), A = FINAL V1.8, B = KY18 RC1: **VERDICT PASS, 32/32 on both, line for
+  line identical** (D's landing-tick instruction count included). **Not a stall:** timestamped, no silence over ~12
+  min; per phase B 8.4, C 8.3, D 11.7, E 8, G 7, H 7, I 7 + 10, W 5.7, F 7.5 min; 82-88 min a run with ~12 other
+  emulators running. `sample` of a run: one third in unicorn, two thirds in Python driving it 32 instructions at a time
+  (attach(step_quantum=32)) plus the per-instruction code hooks. emus-guard's kyoti_smoke3 runs stopped writing at W
+  within 20 s of each other when that session ended (killed, not stuck); led-fix's own run passed 32/32 in ~99 min.
+- **Plain-VARISPEED MMTESTDT equivalence** (`varispeed_emus_equiv.py`, VRRC1 vs FINAL feature): 3/35 strict, timing-free
+  (eq_collapse) 35/36 -- tempo_edge_7200 again; OTDEMO 35/35. Decided: **emulator frame phase, not behaviour.** In that
+  scenario core 1 T1 alternates 0 / 0x5e480 per pass, then plays 0x400000 (stock rate) for ~1,930 passes; after it
+  FINAL steadies to 0x5e480 every pass, VRRC1 keeps alternating. out/rc1/tee_shift.py re-runs it with every poke shifted
+  by k = 0..7 frames: **FINAL alternates too at k = 3** (stretch from pass 2491 x1929, alternating) -- the very pattern
+  VRRC1 shows at k = 0 (pass 2491 x1929); VRRC1 is constant at k = 1-4, 6, 7 and alternates at 0 and 5; the RC1 unit
+  behaves exactly as VRRC1, the FINAL unit as the FINAL feature. VRRC1 is FINAL shifted by ~2-3 frames of poke phase
+  (its load ends at another frame phase), and the tail is a phase property both images have. A FINAL unit with a no-op
+  copy of rp_bpt in every gate read (out/rc1/eqx, never shipped) moves 24/35 scenarios strictly but keeps every payload
+  sequence (36/36) -- a CF workload change alone shifts the interleave, as CLAUDE.md says.
+
+**Hardware (the author's call):** FLASHING §4 "RELEASE CANDIDATE RC1" -- flash 1 `KY18BC RC1` (full: VRG3, BLKPYRAMD
+beside VARI, migration from a FINAL save, the LED matrix, `[BANK]` held, V1.8BC smoke), 2 `KY18C RC1` (smoke), 3
+`140CVEMRC1` (VARISPEED_EMUS + the moved fixes), optional 4 `140C_VRRC1`. KY18 RC1 and 140CFIXRC1 need no flash (RELOAD
+emulator PASS; the LED bytes are the same 318 B everywhere). Promotion (on the author's word only) re-pins VARISPEED /
+VARISPEED_EMUS (unit + feature), EMPTY_PATTERN_LED_FIX's unit, every feature image and BATCH_BUGFIXES, KYOTI V1.8 /
+V1.8C / V1.8BC and CLYPS -- the mainos values in the table.
