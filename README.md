@@ -168,6 +168,11 @@ keeps the lower-numbered one and turns the other back into its Flex track.
 - **Slide:** an OT slide trig glides into its note from the previous one, without a retrigger.
 - **Ties:** trigless locks and/or trigless trigs right after a note hold it. A trigless trig
   still resets LFOs and FX envelopes as on stock, so a trigless trig after a note also ties it.
+  A note tied to the end of a pattern holds on through ties at the start of the next pattern.
+- **Pattern and Part changes:** as a stock machine's sound does, the voice carries over a pattern
+  change until the track's own first trig in the new pattern: the last step plays and rings over the
+  change, and a BLKPYRAMD on another track of the same core in the new Part takes the voice at its first
+  trig. Each note plays with its own Part's GATE from the first step on.
 - **Live:** the track key, chromatic keys and MIDI notes play it, held while the key or note is
   down. TRIG + YES previews a step, and one-shot trigs play once until re-armed.
 - **Chromatic mode:** four octaves of absolute notes. `[FUNC]` + `[LEFT]` / `[RIGHT]` pick the
@@ -192,7 +197,8 @@ Open303's and what is new, every voicing decision and full attribution:
 [`reference/BLACKPYRAMIDS_303.md`](reference/BLACKPYRAMIDS_303.md) and [`CREDITS.md`](CREDITS.md).
 
 **Hardware:** the voice confirmed; the one-per-core refusals (machine list, TRACK PASTE, SRC page paste,
-Clyps), SRC page copy and paste and a project round trip confirmed in KYOTI V1.8BC; loading a project
+Clyps), SRC page copy and paste and a project round trip confirmed in KYOTI V1.8BC; Part and pattern changes
+(no pop, the last step, ties across, the first note's GATE) confirmed in the octabam form; loading a project
 saved with two on a core not tried on the unit. This image, with the three bug fixes, not flashed as such.\
 **Final build:** [`tools/build_blackpyramids_303.py`](tools/build_blackpyramids_303.py) →
 `out/BLACKPYRAMIDS_303/OCTATRACK_OS1.40C_BLACKPYRAMIDS_303`
@@ -388,7 +394,8 @@ sample memory.
 **Hardware:** confirmed (this combined image): the voice on both cores, the FX2 list, SIDE-CHAIN
 keyed from and onto a BLKPYRAMD track, every MUTE MODE on a BLKPYRAMD track, the trigless-lock erase,
 Clyps and DIRECT JUMP with a BLKPYRAMD track, a project round trip, the one-per-core refusals and SRC page
-copy and paste. Loading a project saved with two on a core not tried on the unit.\
+copy and paste. Its BLACKPYRAMIDS_303's Part and pattern changes are confirmed in the octabam form (the same
+code), not in this image. Loading a project saved with two on a core not tried on the unit.\
 **Final build:** [`tools/build_kyoti.py`](tools/build_kyoti.py) `--clyps-bp` →
 `out/KYOTI/OCTATRACK_OS1.40C_KYOTI_V1.8BC`
 

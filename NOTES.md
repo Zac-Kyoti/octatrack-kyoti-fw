@@ -39522,3 +39522,54 @@ and then looped forever in `while state()["cur"] != q: tap(DOWN)`. Regenerate it
 there): an octabam test image for the author to flash first, then the pin PR to Sam (octabam PR checklist). Modwerk's
 form stays parked (#1542). Clyps' owner told: tools/clyps/* has the V1.8BC-only BP_CLASH / BP_UITAIL blocks (Clyps and
 V1.8C byte-identical without them).
+
+## 2026-11-19 cont. (`kyoti-bp`) — BLACKPYRAMIDS_303 Part / pattern changes fixed (octabam form OCTABAM40-43); re-promoted with KYOTI V1.8BC
+
+**Found on the author's MKI in the octabam form** (remixes/test/blackpyramids-303 with the one-per-core module, scratch
+clone `out/octabam-bp1pc` at octabam cc7cffc1, the module from this branch): OCTABAM40 (`aac2bd63…`) all pass but (a)
+a quiet pop at a cued Part switch into a Part whose BLKPYRAMD is on another track of the core with no trig on step 1
+(also faintly with no BLKPYRAMD in the new Part; not with the same track in both), and the outgoing pattern's
+last-step note never sounded; OCTABAM41 (`8c1bfc91…`) (a) fixed, all pass, then (b) a note tied to the end of a
+pattern was cut at a change (same Part) to a pattern starting with ties; OCTABAM42 (`fb5ab3cf…`) (b) fixed, then (c)
+the first note after a load or into another Part for the first time was a blip, and the first note into another Part
+was cut short; OCTABAM43 (`92801b0f…`) all pass. All three were in the earlier FINAL too (the same code paths).
+
+**Causes and fixes (tools/ot303/cf/control.c):**
+- (a) The renderer asked the UI Part (0x100b14cf, via part_base) whether a track is an OT-303; stock moves it ~7 ticks
+  before the boundary, so the outgoing track turned FLEX a step early (voice freed mid-note: the pop; its last note
+  lost) and the incoming one took a stray note from the Part load's trig flag a step early. Now `play_part(t)`: the
+  Part the track's sound comes from, stock's per-track bank / Part 0x8000182a / 0x80001832 + t (moved at the track's
+  own first trig in the new pattern, 0xff after PLAY or a load until the next trig: then the UI Part). The idle table
+  feed asks it too. One voice a core while one carries: `play_rank` (2 its trig in the engine's Part 0x80000002 /
+  0x80000003 -- which also moves early, so it decides nothing alone; 1 carrying another Part; 0 none since PLAY), the
+  loser renders FLEX (its stock record frees the voice on the DSP); the winner's first note is held one frame when the
+  carrier is a higher track (`own_prev`, `dfr`: the DSP serves a core's tracks in order). Gate
+  `tools/ot303/verify_part_carry.py` (fwd T2 -> T3, rev T4 -> T2; ot_trace kind 2): the outgoing step 16 taken, the
+  incoming note at its own step 5 and nothing before; on the earlier FINAL step 16 is lost and the incoming note comes
+  a step early. NB this ot_emu renders no BLKPYRAMD audio (only core 0's ESAI out, and not the voice; out/kbc/partpop.py
+  found every variant silent with only BLKPYRAMD tracks unmuted): 2026-11-17's "DT-T -9.9 dBFS" levels were BOTLI's
+  T7/T8 samples, not the voice.
+- (b) A note's gate is worked out when it starts (ot_note, a step ahead), its ties wrapped to its own pattern's first
+  steps. `tie_xfer` (from ot_step, when another pattern's first step follows the last step): a sounding note whose ties
+  reach that last step gets its gate again from the incoming pattern's first steps and is sent as NOTE|SLIDE to the
+  same pitch -- host.asm copies the note words, GL included, for a slide into an open gate and does not retrigger. Not
+  for DIRECT JUMP landings (the author: a jump into a tie keeps the old rule). Gate `tools/ot303/verify_tie_xfer.py`.
+- (c) ot_note read GATE from the live SETUP byte 0x80000810 + 72 t + 0x23, which stock re-stages only at the track's
+  trig (after ot_note runs): the old Part's GATE into a new Part, a load's leftover after a load (the byte at 0: 55
+  samples). GATE now comes from the scheduled pattern's Part; a SETUP knob has no p-lock slot (a step record is
+  PLAYBACK, AMP, LFO, FX1, FX2: reference/kb/file-format.md), so the Part's value is it. Gate
+  `tools/ot303/verify_first_gate.py` (STALE=1: the byte left at 0).
+
+**Gates (all three forms: standalone, OCTABAM43, V1.8BC):** the five BLKPYRAMD gates ALL GOOD; verify_ot303 / V1.8BC's
+voice check as before (only the core-1 DARK REV stopwatch, and PLATE on V1.8BC); Clyps refusals ALL GOOD, Clyps UI
+ABCDY PASS (50; CLYPS_SYMS regenerated from the map each time); MUTE matrix identical; SC levels 0.00 dB; DJ REF-LOCK
+c1 / RS1 every field identical. The runtime grew to 46,268 B (V1.8BC: 1,721 DRAM pages).
+
+**Re-promoted on the author's word** (V1.8BC and the standalone confirmed through OCTABAM43, the same runtime bytes):
+BLACKPYRAMIDS_303 unit `1d53ef7f…` (was b3327bd3), feature image `b4b55638…` (was 6a124db1; 140C_BP303, syx
+`c78679aa…`), KYOTI V1.8BC mainos `0704647c…` (was 4c7fb0fe; syx `32c3f8ce…`, .bin `e3c3acf0…`). Every other FINAL
+rebuilds to its pin. octabam module regenerated (runtime 46,268 B, `7c5f6008…`, 49 detours); the pin PR to Sam next.
+**Open, another session's:** emus-guard (kyoti-m4-09) found VARISPEED and BLACKPYRAMIDS_303 sharing NEIGHBOR bytes in
+V1.8BC (VARISPEED's STATIC / FLEX PTCH parks in bytes 18 / 23); its fix moves VARISPEED's parks and adds guards on both
+sides, built on the earlier BP. This entry changes no NEIGHBOR byte, stash, signature or FLEX slot; its new
+ot_assign callers are the SRC page paste (ot_pgpaste) and the net.
