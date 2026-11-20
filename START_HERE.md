@@ -160,14 +160,14 @@ are lowercase-hyphen, because octabam requires a module's name to equal its fold
 
 - **2026-11-19 (`led-fix`, WIP, NOT flashed): EMPTY_PATTERN_LED_FIX lights `[BANK]` for trigless locks that carry a
   locked parameter** (the author's spec; a trigless lock with nothing locked stays dark under both grids; `[PTN]`
-  unchanged). The `[BANK]` path reads only the trigless-lock masks (audio/MIDI +0x10) and the set steps' 32-byte lock
+  unchanged). **Ships bundled with the VARISPEED / BLACKPYRAMIDS_303 clash fix (`emus-guard`), one flash** (the
+  author). The `[BANK]` path reads only the trigless-lock masks (audio/MIDI +0x10) and the set steps' 32-byte lock
   rows, at most 16 rows per call; cave 158 -> 318 B. Gates: `tools/led_trigless_matrix.py` (33 cases, both grids, audio +
   MIDI, real-project sweep) and the S119 stall gate `tools/led_bank_stall.py` ([BANK] held, transport running: +0.3-0.5 %
   on real content, +2.3 % worst case, under the FINAL's own [PTN]-held cost). Placement: KYOTI V1.8/V1.8C/V1.8BC carry it
-  in DRAM (`build_kyoti.py move_pattern_led`); VARISPEED_EMUS's DRAM grows to 2 arena pages; V1.8BC trips the stock-SRAM
-  check by a coincidental word in the packed DRAM stream (KYOTI_ALLOW_STOCK_SRAM=1). Test images `140C_FIXL1`
-  (BATCH_BUGFIXES) and `KY18C LED1` (V1.8C); promoting changes every feature-image and KYOTI pin. NOTES 2026-11-19
-  (`led-fix`), FLASHING §4.
+  in DRAM (`build_kyoti.py move_pattern_led`); VARISPEED_EMUS's DRAM grows to 2 arena pages. Merged with origin/main
+  07f47d1; promoting changes every feature-image and KYOTI pin (NOTES 2026-11-19 cont. has the list). octabam pin PR
+  drafted locally (out/octabam-led, not pushed). NOTES 2026-11-19 (`led-fix`), FLASHING §4.
 - **2026-11-19: VARISPEED_EMUS VEM11 FINAL** (the author flashed `140C_VEMG2`: all 8 FLASHING §4 checks pass; the final is
   that code as `140C_VEM11`: unit `d23d9e63…`, feature mainos `e2faf75d…`) — the load guard across
   a Part switch, the author's second round (VEMG1 superseded): the transition is priced before the switch with only real

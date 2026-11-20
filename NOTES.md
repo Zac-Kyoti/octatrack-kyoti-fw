@@ -39573,8 +39573,9 @@ tools/led_trigless_matrix.py before any build left the worktree.
   42.23M, empty 40.20M -> 40.32M, worst 41.96M -> 42.89M (idle 40.58M / 39.83M / 41.24M).
 
 **Placement.** BATCH_BUGFIXES and 9 feature images: the preferred 0x400d6694 (VARISPEED: relocated to 0x400d71e4, as
-before). **VARISPEED_EMUS:** in its DRAM unit as before, but the DRAM image grows 2,546 -> 2,706 B and crosses the 4 KB
-staging boundary (raw <= 2,592 B fits one page from 0x40a955e0): **2 arena pages (12 KB) instead of 1** of the sample pool.
+before). **VARISPEED_EMUS:** the FINAL keeps the 158 B fix in the cave; 318 B no longer fits there (271 B is the largest run),
+so it joins the DRAM unit with PART_CHANGE_CARRYOVER_FIX: 2,386 -> 2,706 B, past the 4 KB staging boundary (raw <= 2,592 B
+fits one page from 0x40a955e0): **2 arena pages (12 KB) instead of 1** of the sample pool. (Corrected 2026-11-19 cont.)
 **KYOTI V1.8 / V1.8C / V1.8BC:** the cave had 92 B left and SPRING's reclaim 204 B / 80 B, so `build_kyoti.py`
 `move_pattern_led()` puts the predicate in the DRAM payload (before Clyps, any image with VARISPEED; the standalone CLYPS
 image keeps it in the cave, 5,162 B free). Cave then 252 B left (this also leaves room for the VRG1 port's +104 B; its
@@ -39660,3 +39661,81 @@ rebuilds to its pin. octabam module regenerated (runtime 46,268 B, `7c5f6008…`
 V1.8BC (VARISPEED's STATIC / FLEX PTCH parks in bytes 18 / 23); its fix moves VARISPEED's parks and adds guards on both
 sides, built on the earlier BP. This entry changes no NEIGHBOR byte, stash, signature or FLEX slot; its new
 ot_assign callers are the SRC page paste (ot_pgpaste) and the net.
+
+## 2026-11-19 cont. (`led-fix`) — EMPTY_PATTERN_LED_FIX merged with main (07f47d1), every image rebuilt and gated (WIP, NOT flashed)
+
+**The author's call:** the change ships **bundled with the VARISPEED / BLACKPYRAMIDS_303 clash fix (`emus-guard`)**, one
+flash, no image of its own (the LED1 / FIXL1 test images of the entry above were deleted unflashed).
+
+**Merge:** origin/main 07f47d1 (BLACKPYRAMIDS_303 + KYOTI V1.8BC re-promoted: Part carry, ties across, GATE from the
+pattern's Part) merged into `led-fix` (3c0f498), no conflict.
+
+**The only difference is the fix (proof):** a clean detached worktree of origin/main (`out/clean-main`) rebuilt every FINAL
+WITHOUT the opt-in, each matching its pin: the fix unit 0e50306d, BATCH_BUGFIXES 0cf32835, the 11 feature images, KYOTI
+V1.8 8807feee, V1.8C 9d1a29c9, V1.8BC 0704647c, CLYPS 94e41a22, and every unit (no WIP banner, no refusal).
+
+**New mainos (led-fix 3c0f498, opt-in) next to the current pin:**
+
+| image | new mainos sha256 | FINAL pin |
+|---|---|---|
+| fix unit `build_empty_pattern_led_fix.py` | `074315c20d4c1c2073fc9ee324cf31dcd92f6c639a664d661cf88e542ef5e1a5` | `0e50306d…` |
+| BATCH_BUGFIXES | `fa374dd80125aea37d2f2ab858b94af7f618e75b080718dfb4f9f23d9c95c1ca` | `0cf32835…` |
+| MUTE_MODES | `316f01f713cf048f2fdd32464845c7c1493211be95abb76ae5a2e9344064e1b2` | `857d80d3…` |
+| QUANTIZE_LIVE_REC_TOGGLE | `9b51ad03846acd3f3be2d286ce6f33eea948b2e37dd6c037dbe3bdda6466fa57` | `df4a2498…` |
+| SIDECHAIN_COMPRESSOR | `2d5a401692894c50996201db525a177f19bb4f19d4a9f258a79ce52c6db604c2` | `4febe2e6…` |
+| ERASE_EMPTY_TRIGLESS_LOCKS | `a6063880e3de7e9fbfd368fe88add0fa642800217f1b40b7d6655ba6f03885f0` | `db348f68…` |
+| RELOAD_FROM_PROJECT | `38f2f7de9c88561bfd9bd2027d7276819aed085eb9873424d02caf16548ef4b6` | `188ec12c…` |
+| DIRECT_JUMP_KYOTI | `79b422fdb3bcf62c42395c7fab775d95e81113bd64fb6c65ff0ea44e3475f872` | `c58591c0…` |
+| REC_TRIG_MUTE | `f8ee2d55ac6d253699b5c4bc2a35a02c587badc3fb43353d17bfc605f47d1c10` | `dac87abd…` |
+| BLACKPYRAMIDS_303 | `49ec8cee2fe4ab3c0b4c599b052fe64143d561d8daa9f220751472f263cde4c4` | `b4b55638…` |
+| VARISPEED | `8e3d8b3b458db122dc7286bf4ed04ed82e7f51c8662386f07904e18064faf2f7` | `c3af514f…` |
+| VARISPEED_EMUS | `31aa8a204c94d18a473e45572504799101359ddedcdca2d1baa0ce9f082e895c` | `e2faf75d…` |
+| KYOTI V1.8 | `5e7d93bdbcba446df662680c1e8de1cd25937f2b56f868ae8de985fadd89e3d1` | `8807feee…` |
+| KYOTI V1.8C | `df27ad313fec70aaca29a33aa2990b1e3d981ede149b9694ee191bc5c9aa36f7` | `9d1a29c9…` |
+| KYOTI V1.8BC | `89304409e973d8503e7610c94544b675d76d3cd605ee0fcc3c98e749acccf8a1` | `0704647c…` |
+| CLYPS | `ac7c622fed16572440009f2d12c52afaa4525a958acd5e8c7c0168260965afa2` | `94e41a22…` |
+
+The feature units are unchanged (BP unit 1d53ef7f etc.). Only BLACKPYRAMIDS_303 and V1.8BC differ from the pre-merge
+build (main's new BP code); the rest are byte-identical to it. The OS VERSION is applied at the wrap only, so these
+mainos are the promotion pins whatever name a test image carries.
+V1.8BC: DRAM directjump 4012 / bp_runtime 46,532 / pattern_led 318 @0x40aa1b50 / Clyps @0x40aa1c90; 1,721 pages (as the
+FINAL). **The stock-SRAM coincidence is gone** (built without KYOTI_ALLOW_STOCK_SRAM: the new BP runtime changed the
+packed stream). Proposal anyway, for kyoti_status.stock_sram_refs: for an image with a tools/dram append, scan the
+stock-length part and the loader, and scan the DEPACKED runtime (dram.depack of the signature stream) instead of the
+packed bytes -- the packed stream is data, and a packed word is no reference.
+
+**Gates on the merged builds:**
+- `led_trigless_matrix.py`: ALL GOOD on the unit (+ `--sweep`, 3 real projects identical), BATCH_BUGFIXES, KYOTI V1.8,
+  V1.8C, V1.8BC and the BLACKPYRAMIDS_303 feature image. `port_pattern_led.py --patched`, `emu_pattern_led.py --patched`:
+  ALL GOOD.
+- Stall gate, KYOTI V1.8BC (FINAL 0704647c -> new, 0.6 s, `[BANK]` held, transport running): OT DEMO 43.88M -> 44.07M
+  (+0.43 %), all empty 41.91M -> 42.02M, TL+lock everywhere 41.91M -> 41.61M, worst 43.67M -> 44.60M (+2.1 %); idle 42.36 /
+  41.54 / 42.94M. The unit and V1.8C numbers above are unchanged (same images).
+- V1.8BC: `tools/ot303/verify_one_per_core / page_paste / part_carry / tie_xfer / first_gate (+STALE=1)` with the image's
+  own `bp_runtime/ot303_runtime.elf`: ALL GOOD; `kyoti_bc_check_onepercore`, `_erase`, `_mute`: ALL GOOD;
+  `kyoti_bc_check_fx2` and `_voice`: FAIL exactly as the FINAL 0704647c does (PHASER, DARK REV core 1, COMPRESSOR
+  stopwatch columns; PLATE given up) -- the same DIFFERS lines, only the max column jitters.
+- V1.8C: Clyps UI `--only ABCDY` (CLYPS_SYMS regenerated from kyoti_v1.8c_map.json; Clyps at 0x40a966cc now): PASS (50).
+  DJ REF-LOCK c1 (16<->7) + n1 (RS1, `out/l2/dj_reflock.sh`, fixture DJTEST2) on FINAL 9d1a29c9 and new: every recorded
+  field identical (only the image path differs).
+- V1.8: `diag_reload_quant.py` (RELOAD's symbols from kyoti_v1.8_map.json as an absolute-symbol .o): VERDICT PASS, 32/32.
+- VARISPEED_EMUS switch suite (`varispeed_emus_switch_test.py run/check --img feature --img base_feature`, base = the FINAL
+  feature image e2faf75d): ALL GATES PASS; the per-case estimate maxima equal the FINAL's, datasheet-cycle maxima within 0.2.
+
+**octabam (local draft only, nothing pushed or opened):** scratch clone `out/octabam-led` (main 9985b4f8), branch
+`batch-bugfixes-led-pin`, one local commit with placeholders `<PIN>` / `<BUILD>` / `<HARDWARE LINE>`: the submodule moved to
+led-fix, manifest docstring + a new Evidence record, module README (318 B, the `[BANK]` path), usage page ("Pattern
+LEDs"), THIRD_PARTY row (BATCH_BUGFIXES only; ERASE stays 77f132f), README regenerated by `make docs`; `make verify-docs`
+115 modules / 151 remixes / 0 problems. `make bus` for all 16 remixes that carry BATCH_BUGFIXES (octabam, octabam-bus,
+test/batch-bugfixes, kyoti-fixes, mods, direct-jump-kyoti, kyoti-mute-jump, hooks-core, trackpatterns-core,
+stock-meter-a/b, window-ctl/mod, dl-probe(-any), ext-probe): all build at the new pin, the fix at the same address as at
+77f132f in each, 128 B less ROM cave left (smallest: hooks-core 632 B; octabam 1,040, octabam-bus 1,208). PR body draft:
+`out/octabam-led-pr-body.md` (style of #1146). The real pin PR waits for our promotion push.
+
+**Merging with `emus-guard`:** files both branches touch: FLASHING.md, NOTES.md, START_HERE.md, tools/build_kyoti.py.
+A trial `git merge-tree` of led-fix with emus-guard a9743a7 conflicts only in START_HERE §6 (two new top bullets);
+build_kyoti.py auto-merges. `move_pattern_led()` is self-contained (one function + one call after VERSTR). emus-guard no
+longer has `move_for_varispeed`; it puts `patch_varispeed_ui` in PLAN["DRAM"] before Clyps. Combined DRAM order:
+..., bp_runtime, patch_varispeed_ui, patch_pattern_led, patch_clyps_dram (mine inserts before Clyps after the static
+list). If VRG3's move frees enough CAVE, `move_pattern_led` could become fit-driven (move only when CAVE lacks 318 B);
+as is it always moves in images with VARISPEED, which is deterministic and needs no change.
