@@ -40151,3 +40151,14 @@ arrivals, OWN / LIVE / stage words -- this emulator renders no BLKPYRAMD audio. 
 out/bpsilent/fixB/ (KY18BC BPF, mainos 9012455a…); not to be flashed, RC2 replaces it. The standalone
 BLACKPYRAMIDS_303 and the octabam module carry the same control.c: both need it (octabam #1195 stays draft until
 re-pinned to it).
+
+**Follow-up (2026-11-20, raised by the BlackPyramids session):** (1) 5511929's pair reset inside a cued Part switch's carry
+window (UI Part moved ~7 ticks before the boundary, the track still carrying the old Part's note) ended the carry early:
+out/bpsilent/c1.py (verify_part_carry `fwd` layout, a net repair -- stale signature / a second BLKPYRAMD -- or a chooser
+commit on the incoming Part at frame 13640): T2 rendered FLEX (level 0) for 20-40 frames and, in the second / chooser
+cases, the seed wrote Part 2's FLEX values under the carried note. Fixed: no seed and no pair reset while
+play_part(t) != part_base() (the track's first trig in the new Part re-stages it anyway); all three window scenarios
+reproduce RC1 row for row, e3.py's original cases (FLEX -> BP, quick BP -> NEIGHBOR -> BP, BP -> FLEX, STATIC) still full
+level. (2) bp_net's ot_assign then TRK_REFRESH (0x400972fc): one seed, then the refresh (which seeds only on its PICKUP arm
+0x400973da) -- staged once, correct order; RC1 left the demoted track stale until its next trig. Five verify_* gates ALL
+GOOD. Scratch image out/bpsilent/fixC/ (KY18BC BPC, mainos 6ef2b86f…), not to be flashed; RC2 replaces it.

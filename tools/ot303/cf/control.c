@@ -311,7 +311,11 @@ void ot_assign(volatile uint8_t *part, unsigned t, unsigned sign) {
      * change). FLEX <-> OT-303 is FLEX -> FLEX to stock: nothing was re-staged, the voice played FLEX's live values
      * (VOL = FLEX's TSTR byte: silent) and a FLEX track kept the OT-303's. Stock's own seed, as its commits call it
      * from the UI task (0x400973da, 0x40096d9a); every ot_assign caller is a UI-task path. */
-    if (!changed || part != part_base()) return;
+    /* Not while the track still carries another Part's sound (a cued Part switch: the UI Part moves ~7 ticks before
+     * the boundary, the track's pair keeps the old Part until its first trig there, play_part): forgetting the pair
+     * would end the carry early (the voice freed mid-note) and the seed would put the incoming Part's values under
+     * the carried note. Its first trig in this Part re-stages it anyway (pair != the trig's Part). */
+    if (!changed || part != part_base() || play_part(t) != part_base()) return;
     if (part[0x22 + t] == 1) ((void (*)(unsigned, unsigned, unsigned))TRK_SEED)(U8(0x100b14ceu), U8(PART_IDX), t);
     /* and whatever the machine byte becomes after this commit, the track's next trig re-stages it from the Part: its
      * live-bytes pair forgotten, as PLAY and a load leave it (BP -> NEIGHBOR -> BP with no trig between kept FLEX's) */
