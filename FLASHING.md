@@ -425,7 +425,7 @@ quick check for each:
 - **VARISPEED VRG3 walk-through** (WIP, NOT promoted; `out/VARISPEED/OCTATRACK_OS1.40C_VARISPEED.syx`, sha256
   `38b1f1ed…`; VARISPEED_EMUS VEMG4 `out/VARISPEED_EMUS/OCTATRACK_OS1.40C_VARISPEED_EMUS.syx` `951368de…`; KYOTI
   `out/KYOTI/OCTATRACK_OS1.40C_KYOTI_V1.8.syx` `KY18 VRG3` (`8d64d787…`), `..._V1.8C.syx` `KY18C VRG3` (`05b431f1…`),
-  `..._V1.8BC.syx` `KY18BC VR3` (`d7457e8d…`); NOTES 2026-11-19 cont. (2) `emus-guard`). VRG3 = VRG2 + VARISPEED keeps
+  `..._V1.8BC.syx` `KY18BC VR3` (`9d519304…`); NOTES 2026-11-19 cont. (2) `emus-guard`). VRG3 = VRG2 + VARISPEED keeps
   what it remembers in bytes of its own (it shared NEIGHBOR's with BLACKPYRAMIDS_303 before). The VRG2 checks 1-7
   hold on every one of these images. Then:
   1. **QUAN memory across a save, off VARI.** A track on VARI, QUAN `3/2`; TSTR to `BEAT` (PTCH comes back); SAVE
@@ -455,7 +455,7 @@ quick check for each:
      then back to the old machine and `BEAT`: PTCH `+12`. THRU still passes its inputs as before.
   5. KYOTI images: the V1.8 / V1.8C / V1.8BC checks unchanged (Clyps, DIRECT JUMP, RELOAD, MUTE MODE, SIDE-CHAIN, QLR,
      the pattern LEDs; BLACKPYRAMIDS_303's one-per-core items on V1.8BC). VARISPEED's UI code now runs from the DRAM
-     payload (FREE MEM in the audio pool: one arena page more on V1.8 if the payload crossed a page).
+     payload (the audio pool loses at most an arena page or two more than with FINAL; V1.8C: 1,709 pages, as FINAL).
 - **MIDI_PLAYS_FREE_FIX** — a PLAYS FREE MIDI track, trig quantize DIRECT, SCALE MODE PER
   TRACK, notes on steps 1 and 2: a manual trig keeps it running instead of stalling.
 - **EMPTY_PATTERN_LED_FIX** — a pattern whose only content is a p-lock on a MIDI track:

@@ -39725,11 +39725,12 @@ guard, vh_bptake / vh_bpback) is the source's UI section (`VEM_UI_SECTION`); the
 with VEM_BP); the cave keeps 2,004 B (was 2,584) and EMPTY_PATTERN_LED_FIX's predicate goes back to CAVE in every image
 (`move_for_varispeed()` removed): CAVE 476 B left in V1.8 / V1.8C / V1.8BC, SPRING as before VRG1 (204 B / 82 B left).
 This fixes the merged V1.8BC, which no longer built (SPRING could not hold pattern_led beside patch_triglock_bp).
-Arena: V1.8C 1,709 pages (as FINAL), V1.8BC 1,721, V1.8 12. BLACKPYRAMIDS_303's runtime 43,176 -> 43,192 B in V1.8BC.
+Arena: V1.8C 1,709 pages (as FINAL), V1.8BC 1,721, V1.8 12. BLACKPYRAMIDS_303's runtime +16 B in V1.8BC (the two
+calls; after the merge below 46,532 -> 46,548 B).
 
 **BLACKPYRAMIDS_303 standalone: unchanged** -- the control.c hooks are compiled only with KYOTI_VARI_TAKE; the
-standalone unit and feature image rebuild to their pins without the opt-in (unit b3327bd3…, image 6a124db1…). No
-140C_BPVR1 was needed.
+standalone unit and feature image rebuild to their pins without the opt-in (before the merge below b3327bd3… /
+6a124db1…, after it the re-promoted 1d53ef7f… / b4b55638…). No 140C_BPVR1 was needed.
 
 **Gates (emulator).**
 - QUAN entry (tools/varispeed_quan_entry_test.py, now 18 cases + the switch; new: mem_reload, mem_power, final_vari,
@@ -39748,26 +39749,59 @@ standalone unit and feature image rebuild to their pins without the opt-in (unit
 - VARISPEED suites: varispeed_test.py (KYOTI_UNIT=1) unit 10/11, VARISPEED_EMUS varispeed_emus_test.py unit 44/45
   (widget, pre-existing in both, as VRG2 / FINAL); expectations moved to the new bytes (o2rev: the pasted page now
   clears the old park).
+- Part-switch gates (varispeed_emus_switch_test.py, run unit / feature / vari / vari_feature against the FINAL
+  bases): `check` ALL GATES PASS (VARISPEED_EMUS), `check --plain` ALL PLAIN GATES PASS (VARISPEED).
 - BLACKPYRAMIDS_303 / V1.8BC: verify_one_per_core ALL GOOD, verify_page_paste ALL GOOD, kyoti_bc_check_onepercore ALL
   GOOD, kyoti_bc_check_erase ALL GOOD, kyoti_bc_check_mute as before (muted tracks start 0 notes in OTFX-T / DT-T),
   kyoti_bc_check_voice every line as V1.8BC FINAL (only the core-1 DARK REV stopwatch 3267 vs 3252 and PLATE given up;
   the flex round trip changes no byte outside NEIGHBOR's), kyoti_bc_check_fx2 as FINAL (COMPRESSOR +22, PHASER / DARK
   jitter).
 - Clyps UI (diag_clyps_ui --only ABCDY, symbols regenerated from the new maps: Clyps moved behind the VARISPEED UI
-  piece) PASS on KY18C VRG3 and KY18BC VR3.
+  piece) PASS on KY18C VRG3 and KY18BC VR3 (and on the merged V1.8BC).
+- KYOTI smokes, A = FINAL (main checkout; for the merged V1.8BC the re-promoted FINAL 0704647c from the kyoti-bp
+  worktree), B = VRG3 (out/kyoti_smoke3, out/bytehome/merged): DIRECT JUMP REF-LOCK c1 (16 <-> 7) and RS1 (restart)
+  on V1.8C and V1.8BC: A == B every recorded field (also on the merged V1.8BC). RELOAD quant (diag_reload_quant, V1.8,
+  OT DEMO): A and B line for line the same through the 27 checks the runs reached (A-D of A-I, W, F; both runs were
+  still going, slowly, when this was written -- no verdict line yet).
+- Equivalence matrix (varispeed_emus_equiv.py, what every DSP voice pass receives): OTDEMO 35/35 identical, VARISPEED
+  vs FINAL and VARISPEED_EMUS vs FINAL. MMTESTDT strict: VARISPEED 3/35 (vs FINAL and vs VRG2 alike), VARISPEED_EMUS
+  11/35 (vs FINAL and vs VEMG3; --base-shift 1-3: 4/35); timing-free (out/bytehome/eq_collapse.py: per track the
+  sequence of distinct payloads): VARISPEED_EMUS 35/35 the same, VARISPEED 34/35 -- tempo_edge_7200 (project tempo
+  300 BPM) differs in how many 0 / increment alternations precede and follow a stretch at stock rate; T1's Part bytes
+  are written identically by both images in that run (watched): the CF frame workload grew (rp_bpt in every gate
+  read), which moves the pass interleave in ot_emu (CLAUDE.md: sample-exact emulator diffs are not valid evidence
+  when the CF workload differs). Not measured: the frame hook's instruction count (VRG1 measured +56 for 4 VARI
+  tracks; rp_bpt adds ~10-20 per gate read).
 - Every other FINAL image rebuilds to its pin without the opt-in (feature_image.py: MUTE_MODES, QLR, SIDECHAIN,
   TRIGLESS, RELOAD, DJK, RTM, BLACKPYRAMIDS_303, BATCH_BUGFIXES; build_kyoti --clyps-standalone 94e41a22).
+
+**origin/main 07f47d1 merged (a9743a7)** -- BLACKPYRAMIDS_303 re-promoted in another session (a cued Part switch carries
+the voice, ties across a cued pattern change, GATE from the pattern's Part; new pins unit 1d53ef7f, image b4b55638,
+V1.8BC 0704647c). Its storage (NEIGHBOR bytes, stash, signature, parked knobs, FLEX slots) and ot_assign are unchanged;
+control.c merged without conflict (the VARI_TAKE / VARI_BACK hooks sit inside ot_assign, so every caller -- the chooser,
+SRC SETUP, ot_pgpaste, bp_net's demotions and stale clears -- goes through them). Its renderer now decides BLKPYRAMD by
+the track's live-bytes Part (play_part: stock's pair 0x8000182a / 0x80001832 + t); VARISPEED's rp_bpt reads the Part it
+polls, and its frame poll does not poll a carried track whose pair is not the current Part (VRG1's vf_win), so the two
+cannot act on different Parts' bytes for the same note. Re-run on the merged V1.8BC (out/bytehome/merged): QUAN entry
+19/19; every bc-park scenario and M1-M3 the same track states as before the merge (only the runtime's addresses and the
+net's pass counts moved); verify_part_carry / tie_xfer / first_gate / page_paste / one_per_core ALL GOOD on all three
+forms (V1.8BC, the feature image, the unit -- the latter two are the new FINAL bytes); kyoti_bc_check_erase /
+onepercore ALL GOOD, voice / fx2 / mute as FINAL (above). V1.8 / V1.8C byte-identical to the pre-merge builds; the
+BLACKPYRAMIDS_303 feature image rebuilds to the new pin b4b55638 without the opt-in.
 
 **Builds (WIP, NOT flashed):** VARISPEED `out/VARISPEED/OCTATRACK_OS1.40C_VARISPEED.syx` 38b1f1ed… (.bin 84745b39…,
 mainos 94e4ac0f…; unit mainos 2e365957…), `140C_VRG3`; VARISPEED_EMUS `out/VARISPEED_EMUS/OCTATRACK_OS1.40C_VARISPEED_EMUS.syx`
 951368de… (.bin cc94e463…, mainos 1ed792d9…; unit mainos b54e7246…), `140C_VEMG4`; KYOTI V1.8 `KY18 VRG3` syx 8d64d787…
 (.bin e00607ec…, mainos d79d86e4…); V1.8C `KY18C VRG3` syx 05b431f1… (.bin b00a0f88…, mainos 48455649…); V1.8BC
-`KY18BC VR3` syx d7457e8d… (.bin 9c1656b0…, mainos afb82323…).
+`KY18BC VR3` syx 9d519304… (.bin 1b4b2ae9…, mainos 27601be5…; built on a9743a7, the merge of origin/main 07f47d1 with
+BLACKPYRAMIDS_303's Part / pattern change fixes -- before that merge the same code gave afb82323…).
 
-**Merge with `led-fix` (foreseen):** build_kyoti.py's main() -- led-fix adds `move_pattern_led()` where VRG1 had
-`move_for_varispeed()` (removed here): keep led-fix's (pattern_led, 318 B there, goes to DRAM; CAVE then has ~640 B
-left). led-fix's DRAM insert puts pattern_led before Clyps, i.e. after `patch_varispeed_ui` -- no textual overlap in
-PLAN. Its docstring's "the classic cave had 92 B left" no longer holds (476 B).
+**Merge with `led-fix` (foreseen):** against origin/main, emus-guard's build_kyoti.py now only adds the
+`patch_varispeed_ui` PLAN entry and key, the V1.8BC flags and their pass-2 lookup (VRG1's `move_for_varispeed()` is
+gone again), so led-fix's `move_pattern_led()` + its call in main() should merge without a textual conflict. Semantics:
+its move still applies (pattern_led, 318 B there, from CAVE to DRAM, inserted before Clyps = after
+`patch_varispeed_ui`); CAVE then has ~630 B left. Its docstring's "the classic cave had 92 B left" no longer holds (476 B
+with the 158 B predicate in CAVE). Re-run its matrix and the KYOTI builds after that merge.
 
 **Not verified / the author's call:** anything on hardware; octabam's ledger for the varispeed modules now claims the
 four new bytes (part_window) while rp_migrate may clear an older build's NEIGHBOR park -- beside octabam's
