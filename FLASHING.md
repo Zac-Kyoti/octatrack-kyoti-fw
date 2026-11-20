@@ -173,6 +173,10 @@ quick check for each:
      load; a DIRECT JUMP; `ONE 303 PER CORE!` on a second BLKPYRAMD on T1-4. Power-cycle at the end.
 
   **Flash 2 -- `140CVEMRC1`** and **(3, optional) `140C_VRRC1`:** RC1's flash 3 / flash 4 items below, unchanged.
+  **Results (the author's MKI, 2026-11-20):** RC1 flashes 1-2 (`KY18BC RC1`, `KY18C RC1`): every item passed except the
+  BLKPYRAMD chooser silence and ERASE on MIDI (the two RC2 fixes). `140CVEMRC1`: every item passed. `140C_VRRC1` not
+  flashed (the author's call: VARISPEED's code is the same as in KYOTI and VARISPEED_EMUS, both passed). `KY18BC RC2`:
+  pending.
 
   Report each item pass / fail with the image's OS VERSION.
 - **RELEASE CANDIDATE RC1** (WIP, NOT promoted, NOT flashed; branch `release-1119`, NOTES 2026-11-19 (`release-1119`)).
