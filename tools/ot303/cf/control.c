@@ -283,12 +283,15 @@ unsigned ot_setup_edit_row(unsigned t) {
 /* machine.s's commits: sign = 1 makes track t of this Part an OT-303 (FLEX stashed, its parked knobs
  * or the defaults seeded), 0 makes it something else (FLEX put back, its knobs parked); both copies (the
  * Part and its SRAM mirror); nothing changes when the track already is / is not one. */
+#define TRK_SEED 0x40001f18u        /* stock's track seed (bank, part, track): the track's live bytes from the Part */
 void ot_assign(volatile uint8_t *part, unsigned t, unsigned sign) {
     volatile uint8_t *copies[2] = {part, part - (U32(BANK) + PART_OFF) + SRAM_PART};
+    unsigned changed = 0;
     for (unsigned c = 0; c < 2; ++c) {
         volatile uint8_t *p = copies[c], *s = p + SIG + 30 * t;
         unsigned is = s[0] == 'O' && s[1] == 'T' && s[2] == 1;
         uint8_t v[12];
+        if ((sign && !is) || (!sign && is)) changed = 1;
         if (sign && !is) {
             VARI_TAKE(p, t);
             for (unsigned k = 0; k < 12; ++k) v[k] = (uint8_t)parked_value(p, t, k);
@@ -303,6 +306,16 @@ void ot_assign(volatile uint8_t *part, unsigned t, unsigned sign) {
             VARI_BACK(p, t);
         }
     }
+    /* Stock re-stages a track's live machine bytes (page 1 at 0x80000810 + 72 t with its base words, SETUP at + 0x20)
+     * only when its stored machine changes (at the track's next trig) or a Part is applied (PLAY, a load, a Part
+     * change). FLEX <-> OT-303 is FLEX -> FLEX to stock: nothing was re-staged, the voice played FLEX's live values
+     * (VOL = FLEX's TSTR byte: silent) and a FLEX track kept the OT-303's. Stock's own seed, as its commits call it
+     * from the UI task (0x400973da, 0x40096d9a); every ot_assign caller is a UI-task path. */
+    if (!changed || part != part_base()) return;
+    if (part[0x22 + t] == 1) ((void (*)(unsigned, unsigned, unsigned))TRK_SEED)(U8(0x100b14ceu), U8(PART_IDX), t);
+    /* and whatever the machine byte becomes after this commit, the track's next trig re-stages it from the Part: its
+     * live-bytes pair forgotten, as PLAY and a load leave it (BP -> NEIGHBOR -> BP with no trig between kept FLEX's) */
+    U8(0x8000182au + t) = 0xff; U8(0x80001832u + t) = 0xff;
 }
 /* The main page names the current track's sample: the track box (0x4004c1c0, the UI's current track
  * 0x100b14cc) and the screen's label builder (0x4003d552, the current track 0x80000000) both call the

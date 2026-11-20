@@ -40117,3 +40117,37 @@ beside VARI, migration from a FINAL save, the LED matrix, `[BANK]` held, V1.8BC 
 emulator PASS; the LED bytes are the same 318 B everywhere). Promotion (on the author's word only) re-pins VARISPEED /
 VARISPEED_EMUS (unit + feature), EMPTY_PATTERN_LED_FIX's unit, every feature image and BATCH_BUGFIXES, KYOTI V1.8 /
 V1.8C / V1.8BC and CLYPS -- the mainos values in the table.
+
+## 2026-11-20 (`release-1119`, BLACKPYRAMIDS_303) — a BLKPYRAMD chosen on a FLEX track played FLEX's live values (silent); fixed in ot_assign (WIP, NOT flashed)
+
+**Hardware (KY18BC RC1, the author's MKI, 2026-11-20):** every RC1 item of flashes 1 and 2 passed except two: ERASE on MIDI
+tracks (never covered; separate entry) and "BLKPYRAMD often not sounding when chosen from the machine chooser; switching
+to NEIGHBOR / THRU and back once or twice wakes it".
+
+**Cause (ot_emu_8d0ad6f4, BOTLI, transport running; not introduced by RC1 -- FINAL V1.8BC 0704647c and the standalone
+feature image give identical numbers).** A BLKPYRAMD track is stored as FLEX, so FLEX -> BLKPYRAMD is FLEX -> FLEX to
+stock: the commit (0x4007981c -> 0x400972fc(part, t, old)) re-stages a track's live machine bytes with the seed
+0x40001f18 only for PICKUP (0x400973da); otherwise only at the track's next trig when its stored machine changed, or on a
+Part apply (PLAY / load / Part change: per-track pair 0x8000182a / 0x80001832 = 0xff). The renderer reads the live bytes
+(page 1 from the frame lane, base words 0x80000a50+64t; SETUP via knob_now 0x80000830+72t), so the voice played FLEX's:
+VOL = FLEX's TSTR byte (OFF -> 0 = silence, OT_SC[0] = 0; AUTO..VARI -> 1-4, ~-20 dB), CUT = FLEX's STRT (often 0).
+A switch away and back with no trig between changes nothing (still FLEX); with a trig between it is a real machine change
+-> re-staged -> "wakes". Same cause the other way: BLKPYRAMD -> FLEX left FLEX on the voice's live numbers. From STATIC /
+THRU / NEIGHBOR / PICKUP it worked; the BP gates seed the bytes before PLAY, so none caught it.
+
+**Fix (tools/ot303/cf/control.c ot_assign, +13 lines):** when a commit changed the machine of the current Part
+(part == part_base()), call stock's seed 0x40001f18(bank 0x100b14ce, part, t) if the stored machine is FLEX, and set
+the track's pair 0x8000182a+t / 0x80001832+t to 0xff (its next trig re-stages from the Part whatever the machine ends
+up -- covers BP -> NEIGHBOR -> BP with no trig between, which the seed alone did not). Every ot_assign caller is a
+UI-task path (both commits, the page paste, bp_net); stock calls the seed from the UI task too (0x400973da, 0x40096d9a).
+Side effect, as stock's own commit paths: the track's p-lock values read the Part's until its next trig.
+
+**Emulator (same harness, chooser commit replayed as stock does it):** FLEX -> BP T7 (core 0): FINAL / RC1 level 0 for all
+12 notes, fixed 2,502,964 from the first frame; STATIC -> FLEX -> BP T2 (core 1): VOL 3 / 261,552 -> full; STATIC -> BP
+works in all three; BP -> NEIGHBOR -> BP with and without a trig between: fixed works throughout; BP -> FLEX: FLEX's own
+values at once. verify_part_carry, verify_tie_xfer, verify_first_gate (+STALE=1), verify_page_paste,
+verify_one_per_core: ALL GOOD on the fixed image. Measured: live bytes, the control record's level word, DSP hq_start
+arrivals, OWN / LIVE / stage words -- this emulator renders no BLKPYRAMD audio. Scratch image (RC1 + this fix only):
+out/bpsilent/fixB/ (KY18BC BPF, mainos 9012455a…); not to be flashed, RC2 replaces it. The standalone
+BLACKPYRAMIDS_303 and the octabam module carry the same control.c: both need it (octabam #1195 stays draft until
+re-pinned to it).
