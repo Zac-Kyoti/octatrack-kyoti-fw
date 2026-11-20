@@ -59,7 +59,9 @@ O_P2, NAME0, NAME11 = E.O_P2, E.NAME0, E.NAME11
 PTCH_FMT = 0x4003b4b0
 STOCK = (ROOT / "out/raw/section_3_MAIN_OS.bin").read_bytes()
 BASE = 0x40000400
-SENT = 99                       # a sentinel in the NEIGHBOR byte VARISPEED_EMUS parks TSNS in
+SENT = 99                       # a sentinel in the NEIGHBOR byte VARISPEED_EMUS kept its TSNS park in (park 3; VRG3:
+                                # VARISPEED never touches NEIGHBOR's bytes but its old PTCH park, which it moves out)
+mem = E.mem
 EMUS_SITES = {0x4003a566: 6, 0x400585f4: 6, 0x40062d1c: 6, 0x400526e4: 8, 0x40052474: 8}
 
 
@@ -74,7 +76,7 @@ def scenarios():
 
     s = Scn("swap", 90)
     s.add(poke(1, [b(UI_TRACK, 0)]),
-          poke(2, p1(0, FL, 0, 70) + p2(0, FL, 5, 30) + park(0, 1, FL, 0) + park(0, 2, FL, SENT)))
+          poke(2, p1(0, FL, 0, 70) + p2(0, FL, 5, 30) + park(0, 1, FL, 0) + park(0, 3, FL, SENT)))
     s.cp(10, "a")
     s.add(poke(12, p2(0, FL, 4, 4)))
     for f in (12, 13, 14):
@@ -89,14 +91,14 @@ def scenarios():
 
     s = Scn("adopt", 40)
     s.add(poke(2, p2(0, FL, 4, 4) + p1(0, FL, 0, 109) + p2(0, FL, 5, 30) + park(0, 1, FL, 70) +
-               park(0, 2, FL, SENT) + [b(S["rp_prev"] + i, 0xff) for i in range(16)]))
+               park(0, 3, FL, SENT) + [b(S["rp_prev"] + i, 0xff) for i in range(16)]))
     s.cp(30, "a")
     sc[s.name] = s
 
     s = Scn("p2edit", 60)
     tsns = PBASE + O_P2 + 30 * 0 + 6 * FL + 5
     s.add(poke(2, p2(0, FL, 4, 4) + p2(0, FL, 5, 64) + p2(2, FL, 4, 3) + p1(2, FL, 0, 70) +
-               park(2, 1, FL, 0) + park(2, 2, FL, SENT)))
+               park(2, 1, FL, 0) + park(2, 3, FL, SENT)))
     s.cp(15, "before")
     s.add(poke(20, [b(UI_TRACK, 0)] + lpoke(PAGE_M, FL)))
     s.add(call(20, P2EDIT, 5, 1)); s.dump(20, tsns, 1, "t1")
@@ -130,8 +132,8 @@ def scenarios():
 
     s = Scn("item11", 420)
     s.add(poke(1, [b(UI_TRACK, 0)]),
-          poke(2, p1(0, FL, 0, 70) + p2(0, FL, 5, 30) + park(0, 1, FL, 0) + park(0, 2, FL, SENT) +
-               park(0, 1, ST, 0) + park(0, 2, ST, SENT - 1) + p1(0, ST, 0, 80, False) + p2(0, ST, 5, 40, False)),
+          poke(2, p1(0, FL, 0, 70) + p2(0, FL, 5, 30) + park(0, 1, FL, 0) + park(0, 3, FL, SENT) +
+               park(0, 1, ST, 0) + park(0, 3, ST, SENT - 1) + p1(0, ST, 0, 80, False) + p2(0, ST, 5, 40, False)),
           poke(4, p2(0, FL, 4, 4)), poke(20, p1(0, FL, 0, 109)))
     s.cp(30, "x0")
     s.add(machine(32, 0, PU))
@@ -224,7 +226,7 @@ def check(name, s):
     TSNS_FL = stock_name(NAME11[FL])
     if name == "swap":
         a, bb, c, dd = cp["a"], cp["b"], cp["c"], cp["d"]
-        q = lambda x: (x.p1(0, FL), x.p2(0, FL), x.park(0, 1, FL), x.park(0, 2, FL))
+        q = lambda x: (x.p1(0, FL), x.p2(0, FL), x.park(0, 1, FL), x.park(0, 3, FL))
         t.eq("before: PTCH / TSNS / PTCH park / the NEIGHBOR byte", q(a), (70, 30, 0, SENT))
         t.eq("before: rp_prev[T1][FL]", a.rp(0, FL), 0)
         t.eq("VARI: QUAN 64 (fresh: 1/1) / TSNS kept / PTCH parked / NEIGHBOR byte untouched", q(bb), (64, 30, 70, SENT))
@@ -236,15 +238,15 @@ def check(name, s):
         for f in (12, 13, 14):
             e = cp[f"edge{f}"]
             t.eq(f"frame {f}: PTCH or QUAN in the slot, TSNS 30", (e.p1(0, FL) in (70, 64), e.p2(0, FL)), (True, 30))
-        t.eq("left (BEAT): PTCH back, QUAN parked with bit 7 (VARIG2: remembered), TSNS as edited (127), NEIGHBOR byte "
-             "untouched", q(c), (70, 127, 0x80 | 109, SENT))
+        t.eq("left (BEAT): PTCH back, nothing parked, TSNS as edited (127), NEIGHBOR byte untouched", q(c), (70, 127, 0, SENT))
+        t.eq("left: QUAN 3/2 remembered (VM, VRG3)", c.park(0, 2, FL), mem(7))
         t.eq("left: rp_prev, captions", (c.rp(0, FL), c.name(NAME0[FL]), c.name(NAME11[FL])), (0, "PTCH", TSNS_FL))
         t.eq("left: live PTCH / base / live TSNS", (c.live[0], c.base[0:2], c.live[0x25]), (70, b"\x46\x00", 127))
         t.eq("back in VARI: QUAN / TSNS / PTCH park / NEIGHBOR byte", q(dd), (109, 127, 70, SENT))
         t.eq("back in VARI: SRAM copy follows", dd.shadow_ok(), True)
     elif name == "adopt":
         a = cp["a"]
-        t.eq("adopted: slots and parks unchanged", (a.p1(0, FL), a.p2(0, FL), a.park(0, 1, FL), a.park(0, 2, FL)),
+        t.eq("adopted: slots and parks unchanged", (a.p1(0, FL), a.p2(0, FL), a.park(0, 1, FL), a.park(0, 3, FL)),
              (109, 30, 70, SENT))
         t.eq("adopted: rp_prev[T1] FL / ST", (a.rp(0, FL), a.rp(0, ST)), (1, 0))
     elif name == "p2edit":
@@ -254,7 +256,7 @@ def check(name, s):
         t.eq("TSTR through P2EDIT: BEAT +1 -> VARI, +1 stays (five positions)", (rd("tstr1"), rd("tstr2")), (4, 4))
         a, bf = cp["after"], cp["before"]
         t.eq("T3 entered VARI from the editor: QUAN 64, PTCH 70 parked, TSNS and the NEIGHBOR byte "
-             "untouched, rp_prev 1", (a.p1(2, FL), a.park(2, 1, FL), a.p2(2, FL), a.park(2, 2, FL), a.rp(2, FL)),
+             "untouched, rp_prev 1", (a.p1(2, FL), a.park(2, 1, FL), a.p2(2, FL), a.park(2, 3, FL), a.rp(2, FL)),
              (64, 70, bf.p2(2, FL), SENT, 1))
     elif name == "widget":
         qf = S["quant_fmt"]
@@ -273,8 +275,8 @@ def check(name, s):
         t.eq("quant_fmt 4 / 64 / 124", qf_, ["1/2", "1/1", "2/1"])
     elif name == "item11":
         x = cp
-        fl = lambda c: (c.p1(0, FL), c.p2(0, FL), c.park(0, 1, FL), c.park(0, 2, FL), c.rp(0, FL))
-        stv = lambda c: (c.p1(0, ST), c.p2(0, ST), c.park(0, 1, ST), c.park(0, 2, ST))
+        fl = lambda c: (c.p1(0, FL), c.p2(0, FL), c.park(0, 1, FL), c.park(0, 3, FL), c.rp(0, FL))
+        stv = lambda c: (c.p1(0, ST), c.p2(0, ST), c.park(0, 1, ST), c.park(0, 3, ST))
         pu = lambda c: bytes(c.part[E.O_P1 + 6 * PU:E.O_P1 + 6 * PU + 6]) + bytes(c.part[O_P2 + 6 * PU:O_P2 + 6 * PU + 6])
         t.eq("x0 FLEX in VARI", fl(x["x0"]), (109, 30, 70, SENT, 1))
         for k, what in (("x1", "on PICKUP"), ("x2", "back on FLEX"), ("x3", "on THRU"), ("x4", "back on FLEX"),
@@ -296,7 +298,7 @@ def check(name, s):
              (109, 127, 50, 20, 1, True))
         sp = cp["srcpaste"]
         t.eq("SRC paste T1 -> T2: TSTR / QUAN / TSNS as pasted, T2's parks untouched, adopted",
-             (sp.p2(1, FL, 4), sp.p1(1, FL), sp.p2(1, FL), sp.park(1, 1, FL), sp.park(1, 2, FL), sp.rp(1, FL) in (1, 0xff)),
+             (sp.p2(1, FL, 4), sp.p1(1, FL), sp.p2(1, FL), sp.park(1, 1, FL), sp.park(1, 3, FL), sp.rp(1, FL) in (1, 0xff)),
              (4, 109, 127, 0, 0, True))
         su = cp["srcundo"]
         t.eq("SRC paste undone: T2 back, adopted",
@@ -304,19 +306,19 @@ def check(name, s):
              (o0.p2(1, FL, 4), 50, 20, 0, True))
         tp = cp["trkpaste"]
         t.eq("track paste T1 -> T3: the whole block, the PTCH park included, adopted",
-             (tp.p2(2, FL, 4), tp.p1(2, FL), tp.p2(2, FL), tp.park(2, 1, FL), tp.park(2, 2, FL), tp.rp(2, FL)),
+             (tp.p2(2, FL, 4), tp.p1(2, FL), tp.p2(2, FL), tp.park(2, 1, FL), tp.park(2, 3, FL), tp.rp(2, FL)),
              (4, 109, 127, 70, 0, 1))
         cl = cp["clear"]
-        t.eq("PART CLEAR: T1 back to defaults, nothing swapped in", (cl.park(0, 1, FL), cl.park(0, 2, FL), cl.rp(0, FL)),
+        t.eq("PART CLEAR: T1 back to defaults, nothing swapped in", (cl.park(0, 1, FL), cl.park(0, 3, FL), cl.rp(0, FL)),
              (0, 0, 0))
         t.eq("PART CLEAR: T1's slots hold the defaults, not a park", (cl.p1(0, FL), cl.p2(0, FL)), (64, 64))
         cu = cp["clearundo"]
         t.eq("PART CLEAR undone: T1 VARI again, adopted",
-             (cu.p2(0, FL, 4), cu.p1(0, FL), cu.p2(0, FL), cu.park(0, 1, FL), cu.park(0, 2, FL), cu.rp(0, FL)),
+             (cu.p2(0, FL, 4), cu.p1(0, FL), cu.p2(0, FL), cu.park(0, 1, FL), cu.park(0, 3, FL), cu.rp(0, FL)),
              (4, 109, 127, 70, 0, 1))
         pp = cp["partpaste"]
         t.eq("PART PASTE: T1 as copied, adopted",
-             (pp.p2(0, FL, 4), pp.p1(0, FL), pp.p2(0, FL), pp.park(0, 1, FL), pp.park(0, 2, FL), pp.rp(0, FL)),
+             (pp.p2(0, FL, 4), pp.p1(0, FL), pp.p2(0, FL), pp.park(0, 1, FL), pp.park(0, 3, FL), pp.rp(0, FL)),
              (4, 109, 127, 70, 0, 1))
         rl = cp["reload"]
         t.eq("RELOAD PART: the saved T1 (not VARI), adopted, no swap", (rl.p2(0, FL, 4), rl.p1(0, FL), rl.p2(0, FL), rl.rp(0, FL)),
@@ -326,13 +328,13 @@ def check(name, s):
     elif name == "o2rev":
         r0, r1 = cp["r0"], cp["r1"]
         t.eq("r0: T1 VARI, rp_prev 1", (r0.p2(0, FL, 4), r0.p1(0, FL), r0.p2(0, FL), r0.rp(0, FL)), (4, 109, 127, 1))
-        t.eq("pasted over: T1 = T2's page (AUTO, 50, 20), the PTCH park untouched, adopted 0",
-             (r1.p2(0, FL, 4), r1.p1(0, FL), r1.p2(0, FL), r1.park(0, 1, FL), r1.park(0, 2, FL), r1.rp(0, FL)),
-             (1, 50, 20, 70, 0, 0))
+        t.eq("pasted over: T1 = T2's page (AUTO, 50, 20), the old PTCH park cleared (VRG3: the page is another track's), adopted 0",
+             (r1.p2(0, FL, 4), r1.p1(0, FL), r1.p2(0, FL), r1.park(0, 1, FL), r1.park(0, 3, FL), r1.rp(0, FL)),
+             (1, 50, 20, 0, 0, 0))
     elif name == "o2late":
         l = cp["late"]
         t.eq("T2 after its trigs: QUAN / TSNS kept, parks untouched, rp_prev 1",
-             (l.p2(1, FL, 4), l.p1(1, FL), l.p2(1, FL), l.park(1, 1, FL), l.park(1, 2, FL), l.rp(1, FL)),
+             (l.p2(1, FL, 4), l.p1(1, FL), l.p2(1, FL), l.park(1, 1, FL), l.park(1, 3, FL), l.rp(1, FL)),
              (4, 109, 127, 0, 0, 1))
     elif name == "old56":
         e = cp["end"]

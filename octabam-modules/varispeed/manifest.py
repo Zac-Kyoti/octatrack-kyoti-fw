@@ -26,7 +26,10 @@ holds, the partsaved that ends the clear forgets), because STORE owns 0x4004a9d0
 module requires STORE. The standalone image keeps its own detour there. The STATIC and
 FLEX descriptors: TSTR count 4 -> 5 with stock's 5-position select and this unit's
 formatter; PTCH's widget and encoder step. The PTCH <-> QUAN swap keeps PTCH of each
-machine in NEIGHBOR's '---' bytes of the same track (claimed below).
+machine, and the QUAN it remembers off VARI, in four bytes of the same track's record that
+stock never edits or shows (VRG3: THRU page 1 slots 2 / 5, THRU's and NEIGHBOR's slot bytes;
+claimed below). An older build's park in NEIGHBOR's '---' bytes is moved in at first sight and
+cleared there, on a track whose NEIGHBOR bytes hold nothing else.
 
 PLACE. DRAM (the default) or CAVE (the classic cave, where the standalone puts it).
 The ledger refuses this module beside VARISPEED_EMUS or any other that writes the STATIC /
@@ -77,7 +80,7 @@ U = "vari_cf"
 LINKED = (
     Linked(U, os.path.join(_HERE, "varispeed.s"),
            reference=(0x400d6500,
-                      "81989fcd4967f54f7db62d14d6867dc8224e42b8bdc7cdd6374109ca1d738d7b"),
+                      "3aa1d4302fa46adda87bfdef82bdcf43cacc22a74162e0b51c5afe2c67dcee15"),
            include=_shared_source),
     # STORE's partclear / partsaved handlers (vs_st_*), octabam only: no standalone twin.
     Linked("vari_store", os.path.join(_HERE, "varispeed_store.s")),
@@ -128,12 +131,14 @@ KEEPS = (
     Keep(0x40046b9e, _u32(0x400be316), "the 5-position select's stock icons"),
 )
 
-# NEIGHBOR's '---' bytes of every track, in the Part window (offsets from 0x8ed80): the
-# parks of STATIC's and FLEX's PTCH (page 1 slots 0 / 5). TSNS has no park here.
+# VRG3: the four bytes of every track this module keeps, in the Part window (offsets from 0x8ed80):
+# THRU page 1 slots 2 / 5 ('---', never editable: STATIC's / FLEX's PTCH park) and THRU's / NEIGHBOR's
+# slot bytes (no slot list, ignored on a THRU / NEIGHBOR trig: STATIC's / FLEX's side byte)
 _PARKS = tuple(
-    (base + 30 * t + slot, 1, f"T{t + 1} {what}")
+    (base + k * t + slot, 1, f"T{t + 1} {what}")
     for t in range(8)
-    for base, slot, what in ((0x2a, 18, "STATIC PTCH park"), (0x2a, 23, "FLEX PTCH park")))
+    for base, k, slot, what in ((0x2a, 30, 14, "STATIC PTCH park"), (0x2a, 30, 17, "FLEX PTCH park"),
+                                (0x2ca, 5, 2, "STATIC side byte"), (0x2ca, 5, 3, "FLEX side byte")))
 
 PLACES = ("DRAM", "CAVE")
 

@@ -83,6 +83,12 @@
         .global rp_pp
         .global rp_prev
         .global vem_depth
+        .global rp_migrate
+        .global rp_bpt
+        .ifdef  VEM_BP
+        .global vh_bptake               | KYOTI V1.8BC: BLACKPYRAMIDS_303's ot_assign calls them
+        .global vh_bpback
+        .endif
         .global rk_ratios
         .global vem_end
 
@@ -230,10 +236,27 @@
         .equ    BPM24_MAX, 7200
         .equ    INC_MAX, 0x07fffff0     | 2.0 - 16 LSB, Q26
         .equ    RP_HOLD, 0xfe
-        .equ    PARK1_ST, 18            | NEIGHBOR p1 slot 0: STATIC's PTCH park
-        .equ    PARK1_FL, 23            | NEIGHBOR p1 slot 5: FLEX's PTCH park
-        .equ    PARK2_ST, 23            | NEIGHBOR p2 slot 5: STATIC's TSNS park
-        .equ    PARK2_FL, 21            | NEIGHBOR p2 slot 3: FLEX's TSNS park
+| What VARISPEED keeps per track (VRG3, 2026-11-19; NOTES): four bytes of the track's Part record that
+| stock never edits or shows -- no page, encoder, chooser, MIDI CC or p-lock reaches them (ot_emu, every
+| machine's pages and the SRC SETUP chooser), its Part validator keeps 0..127, and a track playing THRU /
+| NEIGHBOR sounds the same whatever they hold (ot_emu audio, bit for bit). Their one stock writer, the SRC
+| page paste of a THRU / NEIGHBOR page, is undone around it (vh_pgsave / vh_pgrest). Until VRG2 this lived
+| in NEIGHBOR's page bytes, which BLACKPYRAMIDS_303 owns (and NEIGHBOR's SETUP bytes are editable from the
+| SRC SETUP chooser): rp_migrate moves an older build's park in.
+        .equ    VP_ST, 14               | + OFF_P1 + 30t: THRU page 1 slot 2 ('---'): STATIC's PTCH park
+        .equ    VP_FL, 17               | THRU page 1 slot 5 ('---'): FLEX's PTCH park
+        .equ    VM_ST, 2                | + OFF_SLOT5 + 5t: THRU's slot byte: STATIC's side byte
+        .equ    VM_FL, 3                | NEIGHBOR's slot byte: FLEX's side byte
+        .equ    VM_QUAN, 0x0f           | VM off VARI: the remembered QUAN + 1 (0: none)
+        .equ    VM_EMUS, 0x30           |   the remembered EMUS stop + 1 (VARISPEED_EMUS; 0: none = OT)
+        .equ    VM_BPV, 6               |   bit 6 (FLEX): BLACKPYRAMIDS_303 took the track while on VARI
+| the older builds' NEIGHBOR park (rp_migrate only)
+        .equ    OLD_P1, 18              | + OFF_P1 + 30t: NEIGHBOR page 1, byte 0
+        .equ    OLD_P2_AT, 0x1b0        | NEIGHBOR page 2, from page 1's (OFF_P2 - OFF_P1)
+        .equ    OLD_PK1_ST, 0           | page 1 byte 0: STATIC's PTCH park
+        .equ    OLD_PK1_FL, 5           | page 1 byte 5: FLEX's PTCH park
+        .equ    OLD_PK2_ST, 5           | page 2 byte 5: STATIC's TSNS park (VARISPEED_EMUS)
+        .equ    OLD_PK2_FL, 3           | page 2 byte 3: FLEX's TSNS park (VARISPEED_EMUS)
         .equ    TSNS_SLOT2, 5
         .equ    TSTR_SLOT2, 4
         .equ    EM_DETENTS, 4           | EMUS: detents in one direction per stop (spec §6b item 6)
@@ -586,6 +609,10 @@ emus_idx:
         rts
         .endif
 
+        .ifdef  VEM_UI_SECTION          | VRG3: UI-task code, in the UI section (see THE UI SECTION)
+        .section .vemui,"ax"
+        .balign 2
+        .endif
 | ---------------------------------------------------------------------------
 | tstr_fmt(buf, v): the STATIC / FLEX TSTR readout (descriptor formatter column; PICKUP
 | keeps stock's). OFF AUTO NORM BEAT VARI, else "???". Stock's tail: sprintf(buf, s).
@@ -595,7 +622,7 @@ tstr_fmt:
         cmp.l   %d1,%d0
         bhi.s   1f                      | unsigned: catches negatives too
         lsl.l   #2,%d0
-        lea     tstr_tab(%pc),%a0
+        lea     (tstr_tab).l,%a0
         move.l  (%a0,%d0.l),%d0
         move.l  %d0,8(%sp)
         jmp     (SPRINTF).l
@@ -610,7 +637,7 @@ tstr_fmt:
 attr_label:
         cmpi.l  #VARI,%d0
         bne.s   1f
-        pea     str_vari(%pc)
+        pea     (str_vari).l
         jmp     (ATTR_PRINT).l
 1:      pea     (STR_ERROR).l
         jmp     (ATTR_PRINT).l
@@ -632,7 +659,7 @@ attr_up:
         bne.s   .au_out                 | VARI and anything unknown: no change
         .if VEM_EMUS
         moveq   #7,%d1                  | BEAT -> VARI: tracks under AUTO on this sample enter
-3:      bsr     vg_note                 |   VARI. Every track whose gate is off before the
+3:      jsr     (vg_note).l             |   VARI. Every track whose gate is off before the
         subq.l  #1,%d1                  |   edit is noted: vg_tick gives one the edit puts on
         bpl.s   3b                      |   VARI over budget EMUS = OT, its own (VEM7)
         .endif
@@ -671,6 +698,9 @@ attr_tail:
         bsr     rp_poll_all
         movea.l (%sp)+,%a2
         jmp     (ATTR_REDRAW).l
+        .ifdef  VEM_UI_SECTION
+        .text
+        .endif
 
         .if VEM_EMUS
 | ---------------------------------------------------------------------------
@@ -1136,8 +1166,8 @@ vg_fix:
         rts
 
 | vg_step_ot: d1 = track: its EMUS becomes OT (stored 1) in the current Part, where it
-| lives now: the TSNS slot of its current machine, or that machine's park while the swap
-| into VARI is still to come (rp_prev 0). The working DB and its SRAM copy with the
+| lives now: the TSNS slot of its current machine, or the EMUS that machine's VM remembers
+| while the swap into VARI is still to come (rp_pend). The working DB and its SRAM copy with the
 | writer's dirty flags, as the swap writes them; the live byte too when the slot holds it
 | and the live bytes are this Part's (APPLIED_B / APPLIED_P: during a sequencer Part switch
 | the UI task moves PART_B a step before the frame applies the new Part). The swap's own
@@ -1153,21 +1183,25 @@ vg_step_ot:
         mulu.l  %d3,%d0
         lea     (SHADOW_ADJ).l,%a1
         adda.l  %d0,%a1                 | a1 = its SRAM copy
-        moveq   #30,%d3
-        mulu.l  %d1,%d3
-        addi.l  #OFF_P2,%d3             | d3 = the track's page-2 row
-        jsr     (rp_pend).l             | the swap into VARI still to come: the park
+        jsr     (rp_pend).l             | the swap into VARI still to come: the remembered EMUS
         tst.l   %d0
         beq.s   1f
-        addi.l  #PARK2_ST,%d3           | the park
-        tst.l   %d2
-        beq.s   2f
-        subq.l  #PARK2_ST-PARK2_FL,%d3
-2:      moveq   #1,%d0
+        move.l  %d1,%d3
+        lsl.l   #2,%d3
+        add.l   %d1,%d3
+        add.l   %d2,%d3
+        addi.l  #OFF_SLOT5+VM_ST,%d3    | VM_m
+        moveq   #0,%d0
+        move.b  0(%a0,%d3.l),%d0
+        andi.l  #0xff-VM_EMUS,%d0
+        ori.l   #0x10,%d0               | stop 0 + 1: OT
         move.b  %d0,0(%a0,%d3.l)
         move.b  %d0,0(%a1,%d3.l)
         bra.s   3f
-1:      move.l  %d2,%d0                 | the slot
+1:      moveq   #30,%d3
+        mulu.l  %d1,%d3
+        addi.l  #OFF_P2,%d3             | d3 = the track's page-2 row
+        move.l  %d2,%d0                 | the slot
         add.l   %d0,%d0
         add.l   %d2,%d0
         add.l   %d0,%d0                 | 6m
@@ -1536,13 +1570,13 @@ vg_tkey:
         rts
 
 | rp_pend: d1 = track, d2 = machine (0 ST / 1 FL) of a track whose gate is on in the current
-| Part -> d0 = 1 when that machine's EMUS still waits in its park, the swap into VARI to come:
-| rp_prev 0, or forgotten (0xff) over bytes that have still to enter VARI (rp_unent: the
-| next poll's first sight enters, VARIG2); else 0 (the TSNS slot).
+| Part -> d0 = 1 when that machine's EMUS is still the remembered one (VM), the swap into VARI
+| to come: rp_prev 0, or forgotten (0xff) over bytes that have still to enter VARI (rp_unent:
+| the next poll's first sight enters, VARIG2); else 0 (the TSNS slot).
 | Keeps everything else. UI task.
 rp_pend:
-        lea     -12(%sp),%sp
-        movem.l %d6-%d7/%a0,(%sp)
+        lea     -16(%sp),%sp
+        movem.l %d5-%d7/%a0,(%sp)
         lea     (rp_prev).l,%a0
         move.l  %d1,%d0
         add.l   %d0,%d0
@@ -1552,26 +1586,14 @@ rp_pend:
         addq.l  #1,%d0
         bne.s   1f                      | 1, HOLD: EMUS in the slot
         jsr     (part_base).l
-        moveq   #30,%d6
-        mulu.l  %d1,%d6
-        move.l  %d2,%d0
-        add.l   %d0,%d0
-        add.l   %d2,%d0
-        add.l   %d0,%d0                 | 6m
-        move.l  %d6,%d7
-        add.l   %d0,%d6
-        addi.l  #OFF_P1,%d6             | the PTCH slot
-        addi.l  #OFF_P1+PARK1_ST,%d7    | its park
-        tst.l   %d2
-        beq.s   3f
-        addq.l  #PARK1_FL-PARK1_ST,%d7
-3:      jsr     (rp_unent).l            | forgotten: what the next poll's first sight does
+        jsr     (rp_offs).l
+        jsr     (rp_unent).l            | forgotten: what the next poll's first sight does
         bra.s   4f
 1:      moveq   #0,%d0
         bra.s   4f
 2:      moveq   #1,%d0
-4:      movem.l (%sp),%d6-%d7/%a0
-        lea     12(%sp),%sp
+4:      movem.l (%sp),%d5-%d7/%a0
+        lea     16(%sp),%sp
         rts
 
 | vg_entered: d0 = tracks vg_note noted (bit t) -> d0 = those of them on VARI now (the edit
@@ -1599,7 +1621,7 @@ vg_entered:
 | (its block), its 16 FX type bytes, whether the project tempo is in range, and per track
 | its machine and, on ST / FL, that machine's TSTR; when TSTR is AUTO or VARI (the only
 | values that can open the gate) also its sample slot, that sample's TSMODE and tempo, the
-| rp_prev byte, the TSNS slot and the park. h = 33 h + x over them (any one input changing
+| rp_prev byte, the TSNS slot and VM_m. h = 33 h + x over them (any one input changing
 | changes it but for a collision). rp_sync first: rp_prev must describe this Part. About
 | 15 instructions per track off AUTO / VARI, 50 on them. Uses d0, d1, a0, a1 (the tail's).
 vg_sig:
@@ -1682,17 +1704,14 @@ vg_sig:
         lsl.l   #8,%d0
         add.l   %d0,%d2                 | rp_prev
         movea.l %a2,%a0
-        moveq   #30,%d0
-        mulu.l  %d1,%d0
-        adda.l  %d0,%a0
-        adda.l  #OFF_P2,%a0
-        moveq   #PARK2_ST,%d0
-        tst.l   %d3
-        beq.s   3f
-        moveq   #PARK2_FL,%d0
-3:      mvz.b   0(%a0,%d0.l),%d0
+        adda.l  #OFF_SLOT5+VM_ST,%a0
+        move.l  %d1,%d0
+        lsl.l   #2,%d0
+        add.l   %d1,%d0
+        add.l   %d3,%d0                 | 5t + m
+        mvz.b   0(%a0,%d0.l),%d0
         lsl.l   #3,%d0
-        add.l   %d0,%d2                 | the park
+        add.l   %d0,%d2                 | VM_m (the remembered EMUS, or the parked TSNS)
 .sg_n:  addq.l  #1,%d1
         moveq   #8,%d0
         cmp.l   %d0,%d1
@@ -2274,23 +2293,30 @@ db_tsns:
         lea     12(%sp),%sp
         rts
 
-| d1 = track, d2 = machine (0 ST / 1 FL) -> d0 = machine m's parked TSNS-pair byte (signed):
-| off VARI, its EMUS (0 = never written: enters as OT). Keeps everything else.
+| d1 = track, d2 = machine (0 ST / 1 FL) -> d0 = the EMUS machine m's VM remembers off VARI, as
+| the TSNS slot stores it (emus_stops; 0 = none: enters as OT). Keeps everything else.
 db_park2:
         move.l  %a0,-(%sp)
         bsr     part_base
-        moveq   #30,%d0
-        mulu.l  %d1,%d0
-        adda.l  %d0,%a0
-        adda.l  #OFF_P2+PARK2_ST,%a0
-        tst.l   %d2
+        move.l  %d1,%d0
+        lsl.l   #2,%d0
+        add.l   %d1,%d0
+        add.l   %d2,%d0                 | 5t + m
+        adda.l  #OFF_SLOT5+VM_ST,%a0
+        mvz.b   0(%a0,%d0.l),%d0
+        lsr.l   #4,%d0
+        andi.l  #3,%d0                  | the stop + 1
         beq.s   1f
-        subq.l  #PARK2_ST-PARK2_FL,%a0
-1:      mvs.b   (%a0),%d0
-        movea.l (%sp)+,%a0
+        lea     (emus_stops-1).l,%a0
+        mvz.b   0(%a0,%d0.l),%d0
+1:      movea.l (%sp)+,%a0
         rts
         .endif                          | VEM_EMUS: EMUS and the DSP load guard
 
+        .ifdef  VEM_UI_SECTION          | VRG3: UI-task code, in the UI section (see THE UI SECTION)
+        .section .vemui,"ax"
+        .balign 2
+        .endif
 | ---------------------------------------------------------------------------
 | Bulk writers (the user's O2): SRC page paste, track paste and the PART menu (paste,
 | undo, clear) rewrite TSTR together with values already in the right domain, and pass
@@ -2301,6 +2327,7 @@ db_park2:
 | arguments are passed on again; d0 comes back untouched.
 vh_srcpaste:
         bsr     vh_enter
+        bsr     vh_pgsave               | VRG3: VARISPEED's four bytes, kept across the paste
         move.l  24(%sp),-(%sp)
         move.l  24(%sp),-(%sp)
         move.l  24(%sp),-(%sp)
@@ -2309,6 +2336,7 @@ vh_srcpaste:
         move.l  24(%sp),-(%sp)
         jsr     vb_srcpaste
         lea     24(%sp),%sp
+        bsr     vh_pgrest
         bra     vh_leave
 vb_srcpaste:
         lea     -52(%sp),%sp            | displaced
@@ -2363,6 +2391,200 @@ vb_partclear:
         movem.l %d2-%d3/%a2-%a3,(%sp)   | displaced
         jmp     (0x4004a9d8).l
 
+| vh_pgsave / vh_pgrest (VRG3), around the SRC page paste 0x40027e4c(buf, part, t, page, midi), whose
+| arguments they read at 12(sp)..: a paste writes one machine's twelve page bytes and its slot byte, so
+| a THRU page also writes THRU page 1 slots 2 / 5 and THRU's slot byte, a NEIGHBOR page NEIGHBOR's slot
+| byte -- VARISPEED's four bytes, which no page shows. They are kept across it, both copies (an UNDO of
+| the paste comes through here too). A pasted STATIC / FLEX page brings that machine's twelve bytes from
+| another track, so what VARISPEED kept for the old ones is cleared (VP_m, VM_m: a VARI page is then
+| adopted as it is, rp_unent) -- unless the track is a BLKPYRAMD after the paste (its FLEX bytes are the
+| voice's knobs; FLEX's pair belongs to the stashed FLEX, BLACKPYRAMIDS_303's page paste). A MIDI or
+| other page, or nothing pasted (d0 = 0): only kept. Keep every register (d0 = the paste's result).
+vh_pgsave:
+        lea     -12(%sp),%sp
+        movem.l %d0-%d1/%d3,(%sp)
+        move.l  12+12(%sp),%d0          | part
+        move.l  12+16(%sp),%d1          | t
+        moveq   #0,%d3
+        bsr     pgx
+        movem.l (%sp),%d0-%d1/%d3
+        lea     12(%sp),%sp
+        rts
+vh_pgrest:
+        lea     -20(%sp),%sp
+        movem.l %d0-%d3/%a0,(%sp)
+        move.l  %d0,%d2                 | pasted?
+        move.l  20+12(%sp),%d0
+        move.l  20+16(%sp),%d1
+        moveq   #1,%d3
+        bsr     pgx                     | the four bytes back
+        tst.l   %d2
+        beq.s   9f
+        tst.l   20+24(%sp)              | a MIDI page
+        bne.s   9f
+        tst.l   20+20(%sp)              | not SRC
+        bne.s   9f
+        movea.l 20+8(%sp),%a0
+        moveq   #0,%d3
+        move.b  19(%a0),%d3             | the pasted machine
+        moveq   #1,%d2
+        cmp.l   %d2,%d3
+        bhi.s   9f                      | not STATIC / FLEX
+        addq.l  #2,%d3
+        bsr     pgx                     | its pair cleared
+9:      movem.l (%sp),%d0-%d3/%a0
+        lea     20(%sp),%sp
+        rts
+| pgx: d0 = part, d1 = t, d3 = 0 save VARISPEED's four bytes (vh_pgbuf) / 1 put them back / 2 + m clear
+| machine m's pair (not on a BLKPYRAMD track); both copies. Nothing for another part or track. Keeps all.
+pgx:
+        lea     -32(%sp),%sp
+        movem.l %d0-%d4/%a0-%a2,(%sp)
+        moveq   #3,%d2
+        cmp.l   %d2,%d0
+        bhi     9f
+        moveq   #7,%d2
+        cmp.l   %d2,%d1
+        bhi     9f
+        move.l  #PART_STRIDE,%d2
+        mulu.l  %d2,%d0
+        movea.l (DB_PTR).l,%a0
+        adda.l  %d0,%a0                 | the DB's block
+        lea     (SHADOW_ADJ).l,%a1
+        adda.l  %d0,%a1                 | its SRAM copy
+        moveq   #2,%d2
+        cmp.l   %d2,%d3
+        blt.s   1f
+        jsr     (rp_bpt).l
+        tst.l   %d0
+        bne     9f                      | a BLKPYRAMD track: FLEX's pair is the stashed FLEX's
+1:      move.l  %d1,%d0
+        mulu.w  #30,%d0
+        addi.l  #OFF_P1+VP_ST,%d0       | d0 = VP_ST
+        mulu.w  #5,%d1
+        addi.l  #OFF_SLOT5+VM_ST,%d1    | d1 = VM_ST
+        cmp.l   %d2,%d3
+        blt.s   4f
+        moveq   #3,%d2                  | clear: machine m = d3 - 2
+        cmp.l   %d2,%d3
+        bne.s   2f
+        addq.l  #VP_FL-VP_ST,%d0
+        addq.l  #VM_FL-VM_ST,%d1
+2:      moveq   #0,%d2
+        move.b  %d2,0(%a0,%d0.l)
+        move.b  %d2,0(%a1,%d0.l)
+        move.b  %d2,0(%a0,%d1.l)
+        move.b  %d2,0(%a1,%d1.l)
+        bra.s   9f
+4:      lea     (vh_pgbuf).l,%a2
+        bsr.s   5f                      | the DB's block
+        movea.l %a1,%a0
+        bsr.s   5f                      | its SRAM copy
+9:      movem.l (%sp),%d0-%d4/%a0-%a2
+        lea     32(%sp),%sp
+        rts
+5:      tst.l   %d3
+        bne.s   6f
+        move.b  0(%a0,%d0.l),%d4        | save
+        move.b  %d4,(%a2)+
+        move.b  VP_FL-VP_ST(%a0,%d0.l),%d4
+        move.b  %d4,(%a2)+
+        move.b  0(%a0,%d1.l),%d4
+        move.b  %d4,(%a2)+
+        move.b  VM_FL-VM_ST(%a0,%d1.l),%d4
+        move.b  %d4,(%a2)+
+        rts
+6:      move.b  (%a2)+,%d4              | put back
+        move.b  %d4,0(%a0,%d0.l)
+        move.b  (%a2)+,%d4
+        move.b  %d4,VP_FL-VP_ST(%a0,%d0.l)
+        move.b  (%a2)+,%d4
+        move.b  %d4,0(%a0,%d1.l)
+        move.b  (%a2)+,%d4
+        move.b  %d4,VM_FL-VM_ST(%a0,%d1.l)
+        rts
+
+        .ifdef  VEM_BP
+| vh_bptake(part, t) / vh_bpback(part, t), C ABI (KYOTI V1.8BC: BLACKPYRAMIDS_303's ot_assign calls them,
+| tools/ot303/cf/control.c KYOTI_VARI_TAKE / _BACK), once per Part copy (`part`: the Part as the voice sees
+| it, the DB's or its SRAM copy). take: before the voice stashes FLEX and takes the track. Both machines'
+| older NEIGHBOR park moves in first (rp_migrate: the voice is about to write NEIGHBOR's bytes); FLEX leaves
+| VARI when its bytes are on it (PTCH back in the slot, QUAN remembered: the stash keeps FLEX as it is off
+| VARI); a FLEX TSTR of VARI is remembered in VM bit 6 (the stash keeps TSTR in two bits). back: after FLEX
+| is put back -- TSTR VARI again when it was (bit 6 cleared); the next poll enters VARI with the remembered
+| QUAN. Both forget rp_prev: the next poll decides by the bytes. STATIC's bytes are not the voice's: kept.
+vh_bptake:
+        lea     -28(%sp),%sp
+        movem.l %d2-%d7/%a2,(%sp)
+        movea.l 32(%sp),%a0
+        suba.l  #OFF_FX1,%a0            | the voice's Part -> VARISPEED's block (offsets from the blob)
+        move.l  36(%sp),%d1
+        movea.l %a0,%a1                 | one copy
+        moveq   #0,%d2
+1:      jsr     (rp_offs).l
+        jsr     (rp_gate_a).l
+        move.l  %d0,%d4
+        jsr     (rp_migrate).l
+        addq.l  #1,%d2
+        moveq   #1,%d0
+        cmp.l   %d0,%d2
+        bls.s   1b
+        moveq   #1,%d2                  | FLEX: its rp_offs and gate are the last pass's
+        jsr     (rp_unent).l
+        tst.l   %d0
+        bne.s   3f                      | off VARI already
+        moveq   #0,%d0
+        move.b  (%a0,%d7.l),%d0
+        subq.l  #4,%d0
+        bpl.s   2f                      | PTCH parked
+        tst.l   %d4                     | nothing kept under a QUAN stop: on VARI with the gate on
+        beq.s   3f
+2:      moveq   #0,%d4
+        jsr     (rp_xfer).l                 | out of VARI, this copy
+3:      movea.l %d6,%a2
+        lea     OFF_P2-OFF_P1+TSTR_SLOT2(%a2),%a2
+        moveq   #VARI,%d0
+        cmp.b   (%a0,%a2.l),%d0
+        bne.s   4f
+        moveq   #0,%d0
+        move.b  (%a0,%d5.l),%d0
+        bset    #VM_BPV,%d0             | TSTR was VARI
+        move.b  %d0,(%a0,%d5.l)
+4:      jsr     (rp_forget).l
+        movem.l (%sp),%d2-%d7/%a2
+        lea     28(%sp),%sp
+        rts
+vh_bpback:
+        lea     -16(%sp),%sp
+        movem.l %d2/%d5-%d7,(%sp)
+        movea.l 20(%sp),%a0
+        suba.l  #OFF_FX1,%a0
+        move.l  24(%sp),%d1
+        moveq   #1,%d2
+        jsr     (rp_offs).l
+        moveq   #0,%d0
+        move.b  (%a0,%d5.l),%d0
+        bclr    #VM_BPV,%d0
+        beq.s   1f                      | not taken on VARI
+        move.b  %d0,(%a0,%d5.l)
+        movea.l %d6,%a1
+        lea     OFF_P2-OFF_P1+TSTR_SLOT2(%a1),%a1
+        moveq   #VARI,%d0
+        move.b  %d0,(%a0,%a1.l)         | FLEX's TSTR: VARI again
+1:      jsr     (rp_forget).l
+        movem.l (%sp),%d2/%d5-%d7
+        lea     16(%sp),%sp
+        rts
+        .if VEM_EMUS == 0
+| rp_gate_a: rp_gate_m on the Part block in a0 (d1 = track 0..7, d2 = machine 0 / 1) -> d0.
+| Keeps all but d0. (VARISPEED_EMUS has its own, VEM11.)
+rp_gate_a:
+        lea     -16(%sp),%sp
+        movem.l %d1/%d3/%a0-%a1,(%sp)   | rp_gate_m's own frame: its epilogue restores it
+        jmp     (rp_gate_blk).l
+        .endif
+        .endif                          | VEM_BP
+
 | RELOAD PART (stock 0x4004aab4(part)) copies the saved Part in and refreshes, through
 | neither Part apply: the same hold/forget (16 bytes).
 rp_reload:
@@ -2379,11 +2601,11 @@ vb_reload:
 | HOLD every rp_prev byte; nested holds count, so an inner forget (a Part apply inside a
 | PART menu operation) keeps the HOLD until the outermost one leaves. d1/a0 only.
 vh_enter:
-        lea     vem_depth(%pc),%a0
+        lea     (vem_depth).l,%a0
         move.b  (%a0),%d1
         addq.l  #1,%d1
         move.b  %d1,(%a0)
-        lea     rp_prev(%pc),%a0
+        lea     (rp_prev).l,%a0
         move.l  #0xfefefefe,%d1
         move.l  %d1,(%a0)+
         move.l  %d1,(%a0)+
@@ -2391,13 +2613,16 @@ vh_enter:
         move.l  %d1,(%a0)
         rts
 vh_leave:
-        lea     vem_depth(%pc),%a0
+        lea     (vem_depth).l,%a0
         move.b  (%a0),%d1
         subq.l  #1,%d1
         bpl.s   1f
         moveq   #0,%d1
 1:      move.b  %d1,(%a0)
-        bra     rp_forget               | rts to our caller, d0 kept
+        jmp     (rp_forget).l           | rts to our caller, d0 kept
+        .ifdef  VEM_UI_SECTION
+        .text
+        .endif
 
 | ============================================================================
 | PART 2 -- RETAINED (VARISPEED_RETAINED.s), extended for VARISPEED_EMUS:
@@ -2451,7 +2676,8 @@ db_mach:
 
 | d1 = track, d2 = machine (0 ST / 1 FL) -> d0 = 1 when that machine's own Part bytes
 | put the track on VARI: TSTR 4, or AUTO with the bound sample's TSMODE 4, and that
-| sample's BPM x 24 in 720..7200. Keeps everything but d0.
+| sample's BPM x 24 in 720..7200; never on a BLKPYRAMD track (rp_bpt: its FLEX TSTR byte
+| is the voice's VOL). Keeps everything but d0.
 rp_gate_m:
         lea     -16(%sp),%sp
         movem.l %d1/%d3/%a0-%a1,(%sp)
@@ -2462,9 +2688,10 @@ rp_gate_m:
         cmp.l   %d0,%d2
         bhi     .gm_no
         bsr     part_base
-        .if VEM_EMUS
-rp_gate_blk:                            | rp_gate_a's landing (VEM11): a0 = the Part given
-        .endif
+rp_gate_blk:                            | rp_gate_a's landing (VEM11, VRG3): a0 = the Part given
+        bsr     rp_bpt
+        tst.l   %d0
+        bne     .gm_no                  | a BLKPYRAMD track (VRG3): never VARI
         move.l  %d1,%d3
         lsl.l   #2,%d3
         add.l   %d1,%d3                 | 5t
@@ -2607,34 +2834,39 @@ rp_swap_ui:
         rts
 
 | d1 = track, d2 = machine (0/1), d3 = 1: m is the track's current machine (write the
-| live bytes + base word too). On a gate transition, swap BOTH pairs of machine m:
-|   PTCH (p1 slot 0) <-> its park (ST: NEIGHBOR p1 s0, FL: NEIGHBOR p1 s5). VARIG2: into
-|     VARI, QUAN is 1/1 unless the park holds the QUAN of the track's last exit from VARI
-|     (bit 7 set: 0x80 | QUAN); PTCH is parked as it is, never below 4. Out of VARI, PTCH
-|     comes back (a park below 4: PTCH 0) and QUAN is parked with bit 7. So the park says
-|     which domain the Part's bytes are in: on VARI it holds PTCH (4..127, bit 7 clear); off
-|     VARI nothing (below 4) or a remembered QUAN (bit 7). A park from before VARIG2 off VARI
-|     (4..127, no bit 7: an old QUAN, or a PTCH value an earlier swap left there) is not a
-|     remembered QUAN: QUAN enters 1/1;
-|   TSNS (p2 slot 5) <-> its park (ST: NEIGHBOR p2 s5, FL: NEIGHBOR p2 s3), a fresh
-|     park (0) entering EMUS as 1 = OT; TSNS comes back verbatim.
+| live bytes + base word too). On a gate transition, swap BOTH pairs of machine m.
+| VRG3 (2026-11-19): what VARISPEED keeps per machine lives in four bytes of the track's Part record
+| that stock never edits or shows (VP_* / VM_* above; NOTES 2026-11-19 VRG3), no longer in NEIGHBOR's
+| page bytes (BLACKPYRAMIDS_303 keeps its signature, stash and parked knobs there):
+|   VP_m  on VARI: the PTCH the slot held (4..124, never below 4); else 0;
+|   VM_m  off VARI: the remembered QUAN + 1 (bits 0-3; 0 none), [EMUS: the remembered EMUS stop
+|         + 1 (bits 4-5)], bit 6 (FLEX): BLACKPYRAMIDS_303 took the track on VARI; on VARI:
+|         [EMUS: the TSNS the slot held; VARISPEED: 0].
+| Every value <= 127: stock's Part validator (every load) keeps them (VARIG2's bit-7 memory was
+| zeroed by it).
+|   PTCH (p1 slot 0) <-> VP: into VARI, QUAN is 1/1 unless VM remembers the QUAN of the track's
+|     last exit from VARI; PTCH is parked, never below 4. Out of VARI, PTCH comes back (none
+|     parked: PTCH 0) and QUAN is remembered in VM.
+|   TSNS (p2 slot 5) <-> VM: into VARI, EMUS = the remembered one (none: OT), TSNS parked; out
+|     of VARI, TSNS comes back verbatim, EMUS remembered.
 |     (VARISPEED_EMUS only. VARISPEED swaps PTCH <-> QUAN alone: TSNS stays TSNS.)
-| in the working DB and the SRAM part copy, with the writer's own dirty flags. The
-| NEIGHBOR bytes are '---' parameters stock saves with the Part and never applies.
-| First sight (0xff: after a Part apply, a bulk write, another Part): rp_prev takes the gate.
-| Off VARI nothing moves. On VARI the bytes decide (rp_unent, VARIG2): PTCH parked, or an
-| empty park under a QUAN stop (a VARI page an SRC page paste brought) -- on VARI already,
-| nothing moves; a remembered QUAN, or an empty park under PTCH -- the entry into VARI is
-| still to come (the gate came on before anything polled the track: a TSTR edit, a sample's
-| TIMESTRETCH or tempo, a Part whose bytes never entered), so it is made now, QUAN 1/1 or the
-| remembered one. A leave over a park with bit 7 (the bytes are off VARI already) moves
-| nothing either. HOLD (a RELOAD or bulk write in progress) touches nothing. Returns d0 =
-| domain<<1 | swapped.
-| Keeps everything else.
+| in the working DB and the SRAM part copy, with the writer's own dirty flags.
+| rp_prev notices that something may have changed (first sight 0xff: after a Part apply, a bulk
+| write, another Part; or a gate transition); the bytes then decide:
+|   gate on:  PTCH parked (entered already: a missed poll) -> nothing moves; a transition -> the
+|             entry; first sight -> rp_unent: nothing kept under a QUAN stop (a VARI page an SRC
+|             page paste brought) is adopted, else the entry is made now.
+|   gate off: PTCH parked -> the exit is made now (also on first sight: a gate that went off
+|             while nothing polled the track); nothing kept under a QUAN stop on a transition
+|             from on (that pasted VARI page) -> the exit, PTCH 0; else nothing moves.
+| First sight also moves an older build's NEIGHBOR park in (rp_migrate). A BLKPYRAMD track
+| (FLEX + 'O','T',1) is never touched, on either machine (rp_bpt: rp_gate_m reads 0, nothing
+| moves, rp_prev stays). HOLD (a RELOAD or bulk write in progress) touches nothing. Returns
+| d0 = domain<<1 | swapped. Keeps everything else.
 rp_swap_m:
         lea     -36(%sp),%sp
         movem.l %d1-%d7/%a0-%a1,(%sp)
-        bsr     rp_gate_m               | d0 = g
+        bsr     rp_gate_m               | d0 = g (0 on a BLKPYRAMD track)
         move.l  %d0,%d4
         lea     rp_prev(%pc),%a0
         move.l  %d1,%d0
@@ -2651,96 +2883,51 @@ rp_swap_m:
         moveq   #-2,%d5
         cmp.l   %d5,%d0
         beq     .sm_same                | HOLD: the Part is being written
-        move.b  %d4,(%a0)
         move.l  %d0,%d3                 | d3 = the byte before
+        movea.l %a0,%a1                 | a1 -> rp_prev[2t + m]
         bsr     part_base               | a0 = the part's block
+        bsr     rp_bpt
+        tst.l   %d0
+        bne     .sm_same                | a BLKPYRAMD track: VARISPEED keeps off it
+        move.b  %d4,(%a1)
         moveq   #0,%d0
         move.b  (PART_B).l,%d0
         move.l  #PART_STRIDE,%d5
-        mulu.l  %d0,%d5
+        mulu.l  %d5,%d0
         lea     (SHADOW_ADJ).l,%a1
-        adda.l  %d5,%a1                 | a1 = the SRAM copy's block
-        moveq   #30,%d5
-        mulu.l  %d1,%d5                 | 30t
-        move.l  %d2,%d0
-        add.l   %d0,%d0
-        add.l   %d2,%d0
-        add.l   %d0,%d0                 | 6m
-        move.l  %d5,%d6
-        add.l   %d0,%d6
-        addi.l  #OFF_P1,%d6             | d6 = PTCH slot
-        move.l  %d5,%d7
-        addi.l  #OFF_P1+PARK1_ST,%d7    | d7 = its park
-        tst.l   %d2
-        beq.s   1f
-        addq.l  #PARK1_FL-PARK1_ST,%d7
-1:      moveq   #1,%d5
-        cmp.l   %d5,%d3
-        bls.s   .sm_move                | 0/1: a transition
-        tst.l   %d4                     | first sight: off VARI nothing moves; on VARI the
-        beq     .sm_adopt               |   bytes say whether they entered it
+        adda.l  %d0,%a1                 | a1 = the SRAM copy's block
+        bsr     rp_offs                 | d5 = VM, d6 = PTCH slot, d7 = VP (offsets)
+        moveq   #1,%d0
+        cmp.l   %d0,%d3
+        bls.s   1f                      | 0/1: a transition
+        bsr     rp_migrate              | first sight: an older build's park moves in
+1:      tst.l   %d4
+        beq.s   2f
+        moveq   #0,%d0                  | gate on: PTCH parked -- entered already
+        move.b  (%a0,%d7.l),%d0
+        subq.l  #4,%d0
+        bpl     .sm_adopt
+        moveq   #1,%d0
+        cmp.l   %d0,%d3
+        bls.s   .sm_move                | a transition: the entry
+        bsr     rp_unent                | first sight: the bytes say (a pasted VARI page:
+        tst.l   %d0                     |   nothing kept under a QUAN stop, adopted)
+        beq     .sm_adopt
+        bra.s   .sm_move
+2:      moveq   #0,%d0                  | gate off: leave over a PTCH park
+        move.b  (%a0,%d7.l),%d0
+        subq.l  #4,%d0
+        bpl.s   .sm_move
+        moveq   #1,%d0                  | or, on a transition from on, a pasted VARI page
+        cmp.l   %d0,%d3                 |   (nothing kept under a QUAN stop): PTCH 0
+        bne     .sm_adopt
         bsr     rp_unent
         tst.l   %d0
-        beq     .sm_adopt               | on VARI already
-.sm_move:                               | (the entry still to come: made now)
-        moveq   #0,%d3
-        move.b  (%a0,%d7.l),%d3         | d3 = the park
-        moveq   #0,%d0
-        move.b  (%a0,%d6.l),%d0         | d0 = the slot
-        tst.l   %d4
-        beq.s   3f
-        bclr    #7,%d3                  | into VARI: the QUAN of the last exit, else 1/1
-        bne.s   2f
-        moveq   #64,%d3
-2:      moveq   #4,%d5                  | PTCH parked, never below 4 (an empty park is)
-        cmp.l   %d5,%d0
-        bge.s   4f
-        move.l  %d5,%d0
-        bra.s   4f
-3:      tst.b   %d3                     | out of VARI over a remembered QUAN: the bytes are
-        bmi     .sm_adopt               |   off VARI already, nothing moves
-        moveq   #4,%d5
-        cmp.l   %d5,%d3
-        bge.s   5f
-        moveq   #64,%d3                 | an empty park: PTCH 0
-5:      bset    #7,%d0                  | QUAN remembered
-4:      move.b  %d3,(%a0,%d6.l)
-        move.b  %d0,(%a0,%d7.l)
-        move.b  %d3,(%a1,%d6.l)
-        move.b  %d0,(%a1,%d7.l)
+        bne     .sm_adopt
+.sm_move:
+        bsr     rp_xfer                 | d3 = the new PTCH-slot value; EMUS: d0 = the new TSNS
         .if VEM_EMUS
-        move.l  %d3,-(%sp)              | the new PTCH-slot value, for the live bytes
-| TSNS <-> EMUS
-        moveq   #30,%d5
-        mulu.l  %d1,%d5
-        move.l  %d2,%d0
-        add.l   %d0,%d0
-        add.l   %d2,%d0
-        add.l   %d0,%d0
-        move.l  %d5,%d6
-        add.l   %d0,%d6
-        addi.l  #OFF_P2+TSNS_SLOT2,%d6  | d6 = TSNS slot
-        move.l  %d5,%d7
-        addi.l  #OFF_P2+PARK2_ST,%d7    | d7 = its park
-        tst.l   %d2
-        beq.s   1f
-        subq.l  #PARK2_ST-PARK2_FL,%d7
-1:      moveq   #0,%d0
-        move.b  (%a0,%d6.l),%d0         | leaving
-        moveq   #0,%d3
-        move.b  (%a0,%d7.l),%d3         | entering
-        tst.l   %d4
-        beq.s   2f                      | leaving VARI: TSNS verbatim
-        tst.l   %d3
-        bne.s   2f
-        moveq   #1,%d3                  | entering EMUS from a fresh park: OT
-2:      move.b  %d3,(%a0,%d6.l)
-        move.b  %d0,(%a0,%d7.l)
-        move.b  %d3,(%a1,%d6.l)
-        move.b  %d0,(%a1,%d7.l)
-        move.l  (%sp)+,%d5              | the new PTCH-slot value
-        .else
-        move.l  %d3,%d5                 | the new PTCH-slot value
+        move.l  %d0,%d2                 | (m is no longer needed)
         .endif
         tst.l   4*2(%sp)                | the caller's d3: live?
         beq.s   3f
@@ -2750,14 +2937,14 @@ rp_swap_m:
         lsl.l   #6,%d6
         add.l   %d6,%d0                 | 72t
         lea     (LIVE_P1).l,%a1
-        move.b  %d5,(%a1,%d0.l)         | live PTCH-slot byte
+        move.b  %d3,(%a1,%d0.l)         | live PTCH-slot byte
         .if VEM_EMUS
         lea     (LIVE_P2+TSNS_SLOT2).l,%a1
-        move.b  %d3,(%a1,%d0.l)         | live TSNS byte (page 2 has no base word)
+        move.b  %d2,(%a1,%d0.l)         | live TSNS byte (page 2 has no base word)
         .endif
         | The BASE word, not the lane: the lane is rebuilt from it every frame.
         lea     (BASE_W).l,%a1
-        move.l  %d5,%d0
+        move.l  %d3,%d0
         lsl.l   #8,%d0
         move.w  %d0,(%a1,%d6.l)         | 64t: base word = ui<<8
 3:
@@ -2782,6 +2969,7 @@ rp_swap_m:
 .sm_seen:
         | a change on the panel's track: its captions now (the page's text pass may
         | run before the widget's next poll)
+        move.l  4(%sp),%d2              | m (the caller's)
         moveq   #0,%d0
         move.b  (UI_TRACK).l,%d0
         cmp.l   %d0,%d1
@@ -2800,20 +2988,137 @@ rp_swap_m:
         lea     36(%sp),%sp
         rts
 
-| rp_unent: a0 = a Part block, d6 = machine m's PTCH slot, d7 = its PTCH park (offsets) ->
-| d0 = 1 when that machine's bytes have still to enter VARI (VARIG2): the park remembers a
-| QUAN (bit 7), or it is empty (below 4) and the slot holds no QUAN stop (4 + 15k: PTCH
-| then). 0: on VARI -- PTCH parked (4..127), or an empty park under a QUAN stop (a VARI page
-| an SRC page paste brought, PTCH 0 behind it). Keeps everything but d0.
+| rp_offs: d1 = track, d2 = machine (0/1) -> d5 = VM_m, d6 = the PTCH slot, d7 = VP_m (offsets in a
+| Part block). Keeps everything else.
+rp_offs:
+        moveq   #30,%d6
+        mulu.l  %d1,%d6                 | 30t
+        move.l  %d6,%d7
+        addi.l  #OFF_P1+VP_ST,%d7
+        tst.l   %d2
+        beq.s   1f
+        addq.l  #VP_FL-VP_ST,%d7
+1:      move.l  %d2,%d5
+        add.l   %d5,%d5
+        add.l   %d2,%d5
+        add.l   %d5,%d5                 | 6m
+        add.l   %d5,%d6
+        addi.l  #OFF_P1,%d6
+        move.l  %d1,%d5
+        lsl.l   #2,%d5
+        add.l   %d1,%d5                 | 5t
+        add.l   %d2,%d5
+        addi.l  #OFF_SLOT5+VM_ST,%d5
+        rts
+
+| rp_xfer: the swap's byte moves. a0 = the Part block it reads and writes, a1 = a second copy it
+| writes the same bytes to (a1 = a0: one copy), d4 = 1 into VARI / 0 out of it, d5 / d6 / d7 =
+| rp_offs. -> d3 = the PTCH slot's new value; VARISPEED_EMUS: d0 = the TSNS slot's new value.
+| Keeps everything else.
+rp_xfer:
+        lea     -12(%sp),%sp
+        movem.l %d1-%d2/%a2,(%sp)
+        moveq   #0,%d1
+        move.b  (%a0,%d5.l),%d1         | d1 = VM
+        moveq   #0,%d2
+        move.b  (%a0,%d6.l),%d2         | d2 = the slot
+        .if VEM_EMUS
+        movea.l %d6,%a2
+        lea     OFF_P2-OFF_P1+TSNS_SLOT2(%a2),%a2   | a2 = the TSNS slot (offset)
+        .endif
+        tst.l   %d4
+        beq.s   .xf_out
+| into VARI: QUAN = the remembered one (else 1/1), PTCH parked (never below 4)
+        moveq   #VM_QUAN,%d3
+        and.l   %d1,%d3
+        beq.s   1f
+        subq.l  #1,%d3
+        mulu.w  #15,%d3
+        addq.l  #4,%d3                  | its stop: 4 + 15 idx
+        bra.s   2f
+1:      moveq   #64,%d3                 | 1/1
+2:      moveq   #4,%d0
+        cmp.l   %d0,%d2
+        bge.s   3f
+        move.l  %d0,%d2
+3:      move.b  %d2,(%a0,%d7.l)         | VP = PTCH
+        move.b  %d2,(%a1,%d7.l)
+        .if VEM_EMUS
+        moveq   #0,%d2
+        move.b  (%a0,%a2.l),%d2         | TSNS
+        move.b  %d2,(%a0,%d5.l)         | VM = the TSNS, parked
+        move.b  %d2,(%a1,%d5.l)
+        lsr.l   #4,%d1
+        moveq   #3,%d0
+        and.l   %d1,%d0                 | the remembered EMUS stop + 1
+        beq.s   4f
+        lea     (emus_stops-1).l,%a2    | (a2 is the offset again below)
+        move.b  (%a2,%d0.l),%d0
+        bra.s   5f
+4:      moveq   #1,%d0                  | none: OT
+5:      movea.l %d6,%a2
+        lea     OFF_P2-OFF_P1+TSNS_SLOT2(%a2),%a2
+        move.b  %d0,(%a0,%a2.l)         | TSNS slot = EMUS
+        move.b  %d0,(%a1,%a2.l)
+        .else
+        moveq   #0,%d0
+        move.b  %d0,(%a0,%d5.l)         | VM: nothing on VARI
+        move.b  %d0,(%a1,%d5.l)
+        .endif
+        bra.s   .xf_slot
+| out of VARI: PTCH back (none parked: PTCH 0), QUAN remembered
+.xf_out:
+        moveq   #0,%d3
+        move.b  (%a0,%d7.l),%d3         | VP
+        moveq   #4,%d0
+        cmp.l   %d0,%d3
+        bge.s   1f
+        moveq   #64,%d3                 | none parked: PTCH 0
+1:      move.l  %d2,%d0
+        bsr     rk_bucket
+        addq.l  #1,%d0                  | the QUAN + 1
+        .if VEM_EMUS
+        move.l  %d0,%d2
+        mvs.b   (%a0,%a2.l),%d0         | EMUS (the TSNS slot)
+        bsr     emus_idx
+        addq.l  #1,%d0
+        lsl.l   #4,%d0
+        or.l    %d0,%d2                 | + the EMUS stop + 1
+        move.b  %d1,(%a0,%a2.l)         | TSNS back
+        move.b  %d1,(%a1,%a2.l)
+        move.l  %d1,-(%sp)
+        move.l  %d2,%d0
+        .endif
+        move.b  %d0,(%a0,%d5.l)         | VM = remembered
+        move.b  %d0,(%a1,%d5.l)
+        moveq   #0,%d0
+        move.b  %d0,(%a0,%d7.l)         | VP = 0
+        move.b  %d0,(%a1,%d7.l)
+        .if VEM_EMUS
+        move.l  (%sp)+,%d0              | the TSNS slot's new value
+        .endif
+.xf_slot:
+        move.b  %d3,(%a0,%d6.l)         | the PTCH slot
+        move.b  %d3,(%a1,%d6.l)
+        movem.l (%sp),%d1-%d2/%a2
+        lea     12(%sp),%sp
+        rts
+
+| rp_unent: a0 = a Part block, d5 / d6 / d7 = rp_offs -> d0 = 1 when machine m's bytes are off
+| VARI (an entry would move them): VM remembers a QUAN, or nothing is kept (VP below 4, VM's QUAN
+| 0) and the slot holds no QUAN stop (4 + 15k: PTCH then). 0: on VARI -- PTCH parked (VP 4..127),
+| or nothing kept under a QUAN stop (a VARI page an SRC page paste brought, PTCH 0 behind it).
+| Keeps everything but d0.
 rp_unent:
         moveq   #0,%d0
-        move.b  (%a0,%d7.l),%d0         | the park
-        tst.b   %d0
-        bmi.s   2f                      | a remembered QUAN
+        move.b  (%a0,%d7.l),%d0         | VP
         subq.l  #4,%d0
         bpl.s   3f                      | PTCH parked
         moveq   #0,%d0
-        move.b  (%a0,%d6.l),%d0         | an empty park: the slot
+        move.b  (%a0,%d5.l),%d0         | VM
+        andi.l  #VM_QUAN,%d0
+        bne.s   2f                      | a remembered QUAN
+        move.b  (%a0,%d6.l),%d0         | nothing kept: the slot
         subq.l  #4,%d0
         bmi.s   2f
 1:      beq.s   3f                      | a QUAN stop
@@ -2822,6 +3127,141 @@ rp_unent:
 2:      moveq   #1,%d0
         rts
 3:      moveq   #0,%d0
+        rts
+
+| rp_bpt: d1 = track, a0 = a Part block -> d0 = 1 on a BLKPYRAMD track (BLACKPYRAMIDS_303: FLEX
+| with 'O','T',1 in NEIGHBOR's page-1 bytes 0..2), else 0. Keeps everything else.
+rp_bpt:
+        lea     -8(%sp),%sp
+        movem.l %d1/%a0,(%sp)
+        adda.l  #OFF_MACH,%a0
+        mvz.b   0(%a0,%d1.l),%d0
+        subq.l  #1,%d0
+        bne.s   1f                      | not FLEX
+        mulu.w  #30,%d1
+        adda.l  %d1,%a0                 | + 30t: NEIGHBOR page 1 at OFF_P1 - OFF_MACH + 18
+        mvz.b   OFF_P1-OFF_MACH+OLD_P1(%a0),%d0
+        cmpi.l  #0x4f,%d0                | 'O'
+        bne.s   1f
+        mvz.b   OFF_P1-OFF_MACH+OLD_P1+1(%a0),%d0
+        cmpi.l  #0x54,%d0                | 'T'
+        bne.s   1f
+        mvz.b   OFF_P1-OFF_MACH+OLD_P1+2(%a0),%d0
+        subq.l  #1,%d0
+        bne.s   1f
+        moveq   #1,%d0
+        bra.s   2f
+1:      moveq   #0,%d0
+2:      movem.l (%sp),%d1/%a0
+        lea     8(%sp),%sp
+        rts
+
+| rp_migrate: a0 / a1 = the Part block and its second copy, d1 = track, d2 = machine, d4 = its gate,
+| d5 / d7 = rp_offs. The park an older build left in NEIGHBOR's page bytes (VARISPEED / VARISPEED_EMUS up
+| to VRG2 / VEMG3, KYOTI up to V1.8BC: page 1 byte 0 STATIC's PTCH park, byte 5 FLEX's; VARISPEED_EMUS:
+| page 2 byte 5 STATIC's TSNS park, byte 3 FLEX's) moves into VP_m / VM_m and is cleared there (both
+| copies) -- only on a track whose NEIGHBOR bytes hold nothing but VARISPEED's: page 1 bytes 1-4 and page 2
+| bytes 0-2 and 4 all 0. VARISPEED never wrote those eight; BLACKPYRAMIDS_303 writes all twelve (its
+| signature, its stash and mark, or its own mark and parked knobs), so a track with any of them keeps
+| NEIGHBOR's bytes as BLACKPYRAMIDS_303's -- but for byte 0 as STATIC's park when it is neither the voice's
+| mark (0x50) nor its signature: there KYOTI V1.8BC FINAL wrote STATIC's park over the mark, which comes
+| back (0x50, so the voice's parked knobs count again) as the park moves in. FLEX's byte 5 is the voice's
+| stash or parked DEC then: not read. Gate on:
+| a PTCH park 4..127 is the PTCH, parked (the bytes are on VARI) [EMUS: and the TSNS park]; gate off: an old
+| park is no memory (VARIG2's rule) [EMUS: a parked EMUS is remembered]. VARISPEED moves only page 1's
+| park; VARISPEED_EMUS both. Keeps everything.
+rp_migrate:
+        lea     -28(%sp),%sp
+        movem.l %d0-%d3/%d6/%a2-%a3,(%sp)
+        movea.l %a0,%a2
+        moveq   #30,%d0
+        mulu.l  %d1,%d0
+        adda.l  %d0,%a2
+        adda.l  #OFF_P1+OLD_P1,%a2      | a2 -> NEIGHBOR page 1, byte 0 (page 2 at + OLD_P2_AT)
+        moveq   #0,%d0
+        moveq   #4,%d3
+1:      mvz.b   0(%a2,%d3.l),%d6        | page 1 bytes 4..1
+        or.l    %d6,%d0
+        subq.l  #1,%d3
+        bne.s   1b
+        mvz.b   OLD_P2_AT(%a2),%d6      | page 2 bytes 0, 1, 2, 4
+        or.l    %d6,%d0
+        mvz.b   OLD_P2_AT+1(%a2),%d6
+        or.l    %d6,%d0
+        mvz.b   OLD_P2_AT+2(%a2),%d6
+        or.l    %d6,%d0
+        mvz.b   OLD_P2_AT+4(%a2),%d6
+        movea.l %a2,%a3
+        suba.l  %a0,%a3
+        adda.l  %a1,%a3                 | a3 = the same bytes in the second copy
+        or.l    %d6,%d0
+        beq.s   1f                      | VARISPEED's alone
+        tst.l   %d2                     | BLACKPYRAMIDS_303's bytes beside it: only STATIC's park in
+        bne     9f                      |   byte 0 is still known -- the voice writes nothing there but
+        mvz.b   (%a2),%d3               |   its mark (0x50) or its signature; FLEX's byte 5 is its too
+        beq     9f
+        moveq   #0x50,%d0
+        cmp.l   %d0,%d3
+        beq     9f                      | the voice's mark
+        cmpi.l  #0x4f,%d3
+        bne.s   2f
+        mvz.b   1(%a2),%d0
+        cmpi.l  #0x54,%d0
+        bne.s   2f
+        mvz.b   2(%a2),%d0
+        subq.l  #1,%d0
+        beq     9f                      | the voice's signature
+2:      moveq   #0x50,%d0               | V1.8BC FINAL wrote this park over the voice's mark: the mark
+        move.b  %d0,(%a2)               |   back (its parked knobs follow it), the park moves in
+        move.b  %d0,(%a3)
+        moveq   #0,%d6
+        bra.s   4f
+1:      moveq   #OLD_PK1_ST,%d1
+        tst.l   %d2
+        beq.s   2f
+        moveq   #OLD_PK1_FL,%d1
+2:      mvz.b   0(%a2,%d1.l),%d3        | d3 = the old PTCH park
+        clr.b   0(%a2,%d1.l)
+        clr.b   0(%a3,%d1.l)
+        moveq   #0,%d6
+        .if VEM_EMUS
+        move.l  #OLD_P2_AT+OLD_PK2_ST,%d1
+        tst.l   %d2
+        beq.s   3f
+        move.l  #OLD_P2_AT+OLD_PK2_FL,%d1
+3:      mvz.b   0(%a2,%d1.l),%d6        | d6 = the old TSNS park
+        clr.b   0(%a2,%d1.l)
+        clr.b   0(%a3,%d1.l)
+        .endif
+        move.l  %d3,%d0
+        or.l    %d6,%d0
+        beq     9f                      | nothing parked there
+4:      tst.l   %d4
+        beq.s   5f
+        moveq   #4,%d0                  | gate on: a PTCH park 4..127 stays parked
+        cmp.l   %d0,%d3
+        blt.s   3f
+        cmpi.l  #127,%d3
+        ble.s   6f
+3:      moveq   #0,%d3                  | none: nothing kept
+        moveq   #0,%d6
+        bra.s   6f
+5:      moveq   #0,%d3                  | gate off: no memory, but a parked EMUS
+        .if VEM_EMUS
+        tst.l   %d6
+        beq.s   6f
+        move.l  %d6,%d0
+        bsr     emus_idx
+        addq.l  #1,%d0
+        lsl.l   #4,%d0
+        move.l  %d0,%d6
+        .endif
+6:      move.b  %d3,(%a0,%d7.l)         | VP_m
+        move.b  %d3,(%a1,%d7.l)
+        move.b  %d6,(%a0,%d5.l)         | VM_m
+        move.b  %d6,(%a1,%d5.l)
+9:      movem.l (%sp),%d0-%d3/%d6/%a2-%a3
+        lea     28(%sp),%sp
         rts
 
 | d0 = gate, d2 = machine (0/1): machine m's two captions, PTCH/QUAN and TSNS/EMUS
@@ -2857,6 +3297,10 @@ caption_m:
         lea     12(%sp),%sp
         rts
 
+        .ifdef  VEM_UI_SECTION          | VRG3: UI-task code, in the UI section (see THE UI SECTION)
+        .section .vemui,"ax"
+        .balign 2
+        .endif
 | Poll every track, both machines (UI task: the ATTR editor). A gate change of a
 | machine that is not current (an ATTR edit of the sample the other machine plays)
 | swaps that machine's Part bytes now, live bytes only for the current one. Keeps all.
@@ -2866,7 +3310,7 @@ rp_poll_all:
         move.w  %sr,%d4
         move.w  #0x2700,%sr
         moveq   #0,%d1
-1:      bsr     db_mach
+1:      jsr     (db_mach).l
         move.l  %d2,%d0                 | the current machine
         moveq   #0,%d2
 2:      moveq   #0,%d3
@@ -2874,7 +3318,7 @@ rp_poll_all:
         bne.s   3f
         moveq   #1,%d3                  | live bytes for the current machine
 3:      move.l  %d0,-(%sp)
-        bsr     rp_swap_m
+        jsr     (rp_swap_m).l
         move.l  (%sp)+,%d0
         addq.l  #1,%d2
         moveq   #1,%d3
@@ -2909,7 +3353,7 @@ quant_step:
         move.l  %d1,-(%sp)
         moveq   #0,%d1
         move.b  (UI_TRACK).l,%d1
-        bsr     rp_ui_gate
+        jsr     (rp_ui_gate).l
         tst.l   %d0
         bne.s   .qs_quan
         move.l  (%sp)+,%d1
@@ -2917,7 +3361,7 @@ quant_step:
 .qs_quan:
         move.l  %d2,-(%sp)
         move.l  20(%sp),%d0             | current (arg 3, two pushes deep)
-        bsr     rk_bucket               | -> zone 0..8
+        jsr     (rk_bucket).l               | -> zone 0..8
         move.l  16(%sp),%d1             | delta (arg 2)
         move.l  %d1,%d2
         bpl.s   .qs_absok
@@ -3023,21 +3467,21 @@ quant_widget:
         move.l  %d2,-(%sp)              | (args now 8..32)
         moveq   #0,%d1
         move.b  (UI_TRACK).l,%d1
-        bsr     db_mach
+        jsr     (db_mach).l
         moveq   #1,%d0
         cmp.l   %d0,%d2
         bls.s   1f
         move.l  (%sp)+,%d2
         jmp     (KNOB).l                | not ST/FL: stock, no poll
-1:      bsr     rp_swap_ui
+1:      jsr     (rp_swap_ui).l
         andi.l  #1,%d0
         movea.l %d0,%a1                 | the swap flag
         moveq   #72,%d0
         mulu.l  %d1,%d0
         lea     (LIVE_P1).l,%a0
         adda.l  %d0,%a0                 | -> this track's live PTCH byte
-        bsr     rp_gate_m
-        bsr     caption_m
+        jsr     (rp_gate_m).l
+        jsr     (caption_m).l
         tst.l   %d0
         bne.s   .qw_quant
         move.l  %a1,%d0
@@ -3059,12 +3503,12 @@ quant_widget:
         tst.l   %d0
         bmi.s   .qw_frame               | an empty cell keeps the bare frame (the dial's)
         move.l  %d0,%d1                 | quant_fmt reads the value
-        bsr     rk_bucket               | d0 = its stop 0..8
+        jsr     (rk_bucket).l               | d0 = its stop 0..8
         move.l  (%sp)+,%d2
         .ifdef  UIS_SW9_AT
         jmp     (UIS_SW9_AT).l          | KYOTI: SIDECHAIN's ui_switch unit has it
         .else
-        bra     sw9_draw
+        jmp     (sw9_draw).l
         .endif
 .qw_frame:
         move.l  32(%sp),-(%sp)          | canvas
@@ -3083,9 +3527,9 @@ quant_widget:
 quant_fmt:
         move.l  8(%sp),%d0
         bmi.s   .qf_unk
-        bsr     rk_bucket
+        jsr     (rk_bucket).l
         lsl.l   #2,%d0
-        lea     q_labels(%pc),%a0
+        lea     (q_labels).l,%a0
         adda.l  %d0,%a0
         move.l  %a0,8(%sp)
         jmp     (SPRINTF).l
@@ -3093,6 +3537,10 @@ quant_fmt:
         lea     (STR_UNK).l,%a0
         move.l  %a0,8(%sp)
         jmp     (SPRINTF).l
+
+        .ifdef  VEM_UI_SECTION
+        .text
+        .endif
 
 | Any Part apply (heavy 0x40009094, light 0x40009e00) makes rp_prev meaningless: forget,
 | so the next poll ADOPTS the applied state. Inside a held bulk write the bytes stay
@@ -3176,6 +3624,8 @@ vem_depth:                              | nested holds
         .byte   0
 rk_acc:                                 | QUAN fine-detent tally, signed
         .byte   0
+vh_pgbuf:                               | VRG3: VARISPEED's four bytes across an SRC page paste
+        .byte   0, 0, 0, 0, 0, 0, 0, 0  |   (the DB's, then its SRAM copy's)
         .if VEM_EMUS
 em_tally:                               | EMUS detent count, signed (sign = direction)
         .byte   0

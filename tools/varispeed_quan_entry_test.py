@@ -42,9 +42,17 @@ Cases (T1 unless said; PTCH raw 64 = 0, 76 = +12, 59 = -5; QUAN 64 = 1/1, 79 = 5
   st_mem32    STATIC: as mem32
   reload      mem32's end state, SAVE PROJECT, RELOAD PROJECT: QUAN 3/2, PTCH +12 parked
   power       mem32's end state, then a power cycle (CS1 kept): QUAN 3/2, PTCH +12 parked
-  midi        p12 on T1, then the MIDI page and a MIDI track key: every Part byte but T1's three
-              (PTCH slot, its park, TSTR; VARISPEED_EMUS: + TSNS and its park) as loaded -- the MIDI
-              tracks' and the other tracks'
+  midi        p12 on T1, then the MIDI page and a MIDI track key: every Part byte but T1's four
+              (PTCH slot, VP, VM, TSTR; VARISPEED_EMUS: + TSNS) as loaded -- the MIDI tracks' and the
+              other tracks'
+VRG3 (2026-11-19: VARISPEED's bytes moved out of NEIGHBOR's into four of its own -- VP_m = THRU page 1
+slot 2 / 5, VM_m = THRU's / NEIGHBOR's slot byte; "park" below is VP, the remembered QUAN is in VM):
+  mem_reload  QUAN 3/2, BEAT, SAVE + RELOAD PROJECT (the bank load path and stock's Part validator, which
+              zeroed VARIG2's bit-7 memory): off VARI VM still remembers 3/2; VARI again: 3/2, PTCH parked
+  mem_power   the same across a power cycle (CS1 kept)
+  final_vari  a project saved by FINAL VARISPEED (VARISPEED_EMUS for an EMUS image) on VARI, QUAN 3/2: loaded
+              here its NEIGHBOR park moves into VP (NEIGHBOR cleared); BEAT: PTCH +12; VARI again: 3/2
+  final_off   the same saved off VARI (FINAL leaves a value in its park): VARI enters at 1/1
 """
 import argparse, concurrent.futures as cf, json, os, pathlib, shutil, subprocess, sys
 
@@ -56,7 +64,11 @@ DB, PSTRIDE, SHADOW = 0x400e21e0, 0x18b2, 0x100a4ece
 O_P1, O_P2, O_MACH, O_SLOT5 = 0x2a, 0x1da, 0x22, 0x2ca
 LIVE_P1, BASE_W = 0x80000810, 0x80000a50
 SET_STATIC, SET_FLEX, SET_STRIDE = 0x100d5b30, 0x100b14f0, 0x448
-PARK1 = {0: 18, 1: 23}
+# VRG3: VARISPEED's own bytes -- VP_m (THRU page 1 slots 2 / 5: STATIC's / FLEX's PTCH park) and VM_m (THRU's /
+# NEIGHBOR's slot byte: off VARI the remembered QUAN + 1, [EMUS: the EMUS stop + 1 << 4]; on VARI [EMUS: the TSNS])
+VP = {0: 14, 1: 17}
+VM = {0: 2, 1: 3}                   # + O_SLOT5 + 5t
+OLDPK = {0: 18, 1: 23}              # the park VARISPEED kept until VRG2 (NEIGHBOR page 1 bytes 0 / 5)
 PROJ = {"otdemo": ("otdemo.img", "KYOTI", "OTDEMO", 1, 1), "mmtestdt": ("mmtestdt.img", "MMTESTDT", "test", 0, 0)}
 K = dict(DOWN=0x20, UP=0x33, YES=0x31, NO=0x32, SRC=0x22, FUNC=0x2d, MIX=0x30, RIGHT=0x21, PTN=0x2e,
          MIDI=0x35, T1=0x10, T2=0x11, TR1=0x00, TR5=0x04)
@@ -131,10 +143,13 @@ class Flow:
         self.enc(0, 1 if steps > 0 else -1, 3 * abs(steps)); self.wait(300)
 
 
-def part_pokes(part, t, m, ptch=None, park=None, tstr=None, live=True):
+def part_pokes(part, t, m, ptch=None, park=None, tstr=None, live=True, old=None):
+    """park: VP_m (and VM_m 0); old: an older build's NEIGHBOR park"""
     pb, sh = DB + 0x8ed80 + part * PSTRIDE, SHADOW + part * PSTRIDE
     out = []
-    for off, v in ((O_P1 + 30 * t + 6 * m, ptch), (O_P1 + 30 * t + PARK1[m], park), (O_P2 + 30 * t + 6 * m + 4, tstr)):
+    for off, v in ((O_P1 + 30 * t + 6 * m, ptch), (O_P1 + 30 * t + VP[m], park),
+                   (O_SLOT5 + 5 * t + VM[m], None if park is None else 0), (O_P2 + 30 * t + 6 * m + 4, tstr),
+                   (O_P1 + 30 * t + OLDPK[m], old)):
         if v is not None:
             out += [b(pb + off, v), b(sh + off, v)]
     if live and ptch is not None:
@@ -177,7 +192,12 @@ class Res:
 
 def t1(parts, part, t=0, m=1):
     p = parts[part]
-    return dict(slot=p[O_P1 + 30 * t + 6 * m], park=p[O_P1 + 30 * t + PARK1[m]], tstr=p[O_P2 + 30 * t + 6 * m + 4])
+    return dict(slot=p[O_P1 + 30 * t + 6 * m], park=p[O_P1 + 30 * t + VP[m]], vm=p[O_SLOT5 + 5 * t + VM[m]],
+                tstr=p[O_P2 + 30 * t + 6 * m + 4], old=p[O_P1 + 30 * t + OLDPK[m]])
+
+
+def mem(q):                          # VM off VARI: the remembered QUAN + 1 (VARISPEED_EMUS: + the EMUS stop + 1 << 4)
+    return q + 1
 
 
 def case_run(name, img, rpp, vem, outd):
@@ -187,7 +207,7 @@ def case_run(name, img, rpp, vem, outd):
         proj, part, m = "otdemo", 1, 1
         ptch = {"ptch0": 64, "m5": 59, "legacy": 64}.get(name, 76)   # legacy: the PTCH such a swap lost
         f = Flow()
-        pokes = part_pokes(part, 0, m, ptch=ptch, park=76 if name == "legacy" else 0)
+        pokes = part_pokes(part, 0, m, ptch=ptch, park=0, old=76 if name == "legacy" else None)
         if name == "auto":
             slot = 20                        # T1's FLEX slot in OTDEMO's part 1
             pokes += [b(SET_FLEX + SET_STRIDE * slot + 0x110 + 3, 4)]   # its TIMESTRETCH: VARI (TSTR stays AUTO)
@@ -215,7 +235,8 @@ def case_run(name, img, rpp, vem, outd):
         if name == "ptch0":
             r.eq("T1 TSTR / QUAN / park", (x["tstr"], x["slot"], x["park"]), (4, 64, 64))
         elif name in ("p12", "m5"):
-            r.eq("after BEAT: TSTR / PTCH / park (QUAN 1/1 remembered)", (x["tstr"], x["slot"], x["park"]), (3, ptch, 0x80 | 64))
+            r.eq("after BEAT: TSTR / PTCH / VP / VM (QUAN 1/1 remembered)", (x["tstr"], x["slot"], x["park"], x["vm"] & 15),
+                 (3, ptch, 0, mem(4)))
             r.eq("live PTCH byte", live[0], ptch)
         elif name == "mem32":
             r.eq("back on VARI: TSTR / QUAN / park (PTCH +12)", (x["tstr"], x["slot"], x["park"]), (4, 109, 76))
@@ -223,6 +244,8 @@ def case_run(name, img, rpp, vem, outd):
             r.eq("live QUAN byte", live[0], 109)
         elif name in ("legacy", "forgot", "auto"):
             r.eq("TSTR / QUAN / park", (x["tstr"], x["slot"], x["park"]), (1 if name == "auto" else 4, 64, 76 if name != "legacy" else 64))
+            if name == "legacy":
+                r.eq("the old NEIGHBOR park cleared (no memory: an older build's park off VARI)", x["old"], 0)
             r.eq("QUAN reads", LAB[bucket(x["slot"])], "1/1")
             r.eq("live QUAN byte", live[0], 64)
         elif name == "stale":
@@ -234,11 +257,11 @@ def case_run(name, img, rpp, vem, outd):
                 g = Flow()
                 run("_base_otdemo", img, rpp, outd / "_base_otdemo", proj, g, part_pokes(part, 0, m, ptch=76, park=0))
             b0 = base.read_bytes()
-            own = {O_P1 + 6 * m, O_P1 + PARK1[m], O_P2 + 6 * m + 4}
+            own = {O_P1 + 6 * m, O_P1 + VP[m], O_SLOT5 + VM[m], O_P2 + 6 * m + 4}
             if vem:                          # VARISPEED_EMUS: the TSNS / EMUS pair swaps with it
-                own |= {O_P2 + 6 * m + 5, O_P2 + {0: 23, 1: 21}[m]}
+                own |= {O_P2 + 6 * m + 5}
             diff = [hex(i) for i in range(PSTRIDE) if b0[i] != parts[part][i] and i not in own]
-            r.eq("Part bytes changed besides T1's PTCH slot / park / TSTR", diff, [])
+            r.eq("Part bytes changed besides T1's PTCH slot / VP / VM / TSTR", diff, [])
             r.eq("T1", (x["tstr"], x["slot"], x["park"]), (4, 64, 76))
         if name in ("ptch0", "legacy", "forgot", "mem32"):
             (d / "knob.json").write_text(json.dumps(knob(rows)))
@@ -266,9 +289,78 @@ def case_run(name, img, rpp, vem, outd):
         parts, live, prev, rows = run(name, img, rpp, d, "mmtestdt", f, part_pokes(0, 0, 0, ptch=76, park=0), dump_parts=(0,))
         x = t1(parts, 0, 0, 0)
         if name == "st_p12":
-            r.eq("STATIC after BEAT: TSTR / PTCH / park", (x["tstr"], x["slot"], x["park"]), (3, 76, 0x80 | 64))
+            r.eq("STATIC after BEAT: TSTR / PTCH / VP / VM", (x["tstr"], x["slot"], x["park"], x["vm"] & 15), (3, 76, 0, mem(4)))
         else:
             r.eq("STATIC back on VARI: TSTR / QUAN / park", (x["tstr"], x["slot"], x["park"]), (4, 109, 76))
+    elif name in ("mem_reload", "mem_power"):
+        # VRG3: QUAN 3/2, off VARI (BEAT), SAVE + RELOAD PROJECT (the bank load path, the Part validator) or a
+        # power cycle, back to VARI: 3/2 (VARIG2 kept the memory in bit 7, which the validator zeroes on load)
+        f = Flow()
+        f.vari(); f.quan(3); f.beat()
+        pokes = part_pokes(1, 0, 1, ptch=76, park=0)
+        d.mkdir(parents=True, exist_ok=True)
+        g = Flow()
+        if name == "mem_reload":
+            card = d / "card.img"
+            shutil.copy(CARDS / PROJ["otdemo"][0], card)
+            f.chord("FUNC", "MIX"); f.wait(500); f.tap("RIGHT"); f.tap("DOWN"); f.tap("YES"); f.wait(500); f.tap("YES")
+            f.wait(20000)                                                # SAVE PROJECT
+            f.chord("FUNC", "MIX"); f.wait(500); f.tap("RIGHT"); f.tap("DOWN"); f.tap("YES"); f.wait(500); f.tap("YES")
+            f.wait(25000); f.tap("T1"); f.tap("SRC"); f.wait(500)        # RELOAD PROJECT
+            parts, live, prev, rows = run(name + "_a", img, rpp, d / "a", "otdemo", f, pokes, extra=["--card-rw"], card=card)
+            x = t1(parts, 1)
+            r.eq("after SAVE + RELOAD, off VARI: TSTR / PTCH / VP / VM", (x["tstr"], x["slot"], x["park"], x["vm"] & 15), (3, 76, 0, mem(7)))
+            g.vari()
+            parts, live, prev, rows = run(name + "_b", img, rpp, d / "b", "otdemo", g, [], card=card)
+        else:
+            cs1 = d / "cs1.bin"
+            run(name + "_a", img, rpp, d / "a", "otdemo", f, pokes, more_dump=f";0x10000000,0x100000={cs1}")
+            g.wait(2000); g.vari()
+            parts, live, prev, rows = run(name + "_b", img, rpp, d / "b", "otdemo", g, [],
+                                          extra=["--cs1-in", str(cs1), "--no-post"])
+        x = t1(parts, 1)
+        r.eq("back on VARI: TSTR / QUAN / park", (x["tstr"], x["slot"], x["park"]), (4, 109, 76))
+        r.eq("QUAN reads", LAB[bucket(x["slot"])], "3/2")
+    elif name in ("final_vari", "final_off"):
+        # VRG3 migration: a project saved by FINAL VARISPEED (its park in NEIGHBOR page 1). final_vari: saved on VARI
+        # (QUAN 3/2, PTCH +12 parked in NEIGHBOR) -> loaded here: QUAN 3/2, the PTCH moved into VP, NEIGHBOR cleared;
+        # BEAT gives PTCH +12 back, VARI again 3/2. final_off: saved off VARI (FINAL leaves a value in its park) ->
+        # VARI enters at 1/1 (VARIG2's rule: an older build's park off VARI is no memory)
+        old = FINAL_IMG[vem]
+        f = Flow()
+        f.vari(); f.quan(3)
+        if name == "final_off":
+            f.beat()
+        f.chord("FUNC", "MIX"); f.wait(500); f.tap("RIGHT"); f.tap("DOWN"); f.tap("YES"); f.wait(500); f.tap("YES")
+        f.wait(20000)                                                    # SAVE PROJECT (FINAL)
+        d.mkdir(parents=True, exist_ok=True)
+        card = d / "card.img"
+        shutil.copy(CARDS / PROJ["otdemo"][0], card)
+        orpp, _ = rp_prev_of(old)
+        parts, live, prev, rows = run(name + "_final", old, orpp, d / "final", "otdemo", f, part_pokes(1, 0, 1, ptch=76, park=0),
+                                      extra=["--card-rw"], card=card)
+        x = t1(parts, 1)
+        r.notes.append(f"saved by FINAL: TSTR {x['tstr']} slot {x['slot']} NEIGHBOR park {x['old']}")
+        g = Flow(); g.wait(1500); g.tap("T1"); g.tap("SRC"); g.wait(500)
+        parts, live, prev, rows = run(name + "_load", img, rpp, d / "load", "otdemo", g, [], card=card)
+        x = t1(parts, 1)
+        if name == "final_vari":
+            r.eq("loaded here: TSTR / QUAN / VP / VM (EMUS: the TSNS park) / old park", (x["tstr"], x["slot"], x["park"], x["vm"], x["old"]),
+                 (4, 109, 76, 64 if vem else 0, 0))
+            g.beat()
+            parts, live, prev, rows = run(name + "_beat", img, rpp, d / "beat", "otdemo", g, [], card=card)
+            x = t1(parts, 1)
+            r.eq("BEAT: TSTR / PTCH / VP / VM", (x["tstr"], x["slot"], x["park"], x["vm"] & 15), (3, 76, 0, mem(7)))
+            g.vari()
+            parts, live, prev, rows = run(name + "_vari", img, rpp, d / "vari", "otdemo", g, [], card=card)
+            x = t1(parts, 1)
+            r.eq("VARI again: TSTR / QUAN / VP", (x["tstr"], x["slot"], x["park"]), (4, 109, 76))
+        else:
+            g.vari()
+            parts, live, prev, rows = run(name + "_vari", img, rpp, d / "vari", "otdemo", g, [], card=card)
+            x = t1(parts, 1)
+            r.eq("VARI: TSTR / QUAN / VP / old park", (x["tstr"], x["slot"], x["park"], x["old"]), (4, 64, 76, 0))
+            r.eq("QUAN reads", LAB[bucket(x["slot"])], "1/1")
     elif name in ("reload", "power"):
         f = Flow()
         f.vari(); f.quan(3); f.beat(); f.vari()
@@ -295,7 +387,10 @@ def case_run(name, img, rpp, vem, outd):
 
 
 CASES = ["ptch0", "p12", "m5", "mem32", "legacy", "forgot", "stale", "auto", "partsw", "st_p12", "st_mem32",
-         "reload", "power", "midi"]
+         "reload", "power", "midi", "mem_reload", "mem_power", "final_vari", "final_off"]
+# the FINAL builds a project of the migration cases is saved by (the main checkout's out/, read only)
+FINAL_IMG = {False: ROOT.parent / "octatrack-kyoti-fw/out/VARISPEED/mainos_varispeed.bin",
+             True: ROOT.parent / "octatrack-kyoti-fw/out/VARISPEED_EMUS/mainos_varispeed_emus.bin"}
 
 
 def main():
