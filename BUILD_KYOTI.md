@@ -87,7 +87,7 @@ They write `out/KYOTI/OCTATRACK_OS1.40C_KYOTI_V1.8.syx` (OS VERSION `KYOTI V1.8`
 
 > **Sample memory.** RELOAD_FROM_PROJECT and DIRECT JUMP run from DRAM in V1.8: eleven 6 KB pages (66 KB)
 > of the 85.5 MB pool. In V1.8C and the CLYPS image, CLYPS and DIRECT JUMP take 1,709 pages (about 10 MB; V1.8BC
-> with the voice's runtime: 1,720),
+> with the voice's runtime: 1,721),
 > almost all of it Clyps' originals and working copies. The MEMORY page still reads 85.5 MB. An
 > octabam-built image (octabam's own remixer) reserves a fixed **10 MiB** whenever any module runs from DRAM.
 

@@ -192,11 +192,21 @@ are lowercase-hyphen, because octabam requires a module's name to equal its fold
     `[CUE]` group, ORIG, temp reload, card) refused whole; a UI-task net (the loop tail 0x40062d1c; Clyps' cl_uitail
     calls it in V1.8BC, SUPERSEDE; idle pass 54 instructions) repairs whatever else gets there. All with
     `ONE 303 PER CORE!`.
-  - Pins: KYOTI V1.8BC mainos `4c7fb0fe…` (syx `25bd7a24…`, flashed), BLACKPYRAMIDS_303 unit and feature image
-    (`140C_BP303`) in `kyoti_status.FINAL`. Gates: `tools/ot303/verify_one_per_core.py`, `tools/ot303/verify_page_paste.py`
-    (both images), `tools/kyoti_bc_check_*.py`.
+  - **Part and pattern changes (2026-11-19, from the octabam form OCTABAM40-43):** the renderer asks the Part each
+    track plays (stock's per-track bank / Part 0x8000182a / 0x80001832 + t, moved at the track's own first trig) whether
+    it is a BLKPYRAMD, not the UI Part, which moves ~7 ticks early: an outgoing voice rings over a cued change and plays
+    its last step, an incoming one takes the voice at its first trig (`play_rank`, `yields`, a one-frame hold when the
+    carrier is a higher track); a note tied to the end of a pattern is re-timed from the next pattern's first steps
+    (`tie_xfer`, a same-pitch slide into the open gate; not for DIRECT JUMP landings, the author's choice); a note's
+    GATE comes from its pattern's Part, not the live byte stock re-stages at the trig (the first note after a load
+    was a blip).
+  - Pins (re-promoted 2026-11-19 with the Part-change fixes): KYOTI V1.8BC mainos `0704647c…` (syx `32c3f8ce…`; the
+    first V1.8BC `4c7fb0fe…` / `25bd7a24…` was the one flashed), BLACKPYRAMIDS_303 unit `1d53ef7f…`, feature image
+    `b4b55638…` (`140C_BP303`). Gates: `tools/ot303/verify_one_per_core.py`, `verify_page_paste.py`,
+    `verify_part_carry.py`, `verify_tie_xfer.py`, `verify_first_gate.py` (all three forms), `tools/kyoti_bc_check_*.py`.
   - Open: a sequencer that would not advance after pasting a BLKPYRAMD track into another Part's pattern, seen once
     on the unit, not reproduced (FLASHING §4); a project saved with two on a core not tried on the unit; the
+    VARISPEED / BLACKPYRAMIDS_303 NEIGHBOR-byte clash found by the emus-guard session (its fix, not this thread's); the
     square voice on core 0 under the heaviest FX stack (BLACKPYRAMIDS_303.md §4). octabam's `blackpyramids-303`
     gets the paste refusal, the net and the page fixes (the author, 2026-11-19): an octabam test image to flash
     first, then the pin PR. Modwerk's form: parked (#1542). NOTES 2026-11-19 (`kyoti-bp`).

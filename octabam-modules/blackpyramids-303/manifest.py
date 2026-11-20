@@ -17,11 +17,11 @@ so a stock OS opens the project with the track as FLEX; FLEX's own values are ke
 unused bytes while the track is a BLKPYRAMD and put back when it leaves, and the machine's own
 knobs are kept there while the track is another machine, so it comes back as it was left.
 
-COLDFIRE. One DRAM unit, bp_runtime (~39 KB): tools/ot303/cf/{machine.s,control.c,record.c,
+COLDFIRE. One DRAM unit, bp_runtime (~42 KB): tools/ot303/cf/{machine.s,control.c,record.c,
 params.c} with the voice's tables (body_tables.h) and Y table, generated into one GNU-as unit by
 tools/ot303/octabam_module.py (the C as `m68k-elf-gcc -S` output, libgcc's __muldi3 as words). Its
 `reference` is the standalone image's runtime: linked alone at 0x40a955e0 it is those bytes, sha256
-a6c4efba..., for -mcpu=5407 and 54455 alike (the generator refuses to write it otherwise). The detours,
+7c5f6008..., for -mcpu=5407 and 54455 alike (the generator refuses to write it otherwise). The detours,
 pokes and the FLEX renderer slot (0x400d6438 -> ot_render) are the standalone builder's
 (tools/build_blackpyramids_303.py).
 
@@ -32,14 +32,24 @@ generated with bp_dsp_A.asm / bp_dsp_B.asm (the source as assembled, for reading
 both payloads byte for byte as the standalone image does. The voice's Y ($7a5-$feb) is streamed from
 the ColdFire record, never part of an upload.
 
+ONE PER CORE, ON EVERY PATH (2026-11-17/18). Two BLKPYRAMD tracks on one DSP core are always refused, with
+the toast ONE 303 PER CORE!: the machine chooser and SRC SETUP; TRACK PASTE (the wrapper 0x4002b988, refused
+whole); an SRC page paste, which now carries the machine (the copy 0x40026314 notes a BLKPYRAMD source; the
+paste 0x40028fc4 and the page UNDO's push 0x40028f94 turn the track into what was copied before stock writes:
+a FLEX / STATIC page onto a BLKPYRAMD makes that machine, a BLKPYRAMD page makes a BLKPYRAMD, refused on a
+core that has one). A UI-task net at the loop's tail (0x40062d1c; idle pass 54 instructions) repairs anything
+else that gets there (a project or bank load, an undo): the previous holder, else the lowest track, keeps it,
+the others go back to FLEX with their pre-303 settings.
+
 A REMIX WITH THIS MODULE gives up SPRING REV (the voice is its code) and carries no other DSP
 module and no ANALOG BD (each owns the source seam, SPRING's words or DSP memory the voice uses).
 
-MEASURED. The standalone image of this voice (FINAL 23 Oct 2026, mainos 88d49307...: the 21 Oct voice,
-mainos ecc85887..., plus the link clips CUT-RES and DEC-ACC on the SRC page) on the author's MKI: all good.
-This octabam form: the runtime and both DSP payloads are the standalone's bytes; the 21 Oct form flashed on
-the author's MKI, 21 Oct 2026 (remixes/test/blackpyramids-303): all good. The 23 Oct form (the clips) is
-not flashed in octabam.
+MEASURED. The voice: the standalone images on the author's MKI (the recalibrated voice 21 Oct 2026, the link
+clips 23 Oct, the 936 / 932-word voice 3 Nov): all good. One per core and the SRC page paste: in KYOTI V1.8BC
+(the same runtime source, other placement) on the author's MKI, 18-19 Nov 2026: all checks pass (a project
+saved with two on a core not tried). This octabam form: the runtime and both DSP payloads are the standalone's
+bytes; the 21 Oct form flashed on the author's MKI, 21 Oct 2026 (remixes/test/blackpyramids-303): all good;
+this one not flashed yet.
 """
 
 import os
@@ -53,7 +63,7 @@ _HERE = os.path.relpath(os.path.dirname(os.path.realpath(__file__)))
 H = bytes.fromhex
 
 RUNTIME_AT = 0x40A955E0        # the standalone image's DRAM reserve (tools/ot303/dram.py RESERVE)
-RUNTIME_SHA256 = "a6c4efba4b65bcd101fd3e1a369e121dab3da1e3a1c769bbb4b587d8bff21f43"
+RUNTIME_SHA256 = "7c5f600864ab875adca47ce275d4e4e4b3f86c0abb20b811777c66bc915452a3"
 
 DETOURS = (
     Detour(0x400334D8, H("2f02222f0008"), "bp_runtime", "ot_machine_name", "chooser row 5's name"),
@@ -100,6 +110,12 @@ DETOURS = (
     Detour(0x40044968, H("7201b2b9460d16fc6616"), "bp_runtime", "ot_chrom_img_hook", "the full keyboard image", pad_to=10),
     Detour(0x4004FDE4, H("4ab9460d16fc660001aa"), "bp_runtime", "ot_page_key_hook", "the PAGE key: a 17th note on every octave", pad_to=10),
     Detour(0x40050CE2, H("72ffb280660000a6"), "bp_runtime", "ot_plock_hook", "MT31: held trigs' PTCH locks", pad_to=8),
+    # one BLKPYRAMD per DSP core on every path (2026-11-17/18)
+    Detour(0x4002B988, H("7004b0b9460d0ffa"), "bp_runtime", "ot_paste_hook", "the TRACK PASTE wrapper's entry", pad_to=8),
+    Detour(0x40062D1C, H("4ab946c7c72c"), "bp_runtime", "bp_uitail", "the UI loop's tail: the one-per-core net", kind="jsr"),
+    Detour(0x40026314, H("4fefffe848d70c3c"), "bp_runtime", "ot_pgcopy_hook", "the page copy (clipboard or undo buffer)", pad_to=8),
+    Detour(0x40028FC4, H("2f2f00102f2f0010"), "bp_runtime", "ot_pgpaste_hook", "the page paste from the clipboard", pad_to=8),
+    Detour(0x40028F94, H("4879460bf218"), "bp_runtime", "ot_pgundo_hook", "the page UNDO's buffer push", kind="jsr"),
 )
 
 POKES = (
