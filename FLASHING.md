@@ -129,12 +129,52 @@ unit that boots; if it doesn't, use §3b.
 | VARISPEED_EMUS VEMG4 (WIP: VEMG3 + the same bytes) | `140C_VEMG4` |
 | KYOTI V1.8 / V1.8C / V1.8BC with VARISPEED VRG3 (WIP) | `KY18 VRG3` / `KY18C VRG3` / `KY18BC VR3` |
 | RELEASE CANDIDATE RC1 (WIP: VRG3 + the `[BANK]` trigless-lock LED change): KYOTI V1.8BC / V1.8C / V1.8, VARISPEED_EMUS, VARISPEED, BATCH_BUGFIXES | `KY18BC RC1` / `KY18C RC1` / `KY18 RC1`, `140CVEMRC1`, `140C_VRRC1`, `140CFIXRC1` |
+| RELEASE CANDIDATE RC2 (WIP: RC1 + ERASE on MIDI tracks + the BLKPYRAMD chooser fix): KYOTI V1.8BC / V1.8C / V1.8, ERASE_EMPTY_TRIGLESS_LOCKS, BLACKPYRAMIDS_303 | `KY18BC RC2` / `KY18C RC2` / `KY18 RC2`, `140C_ERRC2`, `140C_BPRC2` |
 | ERASE_EMPTY_TRIGLESS_LOCKS and the BATCH_BUGFIXES builds | `1.40C` (stock string — check by behaviour) |
 | a feature + BATCH_BUGFIXES | `BUG_` + the feature (`BUG_MUTEDT`, `BUG_DJV7`, `BUG_SC3X`, `BUG_RL3`, `BUG_QLREC`, `BUG_TRIGLK`, `BUG_RTM`, `BUG_BP303`, `BUG_VARI`, `BUG_VEM10`) |
 
 PERSONALIZE is reset by every flash, so features are off until you re-enable them. A
 quick check for each:
 
+- **RELEASE CANDIDATE RC2** (WIP, NOT promoted, NOT flashed; branch `release-1119`, NOTES 2026-11-20). RC1 + two fixes
+  from RC1's flashes 1-2 (the author's MKI, 2026-11-20: every other item passed): BLACKPYRAMIDS_303 -- a BLKPYRAMD chosen on
+  a FLEX track played FLEX's live values (silent / ~-20 dB) until a machine change with a trig between, PLAY or a Part
+  change (pre-existing, also in the FINAL); ERASE_EMPTY_TRIGLESS_LOCKS -- MIDI tracks too (it only ever covered audio).
+  Files in the release worktree's `out/rc2/` (`SHA256SUMS` there):
+
+  | flash | file | OS VERSION | syx sha256 |
+  |---|---|---|---|
+  | **1** | `OCTATRACK_OS1.40C_KYOTI_V1.8BC.syx` | `KY18BC RC2` | `12f33b35…` |
+  | **2** | RC1's `OCTATRACK_OS1.40C_VARISPEED_EMUS.syx` (`out/rc1/`, unchanged) | `140CVEMRC1` | `bbb2c863…` |
+  | (3, optional) | RC1's `OCTATRACK_OS1.40C_VARISPEED.syx` (`out/rc1/`, unchanged) | `140C_VRRC1` | `f752032d…` |
+  | not needed | `KYOTI_V1.8C` `KY18C RC2` (`fc8588a5…`), `KYOTI_V1.8` `KY18 RC2` (`07ac9bca…`), `ERASE_EMPTY_TRIGLESS_LOCKS` `140C_ERRC2` (`6025364b…`), `BLACKPYRAMIDS_303` `140C_BPRC2` (`66e6f0ae…`) | | |
+
+  KY18C / KY18 RC2 and the ERASE image differ from RC1 only in ERASE's 279 bytes, which flash 1 carries; KY18BC RC2 =
+  a clean build of the BP fix (`278b05e`) + those 279 bytes; the BLACKPYRAMIDS_303 image carries the same control.c.
+
+  **Flash 1 -- `KY18BC RC2`.**
+  1. **BLKPYRAMD from the chooser** (sequencer playing, trigs on the track; T1-4 and T5-8, so both cores):
+     1. a FLEX track with TSTR `OFF` -> `BLKPYRAMD`: sounds at full level from its first note; again from a FLEX track on
+        `VARI` and from one on `BEAT`;
+     2. STATIC -> `BLKPYRAMD`: sounds (as RC1);
+     3. `BLKPYRAMD` -> `NEIGHBOR` -> `BLKPYRAMD` quickly (no trig between), and again via `THRU`: sounds right away;
+     4. `BLKPYRAMD` -> `FLEX`: the FLEX track plays its own sample settings at once (not a 303-ish level / pitch);
+     5. 1 and 4 on a pattern in a bank other than A;
+     6. a BLKPYRAMD playing in Part 1 with notes held over the bar line, Part 2 with a BLKPYRAMD on another track of the
+        same core: cue the Part switch -- the outgoing note rings over the change, the incoming one takes over at its
+        first trig (the BLACKPYRAMIDS_303 FINAL's Part-change behaviour, unchanged).
+  2. **ERASE on MIDI tracks** (LIVE REC: `[REC]`+`[PLAY]`, then hold `[NO]` and turn the knob, or `[NO]`+trig):
+     1. a MIDI trigless lock with one locked value (NOTE or a CC), erase it: the step goes dark;
+     2. two locked values: erase one -> still lit; erase the other -> dark;
+     3. a `[FUNC]`+trig trigless lock with nothing locked, erase a never-locked value as the playhead passes: stays;
+     4. a MIDI note trig with a lock, and a trigless trig with a lock: erasing the lock leaves the trig;
+     5. the same 1 and 3 on an audio track (regression), and on a BLKPYRAMD track (left alone, as before).
+  3. **Smoke:** OS VERSION `KY18BC RC2`; one VARI track (1.1 / 1.2 of RC1); LED rows 2 and 5 under `[BANK]`; a Clyps
+     load; a DIRECT JUMP; `ONE 303 PER CORE!` on a second BLKPYRAMD on T1-4. Power-cycle at the end.
+
+  **Flash 2 -- `140CVEMRC1`** and **(3, optional) `140C_VRRC1`:** RC1's flash 3 / flash 4 items below, unchanged.
+
+  Report each item pass / fail with the image's OS VERSION.
 - **RELEASE CANDIDATE RC1** (WIP, NOT promoted, NOT flashed; branch `release-1119`, NOTES 2026-11-19 (`release-1119`)).
   One release: VARISPEED VRG3 (its own track bytes beside BLACKPYRAMIDS_303, QUAN enters VARI at 1/1, the
   QUAN memory across a save, the migration of older projects, a held VARI note keeps its speed through a Part
