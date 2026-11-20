@@ -237,11 +237,11 @@ PLAN = {
               "patch_pattern_led",                 # EMPTY_PATTERN_LED_FIX
               "patch_mutemode",
               "rtm_mask"],                         # REC_TRIG_MUTE's state byte, written at runtime
-    "ENC":   ["patch_triglock"],                   # LIVE-erase key path only
+    "ENC":   ["patch_triglock"],                   # LIVE-erase key path only (AUDIO + MIDI entries, 240 B)
     # SPRING REVERB's dead descriptor record (UI-path code ran there in V1.2-V1.3): [PLAY]/[REC]
     # key handlers, moved out of SAFE when SIDE-CHAIN's units grew (2026-10-25)
     "SPRING": ["patch_qlrec",
-               "patch_triglock_bp"],               # V1.8BC: ERASE's LIVE-erase path (ENC has 40 B left)
+               "patch_triglock_bp"],               # V1.8BC: ERASE's LIVE-erase path (placed when ENC had 40 B left)
     "PERS1": [], "PERS2": [],
 }
 

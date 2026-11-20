@@ -40162,3 +40162,74 @@ reproduce RC1 row for row, e3.py's original cases (FLEX -> BP, quick BP -> NEIGH
 level. (2) bp_net's ot_assign then TRK_REFRESH (0x400972fc): one seed, then the refresh (which seeds only on its PICKUP arm
 0x400973da) -- staged once, correct order; RC1 left the demoted track stale until its next trig. Five verify_* gates ALL
 GOOD. Scratch image out/bpsilent/fixC/ (KY18BC BPC, mainos 6ef2b86f…), not to be flashed; RC2 replaces it.
+
+## 2026-11-20 (`release-1119`) — ERASE_EMPTY_TRIGLESS_LOCKS on MIDI tracks; RELEASE CANDIDATE RC2 (WIP, NOT flashed, NOT promoted)
+
+The author, on KY18C / KY18BC RC1: on a MIDI track, erasing the last p-lock of a trigless lock leaves the step lit.
+ERASE only ever hooked the AUDIO worker. Spec = the audio feature's, on MIDI.
+
+**Cause (our disassembly).** FUN_40041af4 (opcode 8's LIVE branch) tail-calls FUN_40038668 instead of FUN_40038874 when
+0x80000012 != 0, with the same (trackmask, clear_trigs, param_mask). Its per-param erase store 0x400387b8
+`moveb %d1,%a0@(0x4900) ; addl %d4,%d0` (then the mirror store 0x400387c8) has the audio site's 6-byte shape; the row-empty
+verdict clears only 0x46c7d2e4[step] (the MIDI lock bitmap), never MTRA+0x10. Registers there: a0 = blob + pat*0x8ed8 +
+trk*0x8b0 + step*32 + PARAM (param already added), d1 = 0xff, d2 = param, d3 = trk*0x8b0, d4 = step*32, d6 = step,
+d7 = track. No branch lands in 0x400387ba..bd (the loop's branches: 0x40038794 -> 0x400387e4, 0x400387ea -> 0x4003878c);
+the builder's assert_no_branch_into now runs on both sites. Its only caller is 0x40041b4a.
+- MIDI layers: +0x00 note, +0x08 trigless trig, +0x10 trigless lock (the [FUNC]+trig toggle 0x40040f90 cycles
+  note -> +0x08 -> +0x10 -> +0x08), +0x18 swing (FUN_4009abdc fills it 0xAA..), +0x20 slide (filled 0; the 0x40027xxx
+  page loaders pair MIDI +0x18 / +0x20 with audio +0x40 / +0x48). The trig row: FUN_40034bd4's MIDI branch
+  (0x40034d2a..) paints +0x00 red, else +0x08 green, else +0x10 green dim; ot_emu --watch-read logged its read of MTRA+0x16
+  at 0x40034d92 in GRID REC. VETO on MIDI = +0x00, +0x08, +0x20; swing is not one (it is on every second step by default).
+- The mirror: 0x1001614e is a byte copy of the working bank (ot_emu after the OT DEMO load: 0 of 73,728 bytes differ),
+  so mirror(X) = X - [0x46c82456] + 0x1001614e. MTRA+0x10's is 0x1001aa2e (+patoff +trk*0x8b0): written with +0x48e0 by
+  the toggle (0x40041264 / 0x40041282) and 0x4003dca6 / 0x400426aa; stock's MIDI clear writes aa1e / aa26, the row aa4e.
+- GRID REC: no per-param erase reaches either worker (FUN_40042158's MIDI writers 0x40042500.. only write locks; the
+  other 0x4900 0xFF stores are whole-row clears 0x400397b4 / 0x40040db4 and the chord-note edit 0x4004f124..). As the
+  audio side, the fix covers the LIVE erase ([NO]+knob, and [NO]+trig = clear_trigs, where stock audio already clears
+  +0x10 and stock MIDI left a stale bit: with the fix a TL with a lock goes, an empty one stays as stock leaves it).
+
+**Change.** patch_triglock.s: one shared rule (`tl_core`: old value != 0xFF, every other row byte 0xFF, no veto layer,
++0x10 set -> clear it, its mirror, the dirty flags, NOTIFY) behind two entries: `cave` (AUDIO, offset 0, so
+patch_triglock_bp's `jmp CAVE` and every placement are unchanged) and `cave_midi`. The audio entry keeps its veto set
+(+0x00/+0x08/+0x18/+0x20/+0x28/+0x30); the per-track mirror arithmetic became the mirror rule above (same address).
+296 -> 240 B, position-independent (identical at 0x400d7200 / 7500 / 6f00 / 0x400c45b0). The builder adds the second
+detour (jsr cave_midi, stock bytes asserted) and refuses a manifest REFERENCE that is not the source linked at 0x400d7200.
+manifest.py: one Linked unit + two jsr Detours (REFERENCE 0x400d7200 / 0fa04f4d…). V1.8BC: the MIDI detour never goes
+through patch_triglock_bp (BLKPYRAMD is an audio-track machine). KYOTI placement: ENC 296 -> 240 B (40 -> 96 B left), CAVE
+636 B left, SPRING 204 B (V1.8 / V1.8C) / 82 B (V1.8BC), all as RC1 otherwise.
+
+**Emulator (`tools/erase_trigless_test.py`, ot_emu + `key`, OT DEMO).** T2 selected by its track key, GRID REC by [REC];
+each case resets pattern A01 with FUN_4009abdc (mirror copied), makes the trigless lock with stock's toggle (note bit ->
+toggle x2), pokes lock bytes / other layers (blob + mirror), erases through FUN_40041af4 with stock's gate words
+(0x460d1a94 / 0x460d1a98, or 0x460d1a90 / 0x460d1a9c) and the playhead 0x800064e0[t (+8)], then reads masks, mirror byte,
+row, lock bitmap and -- after the track key repaints -- the step's two LED bits (0x460ba98c) and brightness (0x400b9714).
+Per side (MIDI, AUDIO): one lock erased (steps 4 and 3 = swing step) -> dark; two locks -> lit, then dark; empty TL
+([FUNC]+trig), a never-locked param erased -> lit; a 2-param mask holding the one lock -> dark; note + lock, note + TL bit +
+lock, trigless trig + lock, trigless trig + TL bit + lock -> untouched; MIDI slide / AUDIO one-shot and recorder + TL ->
+kept; neighbours (T3 same step, T2 next step) kept; the erase-the-trigs gesture -> dark; T1 / T8 at steps 33 / 41 / 64
+with params 0 / 15 / 31 (mask bytes and row edges). Results: stock = the bug on both sides (MIDI and audio TLs stay lit,
+mirror and row as the author saw); FINAL ERASE unit 83690ffb… and RC1 V1.8BC = fixed on audio, the bug on MIDI (the
+author's report, reproduced); new unit, ERASE feature, KY18 / KY18C / KY18BC RC2 = every case as specified. ~2 min for
+six images. kyoti_bc_check_erase (BLKPYRAMD skip) ALL GOOD on RC2 V1.8BC.
+Not shown by the emulator: the panel LEDs themselves (it reads the framebuffer the panel is driven from) and the physical
+[NO]+knob gesture (entered at FUN_40041af4 with the words it sets, the path ARTLTEST8 traced on the unit).
+
+**RC2 images** (private build worktree out/rc2/wt = 278b05e + this change, because out/KYOTI here is read by another
+session as RC1; it reproduced RC1 V1.8BC byte for byte first). Copies in out/rc2/ (SHA256SUMS).
+
+| image | OS VERSION | mainos | syx | .bin |
+|---|---|---|---|---|
+| KYOTI V1.8BC | `KY18BC RC2` | `4624b602…` | `12f33b35…` | `7155a854…` |
+| KYOTI V1.8C | `KY18C RC2` | `9df3beb3…` | `fc8588a5…` | `333a9ac3…` |
+| KYOTI V1.8 | `KY18 RC2` | `02e30123…` | `07ac9bca…` | `f4392a43…` |
+| ERASE_EMPTY_TRIGLESS_LOCKS | `140C_ERRC2` | `0f9f1f6f…` | `6025364b…` | `6d677154…` |
+| BLACKPYRAMIDS_303 | `140C_BPRC2` | `f6327fc9…` | `66e6f0ae…` | `8d8acdc5…` |
+| ERASE unit | | `3d60c731…` | | |
+
+Proof: KY18 / KY18C RC2 vs RC1 and the ERASE feature vs RC1's: 279 bytes differ, all in ERASE's zone (ENC
+0x400c45b0..0x400c4700 / 0x400d7200..) and the 6 MIDI-site bytes; the ENC piece = the source linked there. KY18BC RC2 vs a
+pristine 278b05e build (6ef2b86f…, = the BP session's fixC): the same 279 bytes, nothing else. FINAL pins unchanged.
+`feature_image.py --only` ignores KYOTI_VERSTR (only a builder's own run honours it): the ERASE / BP feature images were
+built by their builders. BP gates on RC2 V1.8BC (its mainos + bp_runtime elf): verify_part_carry, verify_tie_xfer, verify_first_gate (and
+STALE=1), verify_page_paste, verify_one_per_core ALL GOOD (idle pass median 54 instructions). Hardware: nothing flashed;
+the MIDI side needs the unit (FLASHING §4 RC2 list to be written by the release session).

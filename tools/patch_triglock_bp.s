@@ -7,7 +7,9 @@
 | EMPTY one ties just as well: it is how a tie is placed. ERASE removes a trigless lock whose last
 | p-lock was erased live, which on that track would cut the note short. So on a BLKPYRAMD track this
 | entry replays the stock store and returns, and ERASE's cave never runs; on any other track it
-| jumps to the cave, which is unchanged (octabam-modules/erase-empty-trigless-locks/patch_triglock.s).
+| jumps to the cave's AUDIO entry `cave` (its first byte; octabam-modules/erase-empty-trigless-locks/
+| patch_triglock.s). The MIDI detour at 0x400387b8 (FUN_40038668, 2026-11-20) goes straight to the
+| cave's `cave_midi`, never through here: BLKPYRAMD is a machine on an audio track.
 |
 | The detour at 0x40038a5c (FUN_40038874's erase store) is `jsr` here instead of `jsr cave`. At the
 | site: d7 = track (0..7: this is the AUDIO worker), d1 = 0xff, d2 = the param, a0 = the step's TRAC

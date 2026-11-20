@@ -107,7 +107,7 @@ FEATURES = {
     "SIDECHAIN_COMPRESSOR": ("build_sidechain_compressor.py", "out/mainos_sidechain_compressor.bin", "140C_SC",
                              "COMPRESSOR FX page 2: MON / KEY / KGN / KBAS / KWID (base-width key filter), cross-core."),
     "ERASE_EMPTY_TRIGLESS_LOCKS": ("build_erase_empty_trigless_locks.py", "out/mainos_erase_empty_trigless_locks.bin", "140C_TL",
-                 "A trigless lock whose last param is LIVE-erased clears from the trig row."),
+                 "A trigless lock whose last param is LIVE-erased clears from the trig row (audio and MIDI tracks)."),
     "RELOAD_FROM_PROJECT": ("build_reload_from_project.py", "out/mainos_reload_from_project.bin", "140C_RL",
                 "[PTN]+[TRACK n] reload track n's saved sequence; [BANK]+[TRACK n] also reloads that track's Part slice."),
     "DIRECT_JUMP_KYOTI": ("build_direct_jump_kyoti.py", "out/mainos_direct_jump_kyoti.bin", "140C_KDJ7",
