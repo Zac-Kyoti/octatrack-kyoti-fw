@@ -40310,3 +40310,27 @@ builders refuse without `KYOTI_ALLOW_WIP=1` until RC3 is promoted; the 2026-11-1
 
 Docs: README (ERASE on MIDI tracks; the LED entry was af7d5f3's; Hardware lines of the ten images), BUILD_KYOTI (the
 opt-in note), FLASHING §4 (promotion note), START_HERE §6. octabam pin PRs: next entry.
+
+## 2026-11-20 cont. (`promote-1120`) — octabam pin PRs for the promotion: #1200 (batch-bugfixes), #1201 (erase), #1202 (varispeed)
+
+**Our side first.** 2cd3109 (docs only, pushed): the three octabam module folders' hardware lines (ERASE's MIDI side was
+"not yet on hardware"; the 318 B LED predicate; VARISPEED VRG3's bytes, QUAN entry and proof_note). build_varispeed /
+_varispeed_emus / _erase / _batch_bugfixes rebuilt and sealed without the opt-in after it. Every PR pins 2cd3109.
+
+**Scratch clone** `out/octabam-pr` (+ worktrees `out/octabam-erase`, `out/octabam-varispeed`), base 382a478b, its own
+`scripts/setup.sh` vendor (the shared ~/Documents/octabam/vendor dsp56300 is 8ccdd843, older than main's pin 8b731966:
+emu-get failed `setIoExtension` against it; not touched). Local environment notes: main's uv.lock has no numpy
+although pyproject's emu extra lists it (WAVE CF's tests fail on import) -- `uv pip install numpy` into the clone's
+.venv, lock untouched; `make emu-unicorn` (private .venv) for WAVE CF's EMAC test. Said so in #1201 / #1202.
+
+| PR | module | gates on 382a478b |
+|---|---|---|
+| sambanks/octabam#1200 | batch-bugfixes 77f132f -> 2cd3109 (the draft from led-fix's out/octabam-led, placeholders filled) | make bus x18 remixes (318 B, smallest cave left test/hooks-core 632 B), make docs, verify-docs 115/151/0, mkdocs --strict 0 warnings, make reach RUN=1 KEEP=1 every gate passed (13 shards); CI green |
+| sambanks/octabam#1201 | erase-empty-trigless-locks 77f132f -> 2cd3109 (CavePatch -> Linked `tl` 240 B + two jsr, MIDI site 0x400387b8 used by no other module) | make bus x15 (matches the reference at 0x400d7200, both jsr placed), docs, verify-docs, mkdocs, make reach every gate passed (65 shards, 21 SKIP for no project fixture) |
+| sambanks/octabam#1202 | varispeed 9b2e35a -> 2cd3109 (VRG3: four claimed bytes, QUAN entry, usage page) | make bus x4 (vari_cf matches the reference, 3,900 B), docs, verify-docs, mkdocs, make reach every gate passed (65 shards) |
+
+**vh_bptake / vh_bpback (VARI_TAKE / VARI_BACK) left out of #1202:** octabam's `vari_cf` must equal the standalone
+VARISPEED unit (its `reference`; build_varispeed.py refuses a wrapper that assembles differently), and `VEM_BP`
+changes that unit; carrying them needs a design choice (a second unit or a setting, and how BLACKPYRAMIDS_303's
+runtime finds the two addresses). The body says so and asks to keep #1195's VARISPEED conflict until that follow-up.
+None of the three octabam forms has been flashed. Not touched: #1195 (the BlackPyramids session's), Modwerk.

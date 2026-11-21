@@ -167,8 +167,9 @@ are lowercase-hyphen, because octabam requires a module's name to equal its fold
   BLACKPYRAMIDS_303 (unit + image), CLYPS, KYOTI V1.8 / V1.8C / V1.8BC** -- their FINAL pins are still the 2026-11-19
   builds (07f47d1), main's sources for them have changed (BP's chooser / blip fixes, the LED / ERASE / VRG3 bytes), so
   `build_blackpyramids_303.py`, `build_clyps.py` and `build_kyoti.py` refuse without `KYOTI_ALLOW_WIP=1` until RC3 is
-  promoted; the old finals rebuild at 07f47d1. octabam: pin PRs for batch-bugfixes, erase-empty-trigless-locks and
-  varispeed (NOTES); no varispeed-emus module (none should exist). VARISPEED's `vh_bptake` / `vh_bpback` (VARI_TAKE /
+  promoted; the old finals rebuild at 07f47d1. octabam pin PRs (all on 2cd3109, base 382a478b, every gate green,
+  waiting on Sam): batch-bugfixes sambanks/octabam#1200, erase-empty-trigless-locks #1201, varispeed #1202 (#1201 and
+  #1200 edit one THIRD_PARTY row; #1202 shares a row with #1195); no varispeed-emus module (none should exist). VARISPEED's `vh_bptake` / `vh_bpback` (VARI_TAKE /
   VARI_BACK, under `VEM_BP`) are not in octabam's varispeed module yet: octabam's BlackPyramids is to call them once the
   varispeed pin merges (the author's plan; NOTES says why they were left out of this pin).
 - **2026-11-20: RELEASE CANDIDATE RC2 (WIP, NOT promoted, branch `release-1119`)** -- RC1 + the BLKPYRAMD chooser fix
