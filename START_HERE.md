@@ -158,6 +158,16 @@ are lowercase-hyphen, because octabam requires a module's name to equal its fold
 
 > Check this against the tree before trusting it; it has gone stale before.
 
+- **2026-11-20: RELEASE CANDIDATE RC2 (WIP, NOT promoted, branch `release-1119`)** -- RC1 + the BLKPYRAMD chooser fix
+  (5511929, 278b05e) + ERASE on MIDI tracks (54769ae). Flashed: `KY18BC RC2` (syx `12f33b35…`) all pass; RC1's
+  `140CVEMRC1` all pass; `140C_VRRC1` skipped (author). Images in `out/rc2/` + `out/rc1/`. Next: promotion on the author's
+  word, then ping the BlackPyramids session (kyoti-m4-ee) to re-pin octabam #1195.
+- **Possible future enhancement (the author, 2026-11-20; not scheduled): BLKPYRAMD ties across a DIRECT JUMP landing and a
+  Clyps load.** Today a tie carries only over a stock cued change (pattern or Part, same track: tie_xfer at the pattern
+  boundary). With DIRECT JUMP on it never carried (November's "a jump into a tie keeps the old rule"; even a boundary
+  landing is missed -- the landing re-schedules step 0 after the wrap's own step 0), and no Clyps load carries (the
+  pattern id does not change). Design sketch + emulator matrix: out/bpsilent/ties/ in this worktree (FINAL / RC1 / RC2
+  identical). Open questions when picked up: which DJ landings carry (any tied landing vs boundary only), Clyps' hook.
 - **2026-11-19: RELEASE CANDIDATE RC1 (WIP, NOT flashed, NOT promoted, branch `release-1119`)** -- VRG3 (`emus-guard`)
   + the `[BANK]` trigless-lock LED change (`led-fix`) in one release. Images `KY18BC RC1` (syx `0a8e18c7…`), `KY18C RC1`
   (`281b10fa…`), `KY18 RC1` (`4edb7163…`), `140CVEMRC1` (`bbb2c863…`), `140C_VRRC1` (`f752032d…`), `140CFIXRC1`
