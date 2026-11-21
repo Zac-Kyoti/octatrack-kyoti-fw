@@ -515,8 +515,7 @@ cl_page:
     bra.w   cl_refresh
 
 | cl_vplay: the view to the playing pattern's bank, the arrows with it (CL40: opening Clyps, the user 2026-11-21 --
-| was the arrows' / the box's bank; the [PTN]+[BANK] chord, which acts on the playing bank and shows its patterns
-| on the grid). Uses d0.
+| was the arrows' / the box's bank; CL41: ORIG PTN+PRT's [YES]). Uses d0.
 cl_vplay:
     move.b  PLAY_BANK,%d0
     move.b  %d0,cl_bank
@@ -637,19 +636,24 @@ cl_k_trig:
     beq.b   kt_go                       | nothing; with [PTN] too: the pattern reload
     tst.l   PTN_HELD
     beq.b   kt_out
+    moveq   #0,%d0                      | CL41 (the user, 2026-11-21): pattern N of the bank SHOWN, from the card
+    move.b  cl_bank,%d0                 | (was the playing bank's) -- not one stock refuses ("BANK UNAVAILABLE",
+    move.l  #BANKSTRIDE,%d1             | 0x4007b30c, the status cl_ptnbank reads)
+    muls.l  %d0,%d1
+    movea.l %d1,%a0
+    adda.l  #BLOB+0x9b336,%a0
+    tst.l   (%a0)
+    bne.b   kt_out
     clr.l   -(%sp)                      | (no track)
-    move.l  8(%sp),%d0
-    andi.l  #15,%d0
-    move.l  %d0,-(%sp)                  | pattern N of the playing bank, from the card
-    pea     RQ_PTN
-    jsr     cl_rlreq
-    lea     12(%sp),%sp
-    moveq   #0,%d0                      | CL40 (the user, 2026-11-21): the pattern's slot flashes, as every load's
-    move.b  PLAY_BANK,%d0
     lsl.l   #8,%d0
     moveq   #15,%d1
-    and.l   4(%sp),%d1
+    and.l   8(%sp),%d1
     or.l    %d1,%d0
+    move.l  %d0,-(%sp)                  | bank << 8 | N
+    pea     RQ_PTN
+    jsr     cl_rlreq
+    move.l  4(%sp),%d0                  | CL40: the pattern's slot flashes, as every load's
+    lea     12(%sp),%sp
     jsr     cl_flcode
     tst.b   cl_chordout                 | the chord opened Clyps: close it (begun inside: stay)
     beq.w   cl_refresh
@@ -1142,6 +1146,7 @@ kp_in:
     tst.b   cl_bpno                     | refused (cl_bpgate): no flash
     bne.w   cl_refresh
 .endif
+    jsr     cl_vplay                    | CL41: the view to the playing pattern's bank, at the [YES] (the user)
     moveq   #0,%d0                      | begun inside: CL40 (the user, 2026-11-21) the pattern's slot flashes, as
     move.b  PLAY_BANK,%d0               | every load's (was the ORIG PTN+PART header box)
     lsl.l   #8,%d0
@@ -1261,8 +1266,7 @@ cl_k_chord:
     clr.b   cl_bkfwd
     jsr     BANK_TEARDOWN               | its keymap + LED layers off (and a repaint)
 kc_pch:
-    jsr     cl_vplay                    | CL40: the chord acts on the playing bank -- the view goes there
-    bra.w   cl_refresh                  | the pattern view (cl_paint, the chord held)
+    bra.w   cl_refresh                  | the pattern view of the bank shown (cl_paint; CL41: the view stays)
 kc_pgo:
     moveq   #1,%d1
     move.b  %d1,cl_ptfwd
@@ -1325,7 +1329,6 @@ kc_bpress:
     moveq   #1,%d1
     move.b  %d1,cl_ptpop
 kc_bch:
-    jsr     cl_vplay                    | CL40: as kc_pch
     bra.w   cl_refresh
 kc_bgo:
     moveq   #1,%d0
@@ -1540,9 +1543,9 @@ cl_srccode:
 sc2_out:
     rts
 
-| cl_boxhome: the select box (and the shown bank) on the active track's sequence (cl_srccode). Opening
-| Clyps and every change of the viewed track; moving it within a view is free (the user, 2026-11-04).
-| Uses d0, d1, a0.
+| cl_boxhome: the select box on the active track's sequence (cl_srccode). Opening Clyps and every change of
+| the viewed track; moving it within a view is free (the user, 2026-11-04). CL41 (the user, 2026-11-21): the
+| shown bank stays -- tucked arrows follow it (cl_pfollow). Uses d0, d1, a0.
 cl_boxhome:
     clr.b   cl_pmoved                   | home: no pre-select box until the arrows move it -- nor in the
     jsr     cl_trk                      | active track's record (a card reload, the open of a track
@@ -1556,7 +1559,6 @@ cl_boxhome:
     move.b  %d1,cl_cur
     lsr.l   #8,%d0
     move.b  %d0,cl_sbank
-    move.b  %d0,cl_bank
     clr.b   cl_ysup                     | (no arrows until one moves them -- the user, 2026-11-12)
     jsr     cl_srccode                  | CL34 (the user, 2026-11-13): a select box -> the arrows are tucked
     moveq   #0,%d1                      | under it (shown again when it goes); none -> nothing on screen
@@ -1569,7 +1571,7 @@ cl_boxhome:
     move.b  %d0,cl_pmoved
     move.b  %d0,cl_ysup
 bh_out:
-    rts
+    jmp     cl_pfollow
 
 | cl_cueslot -> d0 = the active track's cued slot (bank << 8 | slot; an original / saved / card source: the
 | pattern's own slot), -1 = none. Uses d0, d1, a0.
@@ -4643,7 +4645,9 @@ th_rd:
     rts
 
 | cl_ptnswitch (UI task): a pattern reload from the card finished (cl_ptngo = 0x80 | N, clyps_reload.s):
-| the OT goes to pattern N of the playing bank (the user, 2026-11-06), as stock's [PTN] + trig does
+| the OT goes to pattern N of the job's bank (rq_jbk; CL41: the bank Clyps showed at the chord -- the cue
+| 0x400a1030(bank, N) is the one stock's [BANK] + bank + trig makes, 0x4007b36e, with the same refreshes)
+| (the user, 2026-11-06), as stock's [PTN] + trig does
 | (0x40056b2c, without its window teardown, PTN_CONSUMED -- which would close Clyps -- or chain bits):
 | the chain off (0x4009a404), the cue 0x400a1030(bank, N) -- running: a pending change, so DIRECT JUMP
 | (on) jumps at its landing point and stock (off) switches at CHAIN AFTER / the pattern end; stopped: at
@@ -4651,19 +4655,24 @@ th_rd:
 cl_ptnswitch:
     move.l  %d2,-(%sp)
     moveq   #0,%d2
+    move.b  rq_jbk,%d2
+    lsl.l   #8,%d2
     move.b  cl_ptngo,%d2
     clr.b   cl_ptngo
-    andi.l  #15,%d2
+    andi.l  #0x0f0f,%d2                 | d2 = bank << 8 | N
     moveq   #0,%d0
+    move.b  PLAY_BANK,%d0
+    lsl.l   #8,%d0
     move.b  ACT_PAT,%d0
     cmp.l   %d2,%d0
     beq.b   pw_out
 pw_cue:
     jsr     0x4009a404                  | the chain off
-    move.l  %d2,-(%sp)
-    moveq   #0,%d0
-    move.b  PLAY_BANK,%d0
+    moveq   #15,%d0
+    and.l   %d2,%d0
     move.l  %d0,-(%sp)
+    lsr.l   #8,%d2
+    move.l  %d2,-(%sp)
     jsr     0x400a1030                  | the cue
     jsr     0x400418e0                  | stock's refreshes after it (0x40056b6e..0x40056b8c)
     pea     -1
@@ -4689,6 +4698,8 @@ cl_ptncancel:
 pk_go:
     move.l  %d2,-(%sp)
     moveq   #0,%d2
+    move.b  PLAY_BANK,%d2
+    lsl.l   #8,%d2
     move.b  ACT_PAT,%d2
     bra.w   pw_cue
 pk_out:
@@ -4998,8 +5009,8 @@ cl_psave:
 pv_w:
     move.w  %d1,(%a0)
     rts
-| cl_pload (d0 = track) -> d0 = 1: its record shows arrows -- they are the screen's now (the shown bank too);
-| 0: none. Uses d0-d1/a0.
+| cl_pload (d0 = track) -> d0 = 1: its record shows arrows -- they are the screen's now, in the bank shown (CL41,
+| the user 2026-11-21: a track change keeps the view; the arrows follow it, cl_pfollow); 0: none. Uses d0-d1/a0.
 cl_pload:
     lea     cl_pre,%a0
     add.l   %d0,%d0
@@ -5017,11 +5028,10 @@ cl_pload:
     moveq   #1,%d0
     move.b  %d0,cl_ysup
 pl2_y:
-    andi.l  #0x0f,%d1
-    move.b  %d1,cl_sbank
-    move.b  %d1,cl_bank
     moveq   #1,%d0
     move.b  %d0,cl_pmoved
+    jsr     cl_pfollow
+    moveq   #1,%d0
     rts
 pl2_no:
     moveq   #0,%d0
@@ -5171,19 +5181,21 @@ pu_n:
     lea     20(%sp),%sp
     rts
 
-| cl_pmark (d3 = Part index, a2 = that Part, of the playing bank): stock's Part-edited mark follows
+| cl_pmark (d3 = Part index, a2 = that Part, of the playing bank; cl_pmarkb: d0 = the bank, CL41): stock's Part-edited mark follows
 | "differs from its SAVE PART copy" (bank +0x9504a + part * PARTSZ, valid when +0x9b312 + part != 0, the
 | test stock's PART RELOAD makes); the Part's SRAM copy when the playing bank is the UI's -- d4 in = the
 | tracks whose slice changed (only those slices are copied), 0 = the whole Part; the bank marked changed.
 | -> d4 = 1: the playing bank is the UI's. Data only (UI task or the card worker). Keeps d2, d3, a2.
 cl_pmark:
+    moveq   #0,%d0
+    move.b  PLAY_BANK,%d0
+cl_pmarkb:
     move.l  %d5,-(%sp)
+    move.l  %d0,-(%sp)                  | 0(sp) = the bank
 |   d5 = 1: the Part now equals its SAVE PART copy (the user, 2026-10-30: then it is not edited,
 |   as after stock's own PART RELOAD, 0x4004ab46): the "saved" flag set (bank +0x9b312 + part, the
 |   test stock's PART RELOAD makes) and the bytes equal (bank +0x9504a + part * PARTSZ)
     moveq   #0,%d5
-    moveq   #0,%d0
-    move.b  PLAY_BANK,%d0
     move.l  #BANKSTRIDE,%d1
     muls.l  %d1,%d0
     movea.l #BLOB,%a1
@@ -5205,7 +5217,7 @@ cl_pmark:
 pm_neq:
     move.l  %d4,%d1                     | d1 = the slices that changed (0: the whole Part)
     moveq   #0,%d4                      | d4 = 1: the UI bank
-    move.b  PLAY_BANK,%d0
+    move.l  (%sp),%d0
     cmp.b   UI_BANK,%d0
     bne.b   pm_flags
     moveq   #1,%d4
@@ -5246,8 +5258,7 @@ pm_mk:
     beq.b   pm_flags
     bclr    %d3,PEDIT_S
 pm_flags:
-    moveq   #0,%d0
-    move.b  PLAY_BANK,%d0
+    move.l  (%sp),%d0
     move.l  #BANKSTRIDE,%d1
     muls.l  %d1,%d0
     movea.l #BLOB,%a0
@@ -5263,6 +5274,7 @@ pm_fl2:
     moveq   #1,%d0
     move.l  %d0,(%a1)
     move.l  %d0,DIRTY2
+    addq.l  #4,%sp
     move.l  (%sp)+,%d5
     rts
 
@@ -6973,7 +6985,8 @@ ut_post:
     tst.b   cl_open
     beq.b   ut_out
     tst.b   cl_boxreq                   | a card reload: the box / LEDs go to the active track's sequence --
-    beq.b   ut_rf                       | not while the arrows show: they stay (the user, 2026-11-07)
+    beq.b   ut_rf                       | not while the arrows show: they stay (the user, 2026-11-07); the view
+                                        | stays too (CL41: cl_boxhome keeps the bank shown)
     clr.b   cl_boxreq
     tst.b   cl_pmoved
     bne.b   ut_rf
@@ -8411,10 +8424,12 @@ cp_done:
     movem.l (%sp),%d2-%d6/%a2-%a5
     lea     36(%sp),%sp
     rts
-| the pattern view (the user, 2026-10-30: with [PTN]+[BANK] held, whichever came first): the playing
-| bank's patterns as stock's [PTN] view lights them -- your pattern red, a cued one yellow, those
-| with data green (stock's own test PAT_HASDATA), empty off
+| the pattern view (the user, 2026-10-30: with [PTN]+[BANK] held, whichever came first): the shown
+| bank's patterns (CL41, the user 2026-11-21: was the playing bank's) as stock's [PTN] view lights them --
+| your pattern red, a cued one yellow, those with data green (stock's own test PAT_HASDATA), empty off
 cp_pview:
+    moveq   #0,%d5
+    move.b  cl_bank,%d5                 | d5 = the bank shown
     moveq   #0,%d2
 pv_lp:
     lea     LED_TBL,%a0
@@ -8431,6 +8446,8 @@ pv_lp:
     move.b  ACT_PAT,%d0
     cmp.l   %d2,%d0
     bne.b   pv_cue
+    cmp.b   PLAY_BANK,%d5
+    bne.b   pv_cue
     move.l  %d3,-(%sp)                  | red
     jsr     (%a4)
     move.l  %d4,(%sp)
@@ -8441,7 +8458,7 @@ pv_cue:
     tst.l   RUNNING
     beq.b   pv_data
     move.b  PEND_BANK,%d0
-    cmp.b   PLAY_BANK,%d0
+    cmp.b   %d5,%d0
     bne.b   pv_data
     moveq   #0,%d0
     move.b  PEND_PAT,%d0
@@ -8457,9 +8474,7 @@ pv_data:
     move.l  %d3,-(%sp)
     jsr     (%a5)                       | red off
     addq.l  #4,%sp
-    moveq   #0,%d0
-    move.b  PLAY_BANK,%d0
-    move.l  %d0,-(%sp)
+    move.l  %d5,-(%sp)
     move.l  %d2,-(%sp)
     jsr     PAT_HASDATA
     addq.l  #8,%sp

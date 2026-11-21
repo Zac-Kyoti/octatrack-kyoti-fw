@@ -42,6 +42,12 @@ grades it against DIRECT JUMP's position model.
        is the shown bank's on every press, release and in the window; P checks ORIG PTN+PRT's flash on its slot;
        tK = trig K (a cued SEQ load): the flash on its slot, then the select box's frame blinking there; uK = a lone
        [PTN] tap, then trig K in stock's SELECT PATTERN: the bank shown is cued.
+  CL41 (the bank shown is the bank acted on): rK reloads pattern K of the bank SHOWN (after k- with --bankb: bank A
+       while B plays) -- an edit of its slab and Part in RAM first, then the chord: its grid while held = the shown
+       bank's pattern view, the view stays, the toast names that bank, the slab / Part = the card's again, the
+       playing bank's pattern K untouched; P presses [BANK] first and checks the chord's grid and the view before the
+       [YES], the view on the playing bank after it; KN = TRACK N: the view stays, the track's arrows in it; R =
+       [PTN] + the active TRACK (a card SEQ reload of the playing pattern's track): it lands, the view stays.
 """
 import argparse, json, os, pathlib, sys
 
@@ -85,6 +91,7 @@ def main(argv):
     sp = os.environ.get("CLYPS_SYMS", str(ROOT / "out/clyps_syms.txt"))
     syms = {k: int(v, 16) for k, v in (l.split() for l in pathlib.Path(sp).read_text().splitlines())}
     CL40 = "cl_flcode" in syms
+    CL41 = "rq_jbk" in syms
     out = pathlib.Path(a.out)
     if not out.is_absolute():
         out = ROOT / out
@@ -679,10 +686,28 @@ def main(argv):
             qblink(code, f"#{i} {opx}")
             continue
         if op[0] == "r" and op[1:].isdigit():  # CL39: [PTN]+[BANK]+trig K: pattern K back from the card (another
-            k_ = int(op[1:])                  # pattern: the toast at once, then stock's cue) -- of the playing bank
-            code = (rd(0x800065BD, 1) << 8) | k_
+            k_ = int(op[1:])                  # pattern: the toast at once, then stock's cue) -- of the playing bank;
+            pb_, vb_ = rd(0x800065BD, 1), rd(syms["cl_bank"], 1)    # CL41: of the bank shown
+            code = ((vb_ if CL41 else pb_) << 8) | k_
             g0 = rd(syms["rq_gen"], 1)
-            key(0x2E, 1); key(0x2F, 1); key(k_, 1); key(k_, 0); key(0x2F, 0); key(0x2E, 0)
+            if CL41:                          # an edit in RAM the card must undo: T1's first trig-mask byte, and a
+                tb_ = code >> 8               # byte of T1's machine slice in the pattern's Part (diag_clyps_ui L's)
+                sad = BLOB + tb_ * BANKSTRIDE + k_ * PATSTRIDE
+                pad = BLOB + tb_ * BANKSTRIDE + 0x8ED80 + (rd(sad + 0x8E57, 1) & 3) * 0x18B2
+                oad = BLOB + pb_ * BANKSTRIDE + k_ * PATSTRIDE      # the playing bank's pattern K
+                opd = BLOB + pb_ * BANKSTRIDE + 0x8ED80 + (rd(oad + 0x8E57, 1) & 3) * 0x18B2
+                pre_s, pre_p = bytes(u.mem_read(sad, PATSTRIDE)), bytes(u.mem_read(pad, 0x18B2))
+                pre_os, pre_op = bytes(u.mem_read(oad, PATSTRIDE)), bytes(u.mem_read(opd, 0x18B2))
+                u.mem_write(sad, bytes([rd(sad, 1) ^ 0x81]))
+                u.mem_write(pad + 0x2A, bytes([rd(pad + 0x2A, 1) ^ 0x55]))
+                key(0x2E, 1); key(0x2F, 1)
+                g_, want_ = grid(), pgrid(vb_)
+                qcheck(g_ == want_ and rd(syms["cl_bank"], 1) == vb_,
+                       f"#{i} {opx}: the chord held: the view stays on {chr(65 + vb_)} (playing {chr(65 + pb_)}), its grid = "
+                       f"bank {chr(65 + vb_)}'s pattern view {want_} ({g_})")
+                key(k_, 1); key(k_, 0); key(0x2F, 0); key(0x2E, 0)
+            else:
+                key(0x2E, 1); key(0x2F, 1); key(k_, 1); key(k_, 0); key(0x2F, 0); key(0x2E, 0)
             g = 0
             while rd(syms["cl_pcq"], 2) != code and g < 600:
                 rt.run(ms=17)
@@ -691,7 +716,22 @@ def main(argv):
                 g += 1
             print(f"      #{i} {opx}: the card job and stock's cue took {g} UI ticks; its toast line 1 "
                   f"{bytes(u.mem_read(syms['rq_line1'], 12)).split(b'\\0')[0]!r}", flush=True)
-            if CL40:
+            if CL41:
+                NOS = {0x899 + k * TRAC_A for k in range(8)} | set(range(0x8E5C, PATSTRIDE))
+                now_s = bytes(u.mem_read(sad, PATSTRIDE))
+                ds = [j for j in range(PATSTRIDE) if j not in NOS and now_s[j] != pre_s[j]]
+                dp = [j for j in range(0x18B2) if rd(pad + j, 1) != pre_p[j]]
+                line1 = bytes(u.mem_read(syms['rq_line1'], 12)).split(b'\0')[0].decode()
+                qcheck(rd(syms["cl_bank"], 1) == vb_ and rd(syms["rq_jbk"], 1) == vb_
+                       and line1 == f"PATTERN {chr(65 + vb_)}{k_ + 1:02d}",
+                       f"#{i} {opx}: the view stays on {chr(65 + vb_)}; the job read bank {chr(65 + rd(syms['rq_jbk'], 1))}; "
+                       f"toast {line1!r}")
+                qcheck(not ds and not dp, f"#{i} {opx}: {chr(65 + vb_)}{k_ + 1:02d}'s slab and Part = the card's again "
+                       f"({len(ds)} / {len(dp)} bytes differ from as loaded, {[hex(j) for j in (ds + dp)[:6]]})")
+                if vb_ != pb_:
+                    qcheck(bytes(u.mem_read(oad, PATSTRIDE)) == pre_os and bytes(u.mem_read(opd, 0x18B2)) == pre_op,
+                           f"#{i} {opx}: the playing bank's {chr(65 + pb_)}{k_ + 1:02d} and its Part untouched")
+            elif CL40:
                 qcheck(rd(syms["cl_bank"], 1) == code >> 8, f"#{i} {opx}: the chord took the view to the playing bank")
             qcheck(rd(syms["rq_gen"], 1) != g0 and rd(syms["rq_jgen"], 1) == rd(syms["rq_gen"], 1)
                    and rd(syms["rq_busy"], 1) == 0, f"#{i} {opx}: it was a card reload (request generation "
@@ -712,7 +752,16 @@ def main(argv):
             print(f"#{i} d: cur {rd(syms['cl_cur'], 1) + 1} shown {rd(syms['cl_pmoved'], 1)}", flush=True)
             continue
         if op == "P":                         # ORIG PTN+PRT: [PTN]+[BANK]+[YES]
-            key(0x2E, 1); key(0x2F, 1); key(0x31, 1); key(0x31, 0); key(0x2F, 0); key(0x2E, 0)
+            if CL41:                          # [BANK] first (the other order than r's): the chord's grid and the view
+                vb_, pb_ = rd(syms["cl_bank"], 1), rd(0x800065BD, 1)    # before the [YES], the view moves at it
+                key(0x2F, 1); key(0x2E, 1)
+                g_, want_ = grid(), pgrid(vb_)
+                qcheck(g_ == want_ and rd(syms["cl_bank"], 1) == vb_,
+                       f"#{i} P: the chord held: the view stays on {chr(65 + vb_)} (playing {chr(65 + pb_)}), its grid = "
+                       f"bank {chr(65 + vb_)}'s pattern view {want_} ({g_})")
+                key(0x31, 1); key(0x31, 0); key(0x2E, 0); key(0x2F, 0)
+            else:
+                key(0x2E, 1); key(0x2F, 1); key(0x31, 1); key(0x31, 0); key(0x2F, 0); key(0x2E, 0)
             if CL40:
                 mine = (rd(0x800065BD, 1) << 8) | rd(ACT, 1)
                 qcheck(rd(syms["cl_flk"], 1) > 0 and rd(syms["cl_fcode"], 2) == mine and rd(syms["cl_ftgt"], 1) == 0
@@ -721,6 +770,29 @@ def main(argv):
             settle(3000)
             print(f"#{i} P: cur {rd(syms['cl_cur'], 1) + 1} shown {rd(syms['cl_pmoved'], 1)} "
                   f"sbank {rd(syms['cl_sbank'], 1)}", flush=True)
+            continue
+        if op[0] == "K" and op[1:].isdigit():  # CL41: TRACK N -- the view stays; the track's arrows (if any) in it
+            t_, vb_ = int(op[1:]) - 1, rd(syms["cl_bank"], 1)
+            key(0x10 + t_, 1); key(0x10 + t_, 0)
+            settle(200)
+            pm_, sb_ = rd(syms["cl_pmoved"], 1), rd(syms["cl_sbank"], 1)
+            qcheck(rd(0x80000000, 1) == t_ and rd(syms["cl_bank"], 1) == vb_ and (not pm_ or sb_ == vb_),
+                   f"#{i} {op}: track {t_ + 1}; the view stays on {chr(65 + vb_)} (now {chr(65 + rd(syms['cl_bank'], 1))}); "
+                   f"{view()}")
+            continue
+        if op == "R":                         # CL41: [PTN] + the active TRACK: its sequence from the card -- the view stays
+            vb_, g0, nl0 = rd(syms["cl_bank"], 1), rd(syms["rq_gen"], 1), len(lands)
+            t_ = rd(0x80000000, 1)
+            key(0x2E, 1); key(0x10 + t_, 1); key(0x10 + t_, 0); key(0x2E, 0)
+            g = 0
+            while (len(lands) == nl0 or rd(syms["rq_busy"], 1)) and g < 600:
+                settle(34)
+                g += 1
+            settle(300)
+            qcheck(rd(syms["rq_gen"], 1) != g0 and len(lands) > nl0 and rd(syms["cl_open"], 1) == 1
+                   and rd(syms["cl_bank"], 1) == vb_ and rd(syms["cl_boxreq"], 1) == 0,
+                   f"#{i} R: T{t_ + 1}'s card SEQ reload landed ({len(lands) - nl0} landing(s), box home asked and done); "
+                   f"the view stays on {chr(65 + vb_)} (now {chr(65 + rd(syms['cl_bank'], 1))}); {view()}")
             continue
         if op == "Y":                         # a bare [YES]: whatever the screen shows
             nl0 = len(reqs)
