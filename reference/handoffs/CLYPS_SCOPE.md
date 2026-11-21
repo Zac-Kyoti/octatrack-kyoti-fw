@@ -1584,6 +1584,26 @@ the investigation (NOTES "CL24 timing investigation", harness `tools/diag_clyps_
   temp saves and card reloads (the project on the card) are unchanged. octabam: that exit is STORE's (partsaved).
 - Gate 9: SAVE PART -> originals' Part = saved, shadow cleared; FULL slot 5 then ORIG FULL -> T1 as saved.
 
+### 1.39 A stock pattern cue blinks a second highlight (the user, 2026-11-20; test images CLB1)
+
+- The user: a whole pattern cued with stock timing showed its toast and then nothing in the Clyps view. The gesture is
+  `[PTN] + [BANK] + trig` of another pattern (the card reload: its slab is written at once, `PATTERN A05` / `RELOADED
+  FROM PROJ` at once -- `rd_old` -- then `cl_ptnswitch` makes stock's cue `0x400a1030`); a stock `[PTN] + trig` inside
+  Clyps is the same cue without a toast. Both live only in stock's `PEND_BANK` / `PEND_PAT` (`0x800065bf/c0`).
+- **Built:** `cl_pcue` = the cue (running, `PEND` < 16 and != the playing pattern -- pv_cue's test); `cl_cblink` (UI
+  tick) blinks while either the active track's load or that cue is up, one phase (`cl_cph` / `cl_bt`: 20 on / 10 off),
+  and redraws whenever the cue starts, changes, lands or goes (`cl_pcq`). `cl_draw` (after the load confirmation,
+  before the boxes): an inverted bar as the highlight's on the cued slot in the on phase, only when its bank is shown
+  (`cl_bank`, the arrows' rule), not over a load confirmation of that same cell; arrows on it are drawn inverted
+  (`cl_pbq`). Landing: the pattern you are on = the highlight, solid. Cancel: anything that makes `PEND` the playing
+  pattern (stock's `[PTN]` + its trig, `cl_ptncancel`, ORIG PTN+PRT); STOP hides it (the chord grid's RUNNING rule;
+  back on PLAY if stock still holds the cue). DIRECT JUMP
+  on: shown until its jump lands (the next step). All in `.dram`: no cave bytes in any image (CLYPS_ALLDRAM).
+- Not done: the grid LED of the cued pattern in the Clyps view (the chord's pattern view already flashes it, `cl_blink`);
+  DIRECT JUMP's `dj_hide` (V7.1.1) makes `PEND` read as the playing pattern for one sequencer tick at a wrap while a
+  jump is armed: at most one UI tick of the bar's on phase can be missed there.
+- Gate: `diag_clyps_lock.py` ops `qK` / `rK` / `qv` / `ql` / `qc` / `qdK` (composed screens per UI tick).
+
 ### 1.27 Combinations that must never ship (the user, 2026-11-07)
 
 - Clyps + RELOAD_FROM_PROJECT never; Clyps + DIRECT_JUMP_KYOTI only as KYOTI's integrated pair (SUPERSEDE).

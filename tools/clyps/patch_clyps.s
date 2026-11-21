@@ -1570,17 +1570,60 @@ cs2_none:
     moveq   #-1,%d0
     rts
 
+| cl_pcue (CL39, the user 2026-11-20) -> d0 = stock's cued pattern change, PEND_BANK << 8 | PEND_PAT: a [PTN] +
+| trig, or a card reload of another pattern ([PTN]+[BANK]+trig -> cl_ptnswitch), waiting for CHAIN AFTER / the
+| pattern's end (DIRECT JUMP on: its landing step); -1 = none -- stopped, nothing cued (PEND_PAT 0xff), or the cue
+| is the playing pattern (stock's own cancel, cl_ptncancel, ORIG PTN+PRT). The test the chord's grid uses (pv_cue).
+| Uses d0-d1.
+cl_pcue:
+    tst.l   RUNNING
+    beq.b   pq_none
+    moveq   #0,%d0
+    move.b  PEND_BANK,%d0
+    cmpi.l  #16,%d0
+    bcc.b   pq_none
+    moveq   #0,%d1
+    move.b  PEND_PAT,%d1
+    cmpi.l  #16,%d1
+    bcc.b   pq_none
+    lsl.l   #8,%d0
+    or.l    %d1,%d0
+    moveq   #0,%d1
+    move.b  PLAY_BANK,%d1
+    lsl.l   #8,%d1
+    move.b  ACT_PAT,%d1
+    cmp.l   %d1,%d0
+    beq.b   pq_none
+    rts
+pq_none:
+    moveq   #-1,%d0
+    rts
+
 | cl_cblink (the UI task's 1/60 s tick, cl_uitick; Clyps open): while the active track has a load cued, its arrows
 | blink at a fixed 120 BPM whatever the tempo (the user, 2026-11-13: as the grid's red / yellow flash) -- a 0.5 s period
 | of 30 ticks, shown for the first two thirds (20 ticks), hidden for the last (10); each cue starts shown. The
-| screen is redrawn when the phase changes, and once more when the cue ends. Uses d0-d1/a0-a1.
+| screen is redrawn when the phase changes, and once more when the cue ends. CL39 (the user, 2026-11-20): a stock
+| pattern cue (cl_pcue) blinks in the same phase -- its slot's second highlight (cl_draw); the screen is redrawn
+| too whenever that cue starts, changes, lands or goes (cl_pcq). Uses d0-d1/a0-a1.
 cl_cblink:
     tst.b   cl_open
     beq.b   cb_out
+    jsr     cl_pcue
+    moveq   #0,%d1                      | d1 = 1: redraw (the stock cue changed)
+    cmp.w   cl_pcq,%d0
+    beq.b   cb_pk
+    move.w  %d0,cl_pcq
+    moveq   #1,%d1
+cb_pk:
+    move.l  %d1,-(%sp)
     jsr     cl_cueslot
     moveq   #0,%d1
     tst.l   %d0
-    bmi.b   cb_none
+    bpl.b   cb_cue                      | the active track's load is cued
+    move.w  cl_pcq,%d0
+    cmpi.w  #-1,%d0
+    beq.b   cb_none                     | and no stock cue either
+cb_cue:
     moveq   #0,%d0
     move.b  cl_bt,%d0
     addq.l  #1,%d0
@@ -1596,8 +1639,12 @@ cb_k:
 cb_none:
     clr.b   cl_bt                       | the next cue starts shown
 cb_set:
+    move.l  (%sp)+,%d0                  | the stock cue changed: redraw in any case
     cmp.b   cl_cph,%d1
+    bne.b   cb_draw
+    tst.l   %d0
     beq.b   cb_out
+cb_draw:
     move.b  %d1,cl_cph
     jsr     cl_draw
 cb_out:
@@ -7682,6 +7729,48 @@ cd_next:
     bsr.w   cl_xor
     lea     16(%sp),%sp
 cd_nlf:
+|   CL39 (the user, 2026-11-20): stock's cued pattern change (cl_pcue) -- its slot gets a second highlight, an
+|   inverted bar as the highlight's, blinking in the arrows' phase (cl_cph, cl_cblink) until it lands (the pattern
+|   you are on then: the highlight, solid) or the cue goes. Only in the cue's bank, as the arrows; not while the
+|   load confirmation inverts that same cell (it flashes as any load). Arrows on it are inverted (cl_pbq, cd_arrows).
+    moveq   #-1,%d0
+    move.l  %d0,cl_pbq
+    tst.b   cl_cph
+    beq.b   cd_npb
+    jsr     cl_pcue
+    tst.l   %d0
+    bmi.b   cd_npb
+    move.l  %d0,%d1
+    lsr.l   #8,%d1
+    cmp.b   cl_bank,%d1
+    bne.b   cd_npb
+    tst.b   cl_fph
+    beq.b   cd_pb
+    moveq   #1,%d1
+    cmp.b   cl_ftgt,%d1
+    beq.b   cd_pb                       | the header flashes, not a cell
+    moveq   #0,%d1
+    move.w  cl_fcode,%d1
+    andi.l  #0x0f0f,%d1
+    cmp.l   %d1,%d0
+    beq.b   cd_npb
+cd_pb:
+    move.l  %d0,cl_pbq
+    moveq   #15,%d2
+    and.l   %d0,%d2
+    bsr.w   cl_cell
+    moveq   #0,%d5
+    move.w  2(%a3),%d5
+    moveq   #0,%d6
+    move.w  4(%a3),%d6
+    bsr.w   cl_bary
+    move.l  %d1,-(%sp)
+    move.l  %d6,-(%sp)
+    move.l  %d0,-(%sp)
+    move.l  %d5,-(%sp)
+    bsr.w   cl_xor
+    lea     16(%sp),%sp
+cd_npb:
 |   the select box
     moveq   #0,%d0
     move.b  PLAY_BANK,%d0
@@ -7751,6 +7840,14 @@ cd_arrows:
     bne.b   cd_pg
     moveq   #1,%d3                      | on the highlight bar: inverted
 cd_pg:
+    moveq   #0,%d0                      | CL39: on a stock cue's second highlight (drawn now): inverted too
+    move.b  cl_bank,%d0
+    lsl.l   #8,%d0
+    or.l    %d2,%d0
+    cmp.l   cl_pbq,%d0
+    bne.b   cd_pg2
+    moveq   #1,%d3
+cd_pg2:
     bsr.w   cd_glyph
     tst.l   %d3                         | on the select box (set, not the highlight): its frame's pixel beside
     bne.b   ca2_out                     | each end of each arrow's column off, so the arrows stand out (the
@@ -8752,7 +8849,10 @@ cl_ledrec:  .long 0, cl_paint, cl_blink
             .align 2
 
 cl_win:     .long 0
-cl_gmask:   .long 0                     | the painters' group test (cl_gupd): 0 = none, else 0x10000 | members
+cl_pbq:     .long -1                    | CL39: the stock cue's second highlight as cl_draw drew it (-1: not drawn)
+cl_pcq:     .short 0xffff               | CL39: stock's cued pattern as cl_cblink last saw it (cl_pcue, 0xffff: none)
+            .short 0
+cl_gmask:   .long 0                    | the painters' group test (cl_gupd): 0 = none, else 0x10000 | members
 cl_tabsig:  .long 0                     | the tabs' last group / active / side (cl_tabhook)
 cl_xc:      .fill 16, 4, 0xffffffff     | cl_exec: each target's code (pass 1), -1 = none
 cl_xany:    .byte 0                     | ... one of them loads (not a restore): all cued

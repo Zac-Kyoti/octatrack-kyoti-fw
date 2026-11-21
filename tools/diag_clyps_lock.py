@@ -20,6 +20,12 @@ grades it against DIRECT JUMP's position model.
   ops: sK = slot K (pattern K of the playing bank, 0-based), fK = FULL slot K, x = STOP then PLAY, Y = a bare [YES], v = print the view, bK / bY = a load sampled for the cued blink, k+ / k- = [BANK] + DOWN / UP, o = ORIG SEQ, of = ORIG
        SEQ/MCH/FX (the trig of the pattern you are on, [FUNC] for the FULL form); a suffix @mK waits for master step K first (0 = the cycle's last audible step), @kN
        waits N ms; without one, an irregular delay walks the press through every tick of a step.
+  CL39 (a stock pattern cue's second highlight; exit 1 on a failed CHECK): qK = [PTN] + trig K, rK = [PTN]+[BANK]+trig K
+       (a card reload of another pattern: its toast, then stock's cue) -- both sampled for 48 UI ticks: the blink's phase
+       runs, cl_pbq, and the composed screens' on / off difference (one inverted bar on the cued slot's cell, or none
+       with another bank shown); ql = wait for the landing (the solid highlight, steady); qv = sample the cue
+       already up (after k+ / k-); qc = cancel ([PTN] + the
+       playing pattern's trig: no bar, steady); qdK = [PTN] + trig K with DIRECT JUMP on (--dj), sampled to its landing.
 """
 import argparse, json, os, pathlib, sys
 
@@ -262,6 +268,132 @@ def main(argv):
                 f"ysup {rd(syms['cl_ysup'], 1)} tucked {tk} -> {'SHOWN' if rd(syms['cl_pmoved'], 1) and not tk else 'not shown'}; "
                 f"their slot's LED {led}")
 
+    # CL39 (the user, 2026-11-20): a stock pattern cue's second highlight. Per UI tick (0x40056c28 -> cl_uitick ->
+    # cl_cblink), the screen AS COMPOSED (stock's composer 0x40013abc into [0x400b9710], windows included), the
+    # arrows' phase cl_cph, the cue cl_pcq (cl_cblink's) and the bar cl_draw drew, cl_pbq.
+    fails = []
+
+    def qcheck(ok, what):
+        print(f"      CHECK {'PASS' if ok else 'FAIL'}: {what}", flush=True)
+        if not ok:
+            fails.append(what)
+
+    def composed():
+        buf_ = rd(0x400B9710, 4)
+        main_call(0x40013ABC)
+        return bytes(u.mem_read(buf_, 1024))
+
+    def qsample(n, ms=17):
+        seq = []
+        for _ in range(n):
+            rt.run(ms=ms)
+            main_call(0x40056C28)
+            tail()
+            seq.append(dict(ph=rd(syms["cl_cph"], 1), pcq=rd(syms["cl_pcq"], 2), pbq=rd(syms["cl_pbq"], 4),
+                            act=rd(ACT, 1), bank=rd(syms["cl_bank"], 1), scr=composed()))
+        return seq
+
+    def qruns(seq):         # (phase, UI ticks) runs while the cue is up
+        lens = []
+        for x in seq:
+            if x["pcq"] == 0xFFFF:
+                continue
+            if lens and lens[-1][0] == x["ph"]:
+                lens[-1][1] += 1
+            else:
+                lens.append([x["ph"], 1])
+        return lens
+
+    def qdiff(s0, s1):      # differing pixels (x, y) of two composed screens, inside Clyps' window (x 8..119; the
+        import lcd_view as lv   # track tabs outside it follow the sequencer)
+        p0, p1 = lv.pixels(s0), lv.pixels(s1)
+        return {(x, y) for y in range(len(p0)) for x in range(8, 120) if p0[y][x] != p1[y][x]}
+
+    def qwin(s0):           # the window's pixels only
+        import lcd_view as lv
+        return tuple(tuple(row[8:120]) for row in lv.pixels(s0))
+
+    def qcrop(s0, r_):
+        import lcd_view as lv
+        p0 = lv.pixels(s0)
+        return [tuple(p0[y][r_[0]:r_[2] + 1]) for y in range(r_[1], r_[3] + 1)]
+
+    def qrect(d):           # -> (x0, y0, x1, y1) when d is a full rectangle, else None
+        if not d:
+            return None
+        xs, ys = [p[0] for p in d], [p[1] for p in d]
+        r_ = (min(xs), min(ys), max(xs), max(ys))
+        return r_ if len(d) == (r_[2] - r_[0] + 1) * (r_[3] - r_[1] + 1) else None
+
+    def qcell(slot):        # the bar's columns on screen: the window at x 8 (WIN_DX), cl_colx's bar x0 / x1
+        cx = syms["cl_colx"] + (8 if slot >= 8 else 0)
+        return 8 + rd(cx + 2, 2), 8 + rd(cx + 4, 2)
+
+    qst = {}
+
+    def qblink(code, label):    # the cue is up: its slot blinks as a second highlight in the arrows' phase
+        seq = qsample(48)
+        up = [x for x in seq if x["pcq"] == code]
+        on = [x for x in up if x["ph"]]
+        off = [x for x in up if not x["ph"]]
+        lens = qruns(seq)
+        print(f"      {label}: cue 0x{code:04x}; pcq seen {sorted({hex(x['pcq']) for x in seq})}; phase runs {lens}", flush=True)
+        qcheck(len(up) == len(seq), f"{label}: cl_pcq holds the cue on every UI tick ({len(up)}/{len(seq)})")
+        qcheck(all(l_[1] == (20 if l_[0] else 10) for l_ in lens[1:-1]) and len(lens) >= 3,
+               f"{label}: the arrows' blink, 20 on / 10 off UI ticks ({lens})")
+        same = code >> 8 == rd(syms["cl_bank"], 1)
+        qcheck(all(x["pbq"] == (code if same else 0xFFFFFFFF) for x in on) and all(x["pbq"] == 0xFFFFFFFF for x in off),
+               f"{label}: cl_pbq = the cue in the on phase{'' if same else ' -- never: another bank is shown'}, -1 in the off phase")
+        if on and off:
+            d = qdiff(on[-1]["scr"], off[-1]["scr"])
+            r_ = qrect(d)
+            if same:
+                x0, x1 = qcell(code & 15)
+                qcheck(r_ is not None and (r_[0], r_[2]) == (x0, x1) and r_[3] - r_[1] + 1 == 7,
+                       f"{label}: on vs off differ by exactly one inverted bar on slot {(code & 15) + 1}'s cell "
+                       f"(x {x0}..{x1}, 7 rows): {r_} ({len(d)} px)")
+            else:
+                qcheck(not d, f"{label}: another bank shown -- the on and off phases draw the same screen ({len(d)} px differ)")
+            qst.update(code=code, on=on[-1]["scr"], off=off[-1]["scr"], rect=r_, act=rd(ACT, 1))
+        # the screen is stable within a phase (no flicker): every on-phase screen equal, every off-phase one too
+        non, noff = len({qwin(x["scr"]) for x in on}), len({qwin(x["scr"]) for x in off})
+        qcheck(non <= 1 and noff <= 1, f"{label}: one window screen per phase ({non} on, {noff} off)")
+
+    def qsettled(label, code, ref, what):   # after a landing / a cancel: no cue, no bar, no blink; the cue's cell as ref
+        seq = qsample(40)
+        qcheck(all(x["pcq"] == 0xFFFF and x["pbq"] == 0xFFFFFFFF for x in seq),
+               f"{label}: no cue left (cl_pcq 0xffff, cl_pbq -1 on all {len(seq)} UI ticks)")
+        nw = len({qwin(x["scr"]) for x in seq})
+        qcheck(nw == 1, f"{label}: the window is steady over {len(seq)} UI ticks (no blink): {nw} screen(s)")
+        if ref is not None and qst.get("rect") and qst.get("code") == code and code >> 8 == rd(syms["cl_bank"], 1):
+            c1, c0 = qcrop(seq[-1]["scr"], qst["rect"]), qcrop(qst[ref], qst["rect"])
+            k_, o_ = code & 15, qst.get("act", -1)
+            shared = ""
+            if ref == "on" and o_ >= 0 and o_ // 8 == k_ // 8 and abs(o_ - k_) == 1:
+                # the playing pattern's bar was the next row: two XOR bars share one pixel row (a 1 px gap between
+                # them while both show); after the landing that row is the lone highlight's again
+                ix = 0 if o_ < k_ else len(c0) - 1
+                c0, c1 = [r for j, r in enumerate(c0) if j != ix], [r for j, r in enumerate(c1) if j != ix]
+                shared = f"; the row shared with slot {o_ + 1}'s bar left out"
+            qcheck(c1 == c0, f"{label}: slot {k_ + 1}'s cell = the cue's {ref} phase ({what}{shared})")
+            if c1 != c0:            # the cell then / now (# set), the row's text included
+                for r0, r1 in zip(c0, c1):
+                    print("        " + "".join("#" if v else "." for v in r0) + "   " +
+                          "".join("#" if v else "." for v in r1), flush=True)
+        return seq
+
+    def qland(code, label, cap=4000):       # wait for the landing, then it must be the solid highlight
+        g = 0
+        while rd(ACT, 1) != (code & 15) and g < cap:
+            rt.run(ms=17)
+            main_call(0x40056C28)
+            tail()
+            g += 1
+        qcheck(rd(ACT, 1) == (code & 15), f"{label}: landed on pattern {(code & 15) + 1} after {g} UI ticks")
+        settle(200)
+        qsettled(label, code, "on", "the full highlight, unblinking")
+
+
     if a.partreads:     # the playing pattern's Part, from here on (after the start: the stock start's own reads stay out)
         pr_base[0] = bb + 0x8ED80 + (rd(slab_ad + 0x8E57, 1) & 3) * 0x18B2
         u.hook_add(er.eb.UC_HOOK_MEM_READ, on_pread, begin=pr_base[0], end=pr_base[0] + 0x18B1)
@@ -289,6 +421,56 @@ def main(argv):
             continue
         if op == "w":
             settle(1000)
+            continue
+        if op[0] == "q":                      # CL39: stock pattern cues -- qK = [PTN] + trig K (a stock cue made in
+            act0 = rd(ACT, 1)                 # Clyps), rK = [PTN]+[BANK]+trig K (a card reload of another pattern:
+            if op == "qc":                    # the toast, then stock's cue), ql = wait for the landing, qc = cancel
+                key(0x2E, 1); key(act0, 1); key(act0, 0); key(0x2E, 0)      # ([PTN] + the playing pattern's trig)
+                qcheck(rd(0x800065C0, 1) == act0, f"#{i} qc: stock's cue is the playing pattern again")
+                qsettled(f"#{i} qc", qst.get("code", -1), "off", "back as it was before the cue: no bar")
+                continue
+            if op == "ql":
+                qland(qst.get("code", 0xFFFF), f"#{i} ql")
+                continue
+            if op == "qv":                    # the cue already up (e.g. after k+ / k-): sample it again
+                qblink(rd(syms["cl_pcq"], 2), f"#{i} qv")
+                continue
+            dj_ = op[1] == "d"                # qdK: DIRECT JUMP on -- the cue lands at the next step
+            k_ = int(op[2:] if dj_ else op[1:])
+            code = (rd(0x800065BD, 1) << 8) | k_
+            key(0x2E, 1); key(k_, 1); key(k_, 0); key(0x2E, 0)
+            if dj_:
+                seq = []
+                for _ in range(400):
+                    seq += qsample(1)
+                    if seq[-1]["act"] == k_:
+                        break
+                pre = [x for x in seq if x["pcq"] == code]
+                print(f"      #{i} {opx}: {len(pre)} UI ticks cued, phases {[x['ph'] for x in pre]}, "
+                      f"bars {[hex(x['pbq']) for x in pre]}", flush=True)
+                qcheck(bool(pre) and all(x["ph"] == 1 and x["pbq"] == code for x in pre),
+                       f"#{i} {opx}: DIRECT JUMP on -- the second highlight shows (on phase) until the jump lands")
+                qland(code, f"#{i} {opx}")
+                continue
+            qblink(code, f"#{i} {opx}")
+            continue
+        if op[0] == "r" and op[1:].isdigit():  # CL39: [PTN]+[BANK]+trig K: pattern K back from the card (another
+            k_ = int(op[1:])                  # pattern: the toast at once, then stock's cue)
+            code = (rd(0x800065BD, 1) << 8) | k_
+            g0 = rd(syms["rq_gen"], 1)
+            key(0x2E, 1); key(0x2F, 1); key(k_, 1); key(k_, 0); key(0x2F, 0); key(0x2E, 0)
+            g = 0
+            while rd(syms["cl_pcq"], 2) != code and g < 600:
+                rt.run(ms=17)
+                main_call(0x40056C28)
+                tail()
+                g += 1
+            print(f"      #{i} {opx}: the card job and stock's cue took {g} UI ticks; its toast line 1 "
+                  f"{bytes(u.mem_read(syms['rq_line1'], 12)).split(b'\\0')[0]!r}", flush=True)
+            qcheck(rd(syms["rq_gen"], 1) != g0 and rd(syms["rq_jgen"], 1) == rd(syms["rq_gen"], 1)
+                   and rd(syms["rq_busy"], 1) == 0, f"#{i} {opx}: it was a card reload (request generation "
+                   f"{g0} -> {rd(syms['rq_gen'], 1)}, its job done)")
+            qblink(code, f"#{i} {opx}")
             continue
         if op == "x":                         # STOP (stock's COND_RESET(-1), 0x400a12b8), then PLAY again
             key(0x27, 1); key(0x27, 0)
@@ -402,6 +584,9 @@ def main(argv):
                                    purges=purges, applies=applies, parts=parts,
                                    preads=[[pc, off] + v for (pc, off), v in sorted(preads.items())])))
     print(f"wrote {out}: ticks {st['tick']}, landings {len(lands)}", flush=True)
+    if fails:
+        print(f"CL39 checks: {len(fails)} FAIL", flush=True)
+        return 1
     return 0
 
 
