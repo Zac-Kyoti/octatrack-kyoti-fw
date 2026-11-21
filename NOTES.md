@@ -40270,3 +40270,43 @@ fwd / rev, carrier without a trig in the new pattern): hidden-voice frames 1,617
 gates, e3 (incl. bank B), c1, h1 as before; kyoti_bc_check_erase 5/5 on the fixE image. Edge cases (b2.py nbfl): BP ->
 NEIGHBOR -> FLEX after NEIGHBOR's trig renders FLEX from its first trig in the same frame as RC2 (a fresh voice's first
 frame carries its trig flag, which clears was_ot); Part changes / loads likewise.
+
+## 2026-11-20 (`promote-1120`) — VARISPEED, VARISPEED_EMUS, ERASE_EMPTY_TRIGLESS_LOCKS (MIDI), EMPTY_PATTERN_LED_FIX (`[BANK]`) and every feature image with the fixes PROMOTED FINAL; BLACKPYRAMIDS_303 / CLYPS / KYOTI wait for RC3
+
+**The author's instruction (2026-11-20):** promote ERASE_EMPTY_TRIGLESS_LOCKS, the EMPTY_PATTERN_LED_FIX change, VARISPEED
+and VARISPEED_EMUS, push to main, rebuild every image that carries the bug-fix package; BLACKPYRAMIDS_303, CLYPS and KYOTI
+V1.8 / V1.8C / V1.8BC wait until RC3 is flashed. Branch `promote-1120` from `release-1119` b4750a7 (origin/main was still
+07f47d1, so no rebase); the Clyps work the release session adds on `release-1119` after b4750a7 is not in it.
+
+**Procedure.** Every promoted builder run with `KYOTI_ALLOW_WIP=1` (each builder's own OS VERSION, sequentially), each
+mainos / unit compared with the RC values (out/rc1/table_full.txt, out/rc2/SHA256SUMS in the release worktree): all
+equal. Pinned in `tools/kyoti_status.py`; every builder then run again WITHOUT the opt-in: all seal ("image matches the
+promoted FINAL build"), units included (MIDI_PLAYS_FREE_FIX and PART_CHANGE_CARRYOVER_FIX unchanged, still their pins).
+`tools/kyoti_status_sram_test.py` on the ten images: PASS, every image clean under both scans.
+
+| builder | unit (pinned under the builder) | feature image mainos (`feature_image.py`) | syx | .bin | OS VERSION | backed by |
+|---|---|---|---|---|---|---|
+| `build_varispeed.py` | `2e365957f13495c5c6aa8d21e9c75b8954b41104efa7968302140d8ee8b73d54` | `fe4e7f50fb6386e1ee717b54896f615fd946c74e7b9f1d2a061098c729388566` | `1212ab6b…` | `e4168f92…` | `140C_VARI1` | KY18BC / KY18C RC1, 140CVEMRC1 (same code); 140C_VRRC1 not flashed |
+| `build_varispeed_emus.py` | `b54e72464dfb5f3ffbefae98e93198c6c1f76ef8237484e44e06967ee22532bc` | `f3b08c791b888f1683f13a57b14f7f44f3f331d79f383b588a161803bf1a4123` | `feef2e43…` | `b6fbac32…` | `140C_VEM11` | 140CVEMRC1 (this mainos), every item |
+| `build_erase_empty_trigless_locks.py` | `3d60c73153771bbab8920bc0be0a31bbd72286eca5e7293c2859d1436fc4b740` | `0f9f1f6f1b34b87ecf7f5fba74c23af2b734932540d968b1095554dc8eb61d4a` | `97ca9bf8…` | `799ed901…` | `140C_TL` | KY18BC RC2 (MIDI + audio); 140C_ERRC2 not flashed |
+| `build_empty_pattern_led_fix.py` (unit) / `build_batch_bugfixes.py` | `074315c20d4c1c2073fc9ee324cf31dcd92f6c639a664d661cf88e542ef5e1a5` | `fa374dd80125aea37d2f2ab858b94af7f618e75b080718dfb4f9f23d9c95c1ca` | `60c25319…` | `25c28ea5…` | `140C_FIXES` | KY18BC / KY18C RC1, 140CVEMRC1 (LED matrix, `[BANK]` held) |
+| `build_mute_modes.py` | `7d48737d…` (unchanged) | `316f01f713cf048f2fdd32464845c7c1493211be95abb76ae5a2e9344064e1b2` | `61d9a03b…` | `89d1a41e…` | `140C_MM` | fixes: as BATCH |
+| `build_quantize_live_rec_toggle.py` | `2012abd8…` (unchanged) | `9b51ad03846acd3f3be2d286ce6f33eea948b2e37dd6c037dbe3bdda6466fa57` | `dd304411…` | `501489bf…` | `140C_QLR` | fixes: as BATCH |
+| `build_sidechain_compressor.py` | `44465569…` (unchanged) | `2d5a401692894c50996201db525a177f19bb4f19d4a9f258a79ce52c6db604c2` | `900c2314…` | `850ebef2…` | `140C_SC` | fixes: as BATCH |
+| `build_reload_from_project.py` | `fc25a994…` (unchanged) | `38f2f7de9c88561bfd9bd2027d7276819aed085eb9873424d02caf16548ef4b6` | `dbb79a8d…` | `4a16aa56…` | `140C_RL` | fixes: as BATCH |
+| `build_direct_jump_kyoti.py` | `7b48fdd6…` (unchanged) | `79b422fdb3bcf62c42395c7fab775d95e81113bd64fb6c65ff0ea44e3475f872` | `026cec8e…` | `7eead9ed…` | `140C_KDJ7` | fixes: as BATCH |
+| `build_rec_trig_mute.py` | `60e97fb3…` (unchanged) | `f8ee2d55ac6d253699b5c4bc2a35a02c587badc3fb43353d17bfc605f47d1c10` | `c54c8796…` | `0d9e88b8…` | `140C_RTM` | fixes: as BATCH |
+
+The old pins these replace: units VARISPEED `ce4f7696…`, VARISPEED_EMUS `d23d9e63…`, ERASE `83690ffb…`, LED `0e50306d…`;
+images (same order) `c3af514f…`, `e2faf75d…`, `db348f68…`, `0cf32835…`, `857d80d3…`, `df4a2498…`, `4febe2e6…`,
+`188ec12c…`, `c58591c0…`, `dac87abd…`. The mainos are the RC builds' byte for byte (the OS VERSION is applied at the
+wrap), so the syx files differ from the RC copies only in that string.
+
+**Not promoted (the author: after RC3 is flashed):** BLACKPYRAMIDS_303 (unit `1d53ef7f…`, image `b4b55638…`), CLYPS
+(`94e41a22…`), KYOTI V1.8 (`8807feee…`), V1.8C (`9d1a29c9…`), V1.8BC (`0704647c…`): pins untouched (a comment in
+kyoti_status.py says why). Main's sources for them now differ (BLKPYRAMD chooser / blip fixes 5511929 / 278b05e /
+0c465ee / b4750a7, and the VRG3 / LED / ERASE bytes in the composed images; RC2's BP unit is `ae7c5dae…`), so their
+builders refuse without `KYOTI_ALLOW_WIP=1` until RC3 is promoted; the 2026-11-19 finals rebuild at 07f47d1.
+
+Docs: README (ERASE on MIDI tracks; the LED entry was af7d5f3's; Hardware lines of the ten images), BUILD_KYOTI (the
+opt-in note), FLASHING §4 (promotion note), START_HERE §6. octabam pin PRs: next entry.

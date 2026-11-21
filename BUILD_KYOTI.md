@@ -51,6 +51,10 @@ image of a feature without them. Each writes its image to `out/<FEATURE>/`:
 | BATCH_BUGFIXES (the three fixes alone) | `python3 tools/build_batch_bugfixes.py` | `140C_FIXES` |
 | SIDECHAIN_COMPRESSOR light (the earlier version; WIP, not recommended; no bug fixes) | `KYOTI_ALLOW_WIP=1 python3 tools/build_sidechain_compressor_light.py` | `140C_SCLT` |
 
+> **Until RC3 is promoted (2026-11-20):** on `main`, BLACKPYRAMIDS_303, CLYPS and the three KYOTI images below
+> carry changes not yet promoted, so their builders refuse without `KYOTI_ALLOW_WIP=1`. Their finals build at
+> commit `07f47d1` (`git worktree add ../octatrack-kyoti-fw-finals-1119 07f47d1`).
+
 Each build writes, in `out/<FEATURE>/`:
 
 ```

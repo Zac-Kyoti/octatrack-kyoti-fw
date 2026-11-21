@@ -137,6 +137,17 @@ unit that boots; if it doesn't, use §3b.
 PERSONALIZE is reset by every flash, so features are off until you re-enable them. A
 quick check for each:
 
+- **PROMOTED FINAL 2026-11-20 (from RC1 / RC2, the author's word):** VARISPEED VRG3, VARISPEED_EMUS (VEMG4 code),
+  ERASE_EMPTY_TRIGLESS_LOCKS on MIDI tracks, EMPTY_PATTERN_LED_FIX's `[BANK]` change (BATCH_BUGFIXES), and every
+  other feature image that carries the fixes (MUTE_MODES, QUANTIZE_LIVE_REC_TOGGLE, SIDECHAIN_COMPRESSOR,
+  RELOAD_FROM_PROJECT, DIRECT_JUMP_KYOTI, REC_TRIG_MUTE: their units unchanged, only the fix bytes). The finals'
+  mainos are the RC builds' (the OS VERSION is applied at the wrap): they read `140C_VARI1`, `140C_VEM11`, `140C_TL`,
+  `140C_FIXES`, `140C_MM`, `140C_QLR`, `140C_SC`, `140C_RL`, `140C_KDJ7`, `140C_RTM`. What backs them: RC1's
+  `140CVEMRC1` (every item; = the VARISPEED_EMUS final's mainos), `KY18BC RC1` / `KY18C RC1` (VARISPEED, the LED matrix,
+  `[BANK]` held) and `KY18BC RC2` (ERASE on MIDI and audio tracks), all passed on the author's MKI. Not flashed as
+  these images: VARISPEED (`140C_VRRC1` skipped), ERASE, BATCH_BUGFIXES and the six other feature images. **Not
+  promoted, until RC3 is flashed:** BLACKPYRAMIDS_303, CLYPS, KYOTI V1.8 / V1.8C / V1.8BC (their FINALs stay the
+  2026-11-19 builds). Pins: NOTES 2026-11-20 (`promote-1120`).
 - **RELEASE CANDIDATE RC3** (WIP, NOT promoted, NOT flashed; branch `release-1119` `0c465ee`, NOTES 2026-11-20 cont.).
   RC2 + one BLACKPYRAMIDS_303 fix: a track that stops being a BLKPYRAMD (chooser, SRC SETUP, a page paste, the net) no
   longer plays a blip of its FLEX sample (a short fast loop) until its next trig. Only `KY18BC RC3` changes for the

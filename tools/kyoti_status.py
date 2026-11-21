@@ -46,23 +46,26 @@ FINAL = {
     "build_sidechain_compressor.py":       "44465569a6118a9a7936c83d0f728a5f8c81122c42433a7cdaf267206e99f2fc",
     "build_reload_from_project.py":        "fc25a9943a7aa1c5e1a6d2e08733ce3a67d366d49b8f4dcc5da1d9a27051880b",
     "build_quantize_live_rec_toggle.py":   "2012abd83f75336ddc73925f0a3ebb8de16ed3ea24b4c28d226e35ef99c2a6f4",
-    "build_erase_empty_trigless_locks.py": "83690ffbd97ad51281630acc8597f6423715885d2a712915df2edc39bb9b6a1c",
+    "build_erase_empty_trigless_locks.py": "3d60c73153771bbab8920bc0be0a31bbd72286eca5e7293c2859d1436fc4b740",
     "build_midi_plays_free_fix.py":        "672158c18630703cc1aadc635d45aeb68549a3237830d5c4a0aeb2d113afad35",
-    "build_empty_pattern_led_fix.py":      "0e50306d8c242cf0365f2df3e09998be5db3b92a4cc95d5d17e590d9cc36b266",
+    "build_empty_pattern_led_fix.py":      "074315c20d4c1c2073fc9ee324cf31dcd92f6c639a664d661cf88e542ef5e1a5",
     "build_rec_trig_mute.py":              "60e97fb35e255f2a1f19eac84dd463058788b7fcdb481110459aa8b9f8f1cffc",
     "feature_image.py": {                         # each feature + the three bug fixes (out/<FEATURE>/)
-        "mainos_mute_modes.bin":                             "857d80d3d84f0eecb9bbc23944f83d03f5cf2d6f5934247c183710bb440196b4",
-        "mainos_quantize_live_rec_toggle.bin":               "df4a24981ace4a163723ab394bf564c9ccd8b4593ba40c9d5461da36fbd226a4",
-        "mainos_sidechain_compressor.bin":                   "4febe2e60f3ca36df8bac50e291c99f54450adbce188d0f08c5a954b9f48f917",
-        "mainos_erase_empty_trigless_locks.bin":               "db348f68a32adcc195208e46f6c964d0a5714ba41c1d8c4f2fad6beb2d122922",
-        "mainos_reload_from_project.bin":                    "188ec12cb47b1725fa7860b6a0f3dc816a5b5753cdce688710cc72cff8afee95",
-        "mainos_direct_jump_kyoti.bin":                      "c58591c0fed6aa03472e8f0bf0e1ca7e7355ad634c44dcc09a593f765063d6e9",
-        "mainos_rec_trig_mute.bin":                          "dac87abd3d70f6074438f450b492cd4a004f2aeca66fe9969743ebc8ab9dc556",
+        "mainos_mute_modes.bin":                             "316f01f713cf048f2fdd32464845c7c1493211be95abb76ae5a2e9344064e1b2",
+        "mainos_quantize_live_rec_toggle.bin":               "9b51ad03846acd3f3be2d286ce6f33eea948b2e37dd6c037dbe3bdda6466fa57",
+        "mainos_sidechain_compressor.bin":                   "2d5a401692894c50996201db525a177f19bb4f19d4a9f258a79ce52c6db604c2",
+        "mainos_erase_empty_trigless_locks.bin":               "0f9f1f6f1b34b87ecf7f5fba74c23af2b734932540d968b1095554dc8eb61d4a",
+        "mainos_reload_from_project.bin":                    "38f2f7de9c88561bfd9bd2027d7276819aed085eb9873424d02caf16548ef4b6",
+        "mainos_direct_jump_kyoti.bin":                      "79b422fdb3bcf62c42395c7fab775d95e81113bd64fb6c65ff0ea44e3475f872",
+        "mainos_rec_trig_mute.bin":                          "f8ee2d55ac6d253699b5c4bc2a35a02c587badc3fb43353d17bfc605f47d1c10",
         "mainos_blackpyramids_303.bin":                      "b4b556381364de3f0eadf76dccaa1a60bc5239465bfa77c29ab973d389f4e569",
-        "mainos_varispeed.bin":                              "c3af514f52feb1c46747736d7a6151b5109f664b2561278f37d01e99d8f10663",
-        "mainos_varispeed_emus.bin":                         "e2faf75d9695e91903917f2dc690bd34cb9c1f40f34e525a3b5b51bacaf9f7e1",
-        "mainos_batch_bugfixes.bin":                         "0cf328357bf8c7c222de2c6e6a284e29b6f8572019b1485373a39e3f604cbef6",
+        "mainos_varispeed.bin":                              "fe4e7f50fb6386e1ee717b54896f615fd946c74e7b9f1d2a061098c729388566",
+        "mainos_varispeed_emus.bin":                         "f3b08c791b888f1683f13a57b14f7f44f3f331d79f383b588a161803bf1a4123",
+        "mainos_batch_bugfixes.bin":                         "fa374dd80125aea37d2f2ab858b94af7f618e75b080718dfb4f9f23d9c95c1ca",
     },
+    # 2026-11-20: the KYOTI / CLYPS images and BLACKPYRAMIDS_303 (unit + feature image) keep their 2026-11-19
+    # finals (built at 07f47d1); main's sources for them differ until RC3 is flashed and promoted, so their
+    # builders need KYOTI_ALLOW_WIP=1 until then (the author's call).
     "build_kyoti.py": {
         "mainos_kyoti_v1.8.bin":                             "8807feee12f40093e0d4db68101b4e607b2f17e75b3d2cd026dd06a053073279",
         "mainos_kyoti_v1.8c.bin":                            "9d1a29c9625c609979d54834b5b35654c5b40b4c778a2d8025fac52f7666524d",
@@ -71,8 +74,8 @@ FINAL = {
     },
     "build_blackpyramids_303.py":          "1d53ef7f413d82dd8e2fe10ee89726a1e181c953d481ffb76ac985515b878693",
     "build_part_change_carryover_fix.py":  "dd2a7e2ba3328364caa560e431195fd248cbb5d83dce1759de1e7e3effc5febd",
-    "build_varispeed.py":                  "ce4f769602d1231ac40c48fde43a00c332a1f7b698fdb9442152864803eff169",
-    "build_varispeed_emus.py":             "d23d9e63521cf9838ea5e9255967d128a202cfb31ef4b0fdaf7cafed1ca856cc",
+    "build_varispeed.py":                  "2e365957f13495c5c6aa8d21e9c75b8954b41104efa7968302140d8ee8b73d54",
+    "build_varispeed_emus.py":             "b54e72464dfb5f3ffbefae98e93198c6c1f76ef8237484e44e06967ee22532bc",
 }
 
 _RULE = "  " + "-" * 72

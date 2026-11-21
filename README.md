@@ -77,7 +77,8 @@ Choose how an audio track's mute behaves, in **PERSONALIZE → MUTE MODE**:
 SOLO follows the same rule as a manual mute; `CUE MUTES TRK` stays a hard cut. The
 setting survives a power cycle.
 
-**Hardware:** confirmed (this image).\
+**Hardware:** the feature confirmed; the bug fixes confirmed (their latest change, the `[BANK]` LEDs, in
+the KYOTI V1.8BC / V1.8C release candidates); this image not flashed as such.\
 **Final build:** [`tools/build_mute_modes.py`](tools/build_mute_modes.py) →
 `out/MUTE_MODES/OCTATRACK_OS1.40C_MUTE_MODES`
 
@@ -99,7 +100,8 @@ does not combine with CLYPS, which has it built in.
 **Hardware:** confirmed: the clock-locked timing, the Part change, trig conditions and the
 SILENCE TRACKS fade, and (in KYOTI V1.8C) a jump after a normal pattern change landing in step
 with it. Not specifically tested: MIDI tracks, Program Change on fast re-cues, START SILENT.
-This image, with the three bug fixes, not flashed as such.\
+The bug fixes confirmed (their latest change, the `[BANK]` LEDs, in the KYOTI V1.8BC / V1.8C release
+candidates); this image not flashed as such.\
 **Final build:** [`tools/build_direct_jump_kyoti.py`](tools/build_direct_jump_kyoti.py) →
 `out/DIRECT_JUMP_KYOTI/OCTATRACK_OS1.40C_DIRECT_JUMP_KYOTI`
 
@@ -139,7 +141,8 @@ still uses it loads it as NONE.
 > [`tools/build_sidechain_compressor_light.py`](tools/build_sidechain_compressor_light.py)
 > builds it behind the WIP gate (`KYOTI_ALLOW_WIP=1`, see above); OS VERSION reads `140C_SCLT`.
 
-**Hardware:** the feature confirmed; this image, with the three bug fixes, not flashed as such.\
+**Hardware:** the feature confirmed; the bug fixes confirmed (their latest change, the `[BANK]` LEDs, in
+the KYOTI V1.8BC / V1.8C release candidates); this image not flashed as such.\
 **Final build:** [`tools/build_sidechain_compressor.py`](tools/build_sidechain_compressor.py) →
 `out/SIDECHAIN_COMPRESSOR/OCTATRACK_OS1.40C_SIDECHAIN_COMPRESSOR`
 
@@ -215,7 +218,9 @@ editor → ATTR) is VARI plays the same way.
 - Above twice the sample's own speed, it folds down an octave.
 - A sample or project tempo outside 30–300 BPM plays as `TSTR` OFF.
 
-**Hardware:** the feature confirmed; this image, with the three bug fixes, not flashed as such.\
+**Hardware:** confirmed in the KYOTI V1.8BC / V1.8C release candidates and in VARISPEED_EMUS (the same code):
+`QUAN` on entering VARI and across a save, a project saved with the earlier version, a held VARI note's speed
+through a Part switch; the bug fixes there too. This image not flashed as such.\
 **Final build:** [`tools/build_varispeed.py`](tools/build_varispeed.py) →
 `out/VARISPEED/OCTATRACK_OS1.40C_VARISPEED`
 
@@ -240,7 +245,8 @@ through the change until their own next trig.
 The DSP space comes from **SPRING REVERB**, which leaves both FX lists; a project that still
 uses it loads it as NONE.
 
-**Hardware:** confirmed (this image).\
+**Hardware:** confirmed (this image's code, flashed with a test OS VERSION: VARISPEED's `QUAN` and its memory,
+a project saved with the earlier version, the load guard, the bug fixes).\
 **Final build:** [`tools/build_varispeed_emus.py`](tools/build_varispeed_emus.py) →
 `out/VARISPEED_EMUS/OCTATRACK_OS1.40C_VARISPEED_EMUS`
 
@@ -264,7 +270,8 @@ sound still ringing, and trig conditions (`1:2`, `PRE`, `FILL`) carry on as if t
 played all along. `[CUE]` + `[TRACK n]` stays stock. It does not combine with CLYPS, which carries
 its own card reloads.
 
-**Hardware:** the feature confirmed; this image, with the three bug fixes, not flashed as such.\
+**Hardware:** the feature confirmed; the bug fixes confirmed (their latest change, the `[BANK]` LEDs, in
+the KYOTI V1.8BC / V1.8C release candidates); this image not flashed as such.\
 **Final build:** [`tools/build_reload_from_project.py`](tools/build_reload_from_project.py) →
 `out/RELOAD_FROM_PROJECT/OCTATRACK_OS1.40C_RELOAD_FROM_PROJECT`
 
@@ -306,17 +313,19 @@ Tap `[PLAY]` again **while the toast is up** to invert it; if PERSONALIZE is ope
 mark follows. Once the toast has gone (1 s), a tap just shows the setting again. The first
 `[REC]` + `[PLAY]` still starts live recording as on stock.
 
-**Hardware:** the feature confirmed; this image, with the three bug fixes, not flashed as such.\
+**Hardware:** the feature confirmed; the bug fixes confirmed (their latest change, the `[BANK]` LEDs, in
+the KYOTI V1.8BC / V1.8C release candidates); this image not flashed as such.\
 **Final build:** [`tools/build_quantize_live_rec_toggle.py`](tools/build_quantize_live_rec_toggle.py) →
 `out/QUANTIZE_LIVE_REC_TOGGLE/OCTATRACK_OS1.40C_QUANTIZE_LIVE_REC_TOGGLE`
 
 ### ERASE_EMPTY_TRIGLESS_LOCKS
 
-A trigless lock — a step with parameter locks but no audible trig — now disappears from
-the trig row once you erase its last lock, instead of staying lit. One placed
+A trigless lock — a step with parameter locks but no audible trig, on an audio or a MIDI
+track — now disappears from the trig row once you erase its last lock, instead of staying lit. One placed
 deliberately with `FUNC` + `TRIG` is left alone.
 
-**Hardware:** the feature confirmed; this image, with the three bug fixes, not flashed as such.\
+**Hardware:** confirmed on audio and MIDI tracks in the KYOTI V1.8BC release candidate (the same code), with
+the bug fixes; this image not flashed as such.\
 **Final build:** [`tools/build_erase_empty_trigless_locks.py`](tools/build_erase_empty_trigless_locks.py) →
 `out/ERASE_EMPTY_TRIGLESS_LOCKS/OCTATRACK_OS1.40C_ERASE_EMPTY_TRIGLESS_LOCKS`
 
@@ -339,7 +348,8 @@ track's channel. Both need AUDIO CC IN / OUT on, as for every audio-track CC. `[
 `[YES]` / `[NO]` arm and disarm recorder one-shot trigs as on stock.
 
 **Hardware:** confirmed in KYOTI V1.6 (`[TRACK]` + `[REC]`, the per-track toggle, the toast).
-MIDI CC 80 not specifically tested. This image, with the three bug fixes, not flashed as such.\
+MIDI CC 80 not specifically tested. The bug fixes confirmed (their latest change, the `[BANK]` LEDs, in the
+KYOTI V1.8BC / V1.8C release candidates); this image not flashed as such.\
 **Final build:** [`tools/build_rec_trig_mute.py`](tools/build_rec_trig_mute.py) →
 `out/REC_TRIG_MUTE/OCTATRACK_OS1.40C_REC_TRIG_MUTE`
 
@@ -356,7 +366,9 @@ Three fixes to stock bugs. Every image here carries all three; this build is the
   PICKUP for FLEX no longer keeps playing the old Part's pickup loop, and a switch into a
   PICKUP track no longer marks the Part edited when nothing changed.
 
-**Hardware:** each fix confirmed; this image of the three together not flashed as such.\
+**Hardware:** each fix confirmed (the `[BANK]` trigless-lock LEDs, also with `[BANK]` held and the sequencer
+running, in the KYOTI V1.8BC / V1.8C release candidates and VARISPEED_EMUS); this image of the three together
+not flashed as such.\
 **Final build:** [`tools/build_batch_bugfixes.py`](tools/build_batch_bugfixes.py) →
 `out/BATCH_BUGFIXES/OCTATRACK_OS1.40C_BATCH_BUGFIXES`
 
