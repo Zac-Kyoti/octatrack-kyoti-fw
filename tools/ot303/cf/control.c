@@ -983,10 +983,35 @@ static uint8_t own_cur[2] = {8, 8}, own_prev[2] = {8, 8};
 struct ot_dfr { uint32_t gl; uint8_t ev, acc, have; };
 static struct ot_dfr dfr[8] = {{0, 0, 0, 0}};
 uint32_t ot_handovers = 0, ot_yields = 0;
+/* An OT-303 rides on a stock FLEX voice: stock binds it at every trig (with the OT-303's knobs in FLEX's live slots: STRT
+ * = CUT, LEN = RES, RTRG = DEC, RTIM = ACC ...) and this renderer never hands it to stock's. When the track stops being an
+ * OT-303 (the chooser, SRC SETUP, a page paste, the net), stock still renders that voice until the track's next trig --
+ * as FLEX, also under NEIGHBOR / THRU / STATIC, whose voice only starts at that trig: the RC2 report's blip, a bit of the
+ * FLEX sample, often a short fast loop. So a track that rendered as an OT-303 renders stock's idle record (0x400047f0's,
+ * written here: its entry is ot_idle_hook) until its next trig flag. (Not for a yielding track: its FLEX record frees
+ * the DSP voice at once for the track taking it.) */
+static uint8_t was_ot[8] = {0};
+uint32_t ot_quiet_frames = 0;
+static int render_idle(unsigned start, unsigned end) {
+    volatile uint32_t *c = (volatile uint32_t *)(uintptr_t)U32(0x80001c80u);
+    int32_t n = (int32_t)end - (int32_t)start;
+    c[0] = (uint32_t)n; c[1] = 0; c[2] = 0x04000000u; c[3] = 0; c += 4;
+    for (int32_t i = 0; i < n; ++i) { c[0] = 0; c[1] = 0; c += 2; }
+    U32(0x80001c80u) = (uint32_t)(uintptr_t)c;
+    return 0;
+}
 int ot_render(unsigned track, unsigned ping, unsigned start, unsigned end) {
     const volatile uint8_t *pp = track < 8 ? play_part(track) : 0;
-    if (track >= 8 || !signed_track(pp, track) || (yields(track) && (++ot_yields, 1)))
+    if (track >= 8 || !signed_track(pp, track)) {
+        if (track < 8 && was_ot[track]) {
+            if (!(U8(0x46104d0cu + track) & 16)) { if (end == 16) ++ot_quiet_frames; return render_idle(start, end); }
+            was_ot[track] = 0;                           /* its trig: stock's new voice */
+        }
         return ((int (*)(unsigned, unsigned, unsigned, unsigned))FLEX_RENDER)(track, ping, start, end);
+    }
+    if (yields(track) && (++ot_yields, 1))
+        return ((int (*)(unsigned, unsigned, unsigned, unsigned))FLEX_RENDER)(track, ping, start, end);
+    was_ot[track] = 1;
     ++ot_render_calls;
     volatile uint32_t *cursor = (volatile uint32_t *)(uintptr_t)U32(0x80001c80u);
     volatile uint16_t *fp = (volatile uint16_t *)(uintptr_t)U32(0x800062a8u);

@@ -40233,3 +40233,28 @@ pristine 278b05e build (6ef2b86f…, = the BP session's fixC): the same 279 byte
 built by their builders. BP gates on RC2 V1.8BC (its mainos + bp_runtime elf): verify_part_carry, verify_tie_xfer, verify_first_gate (and
 STALE=1), verify_page_paste, verify_one_per_core ALL GOOD (idle pass median 54 instructions). Hardware: nothing flashed;
 the MIDI side needs the unit (FLASHING §4 RC2 list to be written by the release session).
+
+## 2026-11-20 cont. (`release-1119`, BLACKPYRAMIDS_303) — a blip of the FLEX sample when a track stops being a BLKPYRAMD (WIP, NOT flashed)
+
+**Hardware (KY18BC RC2, the author's MKI, sequencer running):** switching a track with a sample between FLEX / STATIC and
+BLKPYRAMD in the chooser, and also NEIGHBOR <-> BLKPYRAMD, played a bit of the FLEX / STATIC sample at the switch, often a
+very short fast loop (beat-repeat-like). Every other RC2 item passed.
+
+**Cause (pre-existing: FINAL V1.8BC 0704647c, RC1, RC2 identical).** A BLKPYRAMD rides on a stock FLEX voice: stock binds it
+at every trig, with the voice's knobs in FLEX's live slots (STRT = CUT 44, LEN = RES 64, RATE = ENV, RTRG = DEC 72, RTIM =
+ACC 100), and ot_render never hands it to stock's sample renderer 0x40004008. When the track stops being a BLKPYRAMD,
+the frame ISR's renderer pointer for it (0x400d61d0 + 4t) stays on ot_render until the track's next trig, and ot_render
+then handed that hidden FLEX voice to stock: it played the FLEX slot's sample until the trig, whatever the new machine
+(NEIGHBOR / THRU / STATIC start only at that trig) -- in FINAL / RC1 with the voice's numbers (the short fast loop), in RC2
+with FLEX's own (5511929's seed). ot_emu, trigs every 4 steps, the switch at frame 8000: 822-823 stock-render frames
+(~300 ms) to the next trig, BP -> STATIC, BP -> NEIGHBOR, FLEX -> BP -> NEIGHBOR, on all three images.
+
+**Fix (control.c ot_render, +26 / -1):** a per-track was_ot flag, set while the track renders as a BLKPYRAMD; once it is no
+longer signed and the frame has no trig flag (0x46104d0c + t, bit 4) it renders stock's idle record (0x400047f0's,
+written in place -- that entry is ot_idle_hook) instead of calling 0x40004008; the trig clears the flag and stock's new
+voice plays. A yielding track (carry loser) still renders FLEX, so its record frees the DSP voice at once. Counter
+ot_quiet_frames. ot_emu: 0 hidden-voice frames in every case (822 quiet frames), FLEX plays again from the next trig;
+the DSP claim hand-off unchanged (blip/h1.py, RC2 = fix); the chooser-silence cases (e3.py incl. bank B) and the
+carry-window cases (c1.py) as on 278b05e; the five verify_* gates ALL GOOD. Measured on the ColdFire side (stock-render
+calls per frame); this ot_emu sounds neither the BOTLI samples nor (in most builds) the voice. Evidence:
+out/bpsilent/blip/, gatesE/.
