@@ -168,6 +168,10 @@ are lowercase-hyphen, because octabam requires a module's name to equal its fold
   landing is missed -- the landing re-schedules step 0 after the wrap's own step 0), and no Clyps load carries (the
   pattern id does not change). Design sketch + emulator matrix: out/bpsilent/ties/ in this worktree (FINAL / RC1 / RC2
   identical). Open questions when picked up: which DJ landings carry (any tied landing vs boundary only), Clyps' hook.
+  Also (the author, 2026-11-20, KY18BCCLB1): a tie across a cued **Part switch between two different tracks** (the
+  outgoing BLKPYRAMD ends tied on track A, the incoming Part's BLKPYRAMD on track B of the same core begins with ties)
+  is cut at the change -- tie_xfer is same-track only, and the incoming tie on step 1 takes the core's one voice and
+  starts nothing. Expected so far, never scoped; a cross-track carry would continue the note on the voice.
 - **2026-11-19: RELEASE CANDIDATE RC1 (WIP, NOT flashed, NOT promoted, branch `release-1119`)** -- VRG3 (`emus-guard`)
   + the `[BANK]` trigless-lock LED change (`led-fix`) in one release. Images `KY18BC RC1` (syx `0a8e18c7…`), `KY18C RC1`
   (`281b10fa…`), `KY18 RC1` (`4edb7163…`), `140CVEMRC1` (`bbb2c863…`), `140C_VRRC1` (`f752032d…`), `140CFIXRC1`
