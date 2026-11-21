@@ -34,6 +34,13 @@ grades it against DIRECT JUMP's position model.
        landing), WN (the whole composed window into the record's "windows", taken in the arrows' on phase) -- compare
        two images' runs with tools/cmp_clyps_windows.py; the run counts cl_draw calls made inside cl_uitick (on the unit:
        the UI task drawing over the sys task) and FAILs a CL39b image on any.
+  CL40 (one cue mark, one cursor): --bankb plays bank B (bank A copied there in RAM after the load, as a stock pattern
+       copy would, its originals re-snapped; then stock's own [BANK] + B + pattern pick, stopped, Clyps closed); every
+       draw counts its arrow sets (cd_arrows) and the run FAILs on two in one window; q / r ops expect the load
+       confirmation flash on the picked slot first (cl_flk, cl_fcode), the blink's box after it; O = close and reopen
+       Clyps: the view on the playing bank; T = two lone [PTN] taps (the second closes stock's SELECT PATTERN): the grid
+       is the shown bank's on every press, release and in the window; P checks ORIG PTN+PRT's flash on its slot;
+       tK = trig K (a cued SEQ load): the flash on its slot, then the select box's frame blinking there.
 """
 import argparse, json, os, pathlib, sys
 
@@ -70,11 +77,13 @@ def main(argv):
     ap.add_argument("--shots", default=None, help="CL34: a directory for screen PNGs (op v and the b ops' phases)")
     ap.add_argument("--cond", action="store_true", help="also record the trig-condition counters per tick")
     ap.add_argument("--leds", action="store_true", help="also record the LED base / invert bitmaps per tick")
+    ap.add_argument("--bankb", action="store_true", help="CL40: play bank B (bank A copied there in RAM)")
     ap.add_argument("--parts", type=lambda v: int(v, 0), default=0,
                     help="BANKSZ: at the end compare the playing Part with the load snapshot's")
     a = ap.parse_args(argv)
     sp = os.environ.get("CLYPS_SYMS", str(ROOT / "out/clyps_syms.txt"))
     syms = {k: int(v, 16) for k, v in (l.split() for l in pathlib.Path(sp).read_text().splitlines())}
+    CL40 = "cl_flcode" in syms
     out = pathlib.Path(a.out)
     if not out.is_absolute():
         out = ROOT / out
@@ -126,6 +135,13 @@ def main(argv):
     if rd(0x80000012, 4):
         key(0x35, 1, 40); key(0x35, 0, 40)
     key(0x10 + a.track, 1, 40); key(0x10 + a.track, 0, 40)
+    if a.bankb:     # CL40: bank A -> bank B in RAM (16 slabs + 4 Parts, a whole-bank pattern copy), its originals
+        u.mem_write(BLOB + BANKSTRIDE, bytes(u.mem_read(BLOB + bank * BANKSTRIDE, 0x95048)))   # re-snapped
+        main_call(syms["cl_snapbank"], 1)
+        p_ = 0 if a.start is None else a.start
+        key(0x2F, 1); key(0x01, 1); key(0x01, 0); key(p_, 1); key(p_, 0); key(0x2F, 0)  # stock: [BANK] + B + pattern
+        bank = rd(0x800065BD, 1)
+        print(f"--bankb: stock's pick -> UI bank {rd(0x80000002, 1)}, playing {bank}:{rd(ACT, 1)}", flush=True)
     bb = BLOB + bank * BANKSTRIDE
     act = rd(ACT, 1) if a.start is None else a.start
     slab_ad = bb + act * PATSTRIDE
@@ -299,7 +315,8 @@ def main(argv):
             main_call(0x40056C28)
             tail()
             seq.append(dict(ph=rd(syms["cl_cph"], 1), pcq=rd(syms["cl_pcq"], 2), pbq=rd(syms["cl_pbq"], 4),
-                            act=rd(ACT, 1), bank=rd(syms["cl_bank"], 1), scr=composed()))
+                            act=rd(ACT, 1), bank=rd(syms["cl_bank"], 1), flk=rd(syms["cl_flk"], 1) if CL40 else 0,
+                            fc=rd(syms["cl_fcode"], 2), scr=composed()))
         return seq
 
     def qruns(seq):         # (phase, UI ticks) runs while the cue is up
@@ -369,17 +386,48 @@ def main(argv):
         u.hook_add(er.eb.UC_HOOK_CODE, lambda uc, ad, sz, ud: posts.update(n=posts["n"] + 1),
                    begin=syms["dp_post"], end=syms["dp_post"])
 
-    def qblink(code, label):    # the cue is up: its slot blinks as a second highlight in the arrows' phase
-        seq = qsample(48)
+    arw = dict(n=0, max=0, bad=0)       # CL40: arrow sets per window draw (cd_arrows calls between cl_draw and cd_boxed)
+    if "cd_arrows" in syms and "cd_boxed" in syms:
+        u.hook_add(er.eb.UC_HOOK_CODE, lambda uc, ad, sz, ud: arw.update(n=0), begin=syms["cl_draw"], end=syms["cl_draw"])
+        u.hook_add(er.eb.UC_HOOK_CODE, lambda uc, ad, sz, ud: arw.update(n=arw["n"] + 1),
+                   begin=syms["cd_arrows"], end=syms["cd_arrows"])
+        u.hook_add(er.eb.UC_HOOK_CODE, lambda uc, ad, sz, ud: arw.update(max=max(arw["max"], arw["n"]),
+                                                                          bad=arw["bad"] + (arw["n"] > 1)),
+                   begin=syms["cd_boxed"], end=syms["cd_boxed"])
+
+    def grid():                         # the trig LEDs as painted now: R / G / Y / . per slot
+        main_call(0x4007E998, 0)
+        b_ = bytes(u.mem_read(0x460BA98C, 17))
+        die = lambda d_: (b_[d_ // 8] >> (d_ % 8)) & 1
+        return "".join({(1, 1): "Y", (1, 0): "R", (0, 1): "G", (0, 0): "."}[(die(ledtbl[n]), die(ledtbl[n] + 1))]
+                       for n in range(16))
+
+    def pgrid(b_):                      # stock's [PTN] grid of bank b_: green = data, red = the playing pattern there
+        g_ = ["G" if main_call(0x4009A464, n, b_) & 0xFFFFFFFF else "." for n in range(16)]
+        if b_ == rd(0x800065BD, 1):
+            g_[rd(ACT, 1)] = "R"
+        return "".join(g_)
+
+    def qblink(code, label, fresh=True):    # the cue is up: its slot blinks as a second highlight in the arrows' phase
+        seq = qsample(78 if CL40 else 48)
         up = [x for x in seq if x["pcq"] == code]
+        fl = []
+        if CL40 and fresh:            # CL40: the load confirmation flash on the picked slot first, the blink's box after it
+            fl = [x for x in seq if x["flk"]]
+            qcheck(bool(fl) and seq[0]["flk"] and all(x["fc"] == code for x in fl) and len(fl) < 32,
+                   f"{label}: the confirmation flash on {chr(65 + (code >> 8))}{(code & 15) + 1:02d} first "
+                   f"({len(fl)} UI ticks, fcode {sorted({hex(x['fc']) for x in fl})})")
+            up = [x for x in up if not x["flk"]]
         on = [x for x in up if x["ph"]]
         off = [x for x in up if not x["ph"]]
         lens = qruns(seq)
         print(f"      {label}: cue 0x{code:04x}; pcq seen {sorted({hex(x['pcq']) for x in seq})}; phase runs {lens}", flush=True)
-        qcheck(len(up) == len(seq), f"{label}: cl_pcq holds the cue on every UI tick ({len(up)}/{len(seq)})")
+        qcheck(all(x["pcq"] == code for x in seq), f"{label}: cl_pcq holds the cue on every UI tick ({len(up)}/{len(seq)})")
         qcheck(all(l_[1] == (20 if l_[0] else 10) for l_ in lens[1:-1]) and len(lens) >= 3,
                f"{label}: the arrows' blink, 20 on / 10 off UI ticks ({lens})")
         same = code >> 8 == rd(syms["cl_bank"], 1)
+        if CL40 and fl and same:    # the flash: the cell inverted / plain, no frame meanwhile
+            qcheck(all(x["pbq"] == 0xFFFFFFFF for x in fl), f"{label}: no cue box while the flash runs")
         qcheck(all(x["pbq"] == (code if same else 0xFFFFFFFF) for x in on) and all(x["pbq"] == 0xFFFFFFFF for x in off),
                f"{label}: cl_pbq = the cue in the on phase{'' if same else ' -- never: another bank is shown'}, -1 in the off phase")
         if on and off:
@@ -439,6 +487,11 @@ def main(argv):
         qcheck(rd(ACT, 1) == (code & 15) and rd(0x800065BD, 1) == code >> 8,
                f"{label}: landed on {chr(65 + (code >> 8))}{(code & 15) + 1:02d} after {g} UI ticks")
         settle(200)
+        if CL40:
+            qcheck(rd(syms["cl_bank"], 1) == code >> 8, f"{label}: the view on the landed pattern's bank")
+            while rd(syms["cl_flk"], 1) and g < cap:      # a quick landing (DIRECT JUMP): the flash ends first
+                settle(34)
+                g += 1
         qsettled(label, code, "on", "the off phase's cell inverted: the full highlight, unblinking")
 
 
@@ -500,6 +553,49 @@ def main(argv):
             qcheck(g1[k_] == (1, 1), f"#{i} {op}: [PTN] held again: {chr(65 + vb)}{k_ + 1:02d} yellow ({g1[k_]})")
             qblink((vb << 8) | k_, f"#{i} {op}")
             continue
+        if op[0] == "t" and op[1:].isdigit():  # CL40: tK = trig K (a SEQ load, cued): the flash on its slot first,
+            k_ = int(op[1:])                  # then the select box's frame blinks there (no arrows), one phase
+            code = (rd(syms["cl_bank"], 1) << 8) | k_
+            key(k_, 1); key(k_, 0)
+            seq = qsample(78)
+            tc = rd(syms["cl_cue"] + 2 * a.track, 2)
+            fl = [x for x in seq if x["flk"]]
+            qcheck(bool(fl) and seq[0]["flk"] and all(x["fc"] == code for x in fl) and len(fl) < 32 and tc == code,
+                   f"#{i} {op}: cued {tc:#06x}; the confirmation flash on its slot first ({len(fl)} UI ticks)")
+            on = [x for x in seq if not x["flk"] and x["ph"]]
+            off = [x for x in seq if not x["flk"] and not x["ph"]]
+            if on and off:
+                d, R = qdiff(on[-1]["scr"], off[-1]["scr"]), qbox(k_)
+                border = {(x, y) for x in range(R[0], R[2] + 1) for y in range(R[1], R[3] + 1)
+                          if x in (R[0], R[2]) or y in (R[1], R[3])}
+                cols = [sum(1 for p_ in d if p_[0] == c) for c in (R[0], R[2])]
+                qcheck(bool(d) and d <= border and min(cols) >= 2, f"#{i} {op}: after the flash, on vs off differ by "
+                       f"one 1 px frame on slot {k_ + 1}'s cell: {len(d)} px, {len(d - border)} outside, sides {cols}")
+            else:
+                qcheck(False, f"#{i} {op}: blink phases after the flash ({len(on)} on, {len(off)} off)")
+            continue
+        if op == "O":                         # CL40: close ([NO]) and reopen Clyps -- the view on the playing bank
+            key(0x32, 1); key(0x32, 0)
+            settle(200)
+            key(0x2E, 1); key(0x2F, 1); key(0x2F, 0); key(0x2E, 0)
+            settle(300)
+            pb_, vb_ = rd(0x800065BD, 1), rd(syms["cl_bank"], 1)
+            qcheck(rd(syms["cl_open"], 1) == 1 and vb_ == pb_,
+                   f"#{i} O: reopened on bank {chr(65 + vb_)}, the playing pattern's {chr(65 + pb_)}; {view()}")
+            continue
+        if op == "T":                         # CL40: two lone [PTN] taps -- every grid the shown bank's
+            vb_ = rd(syms["cl_bank"], 1)
+            want = pgrid(vb_) if "cl_ptnbank" in syms else pgrid(rd(0x80000002, 1))
+            seen = []
+            for n_ in range(2):
+                key(0x2E, 1); seen.append(("press", grid()))
+                key(0x2E, 0); settle(100); seen.append(("up", grid()))
+            print(f"#{i} T: view {chr(65 + vb_)}, want {want}: {seen}", flush=True)
+            qcheck(all(g_ == want for w_, g_ in seen[:3]), f"#{i} T: [PTN] grid = bank {chr(65 + vb_)}'s on the press, "
+                   f"in the window and on the second press")
+            qcheck(rd(WIN_SLOT_, 4) == 0 and rd(syms["cl_open"], 1) == 1 and rd(syms["cl_bank"], 1) == vb_,
+                   f"#{i} T: the second tap closed the window, Clyps still on bank {chr(65 + vb_)}")
+            continue
         if op[0] == "W":                      # CL39b: the whole Clyps window (x 8..119) after 40 UI ticks, taken in the
             g = 0                             # arrows' on phase if anything blinks; masked by the compare: the cued
             for g in range(40):               # pattern's cell
@@ -515,7 +611,7 @@ def main(argv):
             settle(68)
             pend = (rd(0x800065BF, 1), rd(0x800065C0, 1))
             wins[op[1:]] = dict(scr=composed().hex(), cph=rd(syms["cl_cph"], 1), act=rd(ACT, 1), pend=pend,
-                                bank=rd(syms["cl_bank"], 1))
+                                bank=rd(syms["cl_bank"], 1), tcue=rd(syms["cl_cue"] + 2 * a.track, 2))
             print(f"#{i} {op}: window taken (cph {rd(syms['cl_cph'], 1)}, act {rd(ACT, 1)}, pend {pend})", flush=True)
             continue
         if op[0] == "c":                      # CL39b: press only -- cK = [PTN] + trig K, c- = [PTN] + the playing trig
@@ -549,11 +645,11 @@ def main(argv):
                 qland(qst.get("code", 0xFFFF), f"#{i} ql")
                 continue
             if op == "qv":                    # the cue already up (e.g. after k+ / k-): sample it again
-                qblink(rd(syms["cl_pcq"], 2), f"#{i} qv")
+                qblink(rd(syms["cl_pcq"], 2), f"#{i} qv", fresh=False)
                 continue
             dj_ = op[1] == "d"                # qdK: DIRECT JUMP on -- the cue lands at the next step
             k_ = int(op[2:] if dj_ else op[1:])
-            code = (rd(0x800065BD, 1) << 8) | k_
+            code = (rd(syms["cl_bank"] if "cl_ptnbank" in syms else 0x800065BD, 1) << 8) | k_   # CL39c: the bank shown
             key(0x2E, 1); key(k_, 1); key(k_, 0); key(0x2E, 0)
             if dj_:
                 seq = []
@@ -564,14 +660,16 @@ def main(argv):
                 pre = [x for x in seq if x["pcq"] == code]
                 print(f"      #{i} {opx}: {len(pre)} UI ticks cued, phases {[x['ph'] for x in pre]}, "
                       f"bars {[hex(x['pbq']) for x in pre]}", flush=True)
-                qcheck(bool(pre) and all(x["ph"] == 1 and x["pbq"] == code for x in pre),
-                       f"#{i} {opx}: DIRECT JUMP on -- the second highlight shows (on phase) until the jump lands")
+                qcheck(bool(pre) and all(x["ph"] == 1 and (x["fc"] == code and x["flk"] if CL40 else x["pbq"] == code)
+                                         for x in pre),
+                       f"#{i} {opx}: DIRECT JUMP on -- the {'confirmation flash' if CL40 else 'second highlight'} "
+                       f"shows until the jump lands")
                 qland(code, f"#{i} {opx}")
                 continue
             qblink(code, f"#{i} {opx}")
             continue
         if op[0] == "r" and op[1:].isdigit():  # CL39: [PTN]+[BANK]+trig K: pattern K back from the card (another
-            k_ = int(op[1:])                  # pattern: the toast at once, then stock's cue)
+            k_ = int(op[1:])                  # pattern: the toast at once, then stock's cue) -- of the playing bank
             code = (rd(0x800065BD, 1) << 8) | k_
             g0 = rd(syms["rq_gen"], 1)
             key(0x2E, 1); key(0x2F, 1); key(k_, 1); key(k_, 0); key(0x2F, 0); key(0x2E, 0)
@@ -583,6 +681,8 @@ def main(argv):
                 g += 1
             print(f"      #{i} {opx}: the card job and stock's cue took {g} UI ticks; its toast line 1 "
                   f"{bytes(u.mem_read(syms['rq_line1'], 12)).split(b'\\0')[0]!r}", flush=True)
+            if CL40:
+                qcheck(rd(syms["cl_bank"], 1) == code >> 8, f"#{i} {opx}: the chord took the view to the playing bank")
             qcheck(rd(syms["rq_gen"], 1) != g0 and rd(syms["rq_jgen"], 1) == rd(syms["rq_gen"], 1)
                    and rd(syms["rq_busy"], 1) == 0, f"#{i} {opx}: it was a card reload (request generation "
                    f"{g0} -> {rd(syms['rq_gen'], 1)}, its job done)")
@@ -603,6 +703,11 @@ def main(argv):
             continue
         if op == "P":                         # ORIG PTN+PRT: [PTN]+[BANK]+[YES]
             key(0x2E, 1); key(0x2F, 1); key(0x31, 1); key(0x31, 0); key(0x2F, 0); key(0x2E, 0)
+            if CL40:
+                mine = (rd(0x800065BD, 1) << 8) | rd(ACT, 1)
+                qcheck(rd(syms["cl_flk"], 1) > 0 and rd(syms["cl_fcode"], 2) == mine and rd(syms["cl_ftgt"], 1) == 0
+                       and rd(syms["cl_bank"], 1) == mine >> 8,
+                       f"#{i} P: ORIG PTN+PRT's confirmation flash on its slot {mine:#06x}, the view on its bank")
             settle(3000)
             print(f"#{i} P: cur {rd(syms['cl_cur'], 1) + 1} shown {rd(syms['cl_pmoved'], 1)} "
                   f"sbank {rd(syms['cl_sbank'], 1)}", flush=True)
@@ -706,6 +811,9 @@ def main(argv):
         nt = tkst.get("calls", 0)           # the unit's UI tick: 60 per second
         print(f"CL39c: cl_dpost posted {posts['n']} sys message(s) in {nt} UI ticks: {posts['n'] / max(nt, 1):.3f} per "
               f"tick = {60 * posts['n'] / max(nt, 1):.1f} per second at the unit's 60 ticks / s", flush=True)
+    if "cd_boxed" in syms:
+        print(f"CL40: arrow sets per window draw, at most {arw['max']}; draws with two or more: {arw['bad']}", flush=True)
+        qcheck(arw["bad"] == 0, "CL40: at most one set of arrows in the window, every draw")
     if "cl_dreq" in syms:
         qcheck(tkst["draws"] == 0, "CL39b: no cl_draw from the UI tick (the redraws go to the sys task's tail)")
     if fails:

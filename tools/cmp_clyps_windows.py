@@ -4,7 +4,8 @@
 """
 CLYPS CL39b -- the whole Clyps window (x 8..119 of the composed screen) of two diag_clyps_lock.py runs, op WN by op WN:
 a reference image (CL38) against a CL39 image, the same ops. Masked: the cued pattern's cell (stock's PEND when the
-window was taken, in the shown bank) -- CL39's blinking box lives there. Anything else that differs is reported (FAIL).
+window was taken, in the shown bank) -- CL39's blinking box lives there -- and (CL40) the active track's cued slot, whose
+blinking arrows became that box. Anything else that differs is reported (FAIL).
 
   python3 tools/cmp_clyps_windows.py REF.json NEW.json
 """
@@ -34,9 +35,14 @@ def main(argv):
         pa, pb = pixels(bytes.fromhex(a[tag]["scr"])), pixels(bytes.fromhex(b[tag]["scr"]))
         bank, pend = b[tag]["bank"], b[tag]["pend"]
         mask = set()
-        if pend[1] < 16 and pend[0] == bank and (pend[0], pend[1]) != (bank, b[tag]["act"]):
-            x0, y0, x1, y1 = box(pend[1])
-            mask = {(x, y) for x in range(x0, x1 + 1) for y in range(y0, y1 + 1)}
+        cues = [(pend[0], pend[1])] if pend[1] < 16 and (pend[0], pend[1]) != (bank, b[tag]["act"]) else []
+        tc = b[tag].get("tcue", 0xFFFF)             # CL40: the active track's cue -- its box, where CL38 blinked arrows
+        if tc != 0xFFFF:
+            cues.append((tc >> 8, tc & 0xFF) if tc >> 8 < 16 else (bank, b[tag]["act"]))
+        for cb, cs in cues:
+            if cb == bank:
+                x0, y0, x1, y1 = box(cs & 15)
+                mask |= {(x, y) for x in range(x0, x1 + 1) for y in range(y0, y1 + 1)}
         d = [(x, y) for y in range(64) for x in range(8, 120) if pa[y][x] != pb[y][x] and (x, y) not in mask]
         st = "PASS" if not d else "FAIL"
         print(f"W{tag}: {st} -- {len(d)} px differ outside the cued cell (masked {len(mask)} px); "
