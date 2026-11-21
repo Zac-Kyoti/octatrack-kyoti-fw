@@ -48,6 +48,7 @@ BUILDER_A, BUILDER_A_RET = 0x4009D1E8, 0x400A2D82
 FIRE_STORE = 0x400A2E18          # audio fire time store: d0 = time, a1 = track + slot*8, d7 = ahead * 0x285ff0
 SCLK = 0x4610757C
 PAGE, FUNC = 0x1B, 0x2D
+WIN_SLOT_ = 0x460D1E5C           # the SHOW_WIN popup handle (stock's [PTN] / [BANK] windows)
 
 
 def main(argv):
@@ -407,7 +408,11 @@ def main(argv):
         qcheck(nw == 1, f"{label}: the window is steady over {len(seq)} UI ticks (no blink): {nw} screen(s)")
         if ref is not None and qst.get("rect") and qst.get("code") == code and code >> 8 == rd(syms["cl_bank"], 1):
             c1, c0 = qcrop(seq[-1]["scr"], qst["rect"]), qcrop(qst[ref], qst["rect"])
-            if ref == "on":     # CL39b: the cue's box is a frame now -- the highlight = the off phase's cell inverted
+            if ref == "off" and (main_call(syms["cl_srccode"]) & 0x0F0F) == (code & 0x0F0F) and "cl_ptnbank" in syms:
+                ref = "on"      # CL39c: the cued slot is the select box's: it blinked, and after a cancel it is drawn
+                what += "; the select box's slot: its on phase, the box solid again"
+                c0 = qcrop(qst["on"], qst["rect"])
+            if ref == "on" and "solid again" not in what:   # CL39b: the highlight = the off phase's cell inverted
                 c0 = [tuple(1 - v for v in r) for r in qcrop(qst["off"], qst["rect"])]
             k_, o_ = code & 15, qst.get("act", -1)
             shared = ""
@@ -487,7 +492,11 @@ def main(argv):
             qcheck(pend == (vb, k_), f"#{i} {op}: [PTN] + trig {k_ + 1} cued {chr(65 + vb)}{k_ + 1:02d} (PEND {pend})")
             key(0x2E, 1)
             g1 = grid()
-            key(0x2E, 0)
+            key(k_, 1); key(k_, 0)            # the same pick again (no change): consumed, so the release opens no
+            key(0x2E, 0)                      # stock pattern window over the view (a lone [PTN] tap would)
+            settle(100)
+            qcheck((rd(0x800065BF, 1), rd(0x800065C0, 1)) == (vb, k_) and rd(WIN_SLOT_, 4) == 0,
+                   f"#{i} {op}: still cued, no stock window over the view")
             qcheck(g1[k_] == (1, 1), f"#{i} {op}: [PTN] held again: {chr(65 + vb)}{k_ + 1:02d} yellow ({g1[k_]})")
             qblink((vb << 8) | k_, f"#{i} {op}")
             continue

@@ -40346,3 +40346,35 @@ frame carries its trig flag, which clears was_ot); Part changes / loads likewise
   could say a cued change blinks a box on its slot. Not edited (the coordinator's instruction).
 - **Harness:** the full `diag_clyps_ui --only ABCDYETGRSNPK` fails S ("SAVE PROJECT: T2's original and temp save") and then
   stalls, on the CL38 reference image too (the known S accumulation, scope §0); S alone passes.
+
+**CL39c (22d99f4, the user's answers 2026-11-20 / 21):** (1) **[PTN] in Clyps acts on the bank shown** (after [BANK] +
+arrows; pre-existing, a wanted change): `cl_ptnbank` / `cl_ptnbank2` / `cl_ptnpat` behind four guarded `mvzb` -> `jsr`
+splices in build_clyps.py DETOURS -- stock's [PTN] + trig 0x40056b60 (its bank -> `0x400a1030(bank, N)`, the call stock's
+own cross-bank cue makes, 0x4007b36e), its [PTN] LED painter 0x400353d4 at 0x40035522 (data: green), 0x400354ae (a cue
+in it: yellow), 0x40035432 (the playing pattern's red: 16 = none; the painter's own loop repaints every slot); only
+while a lone [PTN] pressed in Clyps is held (`cl_ptfwd`); a bank stock refuses ("BANK UNAVAILABLE", 0x4007b30c) is not
+paged to. No other feature touches the four sites (EMPTY_PATTERN_LED_FIX detours 0x4009a464 itself). (2) The cued
+slot is the select box's: the select box itself blinks (not drawn in the off phase), solid again after a cancel or
+the landing. (3) Review: the tick's posts are latched (`cl_dpend`, one message outstanding, cleared by the tail), and
+the peek's return posts only past stock's double-tap window (cl_pkt's own test). Measured: the peek posts 0 inside the
+window, 1 for 5 ticks past it (diag_clyps_ui C, every image); a blink + loads run 47 posts in 588 UI ticks = 4.8 / s
+at 60 ticks / s; DIRECT JUMP on 2.0 / s -- at most one per phase change. Added code / data lines against CL38
+(b4750a7, comments and labels out): cue read 21, blink 15, box draw 27, draw hand-off 28, paging 32 (+ 4 DETOURS
+lines), data 7. Clyps DRAM unit 28,576 -> 28,972 B (V1.8C / CLYPS), 29,240 -> 29,636 B (V1.8BC); arena pages and caves
+unchanged (V1.8BC CAVE 636, ENC 96, SPRING 82, PERS1 128, PERS2 64).
+- **Gates on CLB3 (OT DEMO; route A):** V1.8C: the CL39 set g3a 29 / g3b 20 / g3c 9 (DJ) / g3d 21, 0 FAIL;
+  the select box's slot cued (s4 then q4): the box blinks (on vs off = one frame), after the cancel solid again, 10 PASS;
+  paging (k+, g4, ql) on V1.8C / V1.8BC / CLYPS: [PTN] held = bank B's grid (OT DEMO's bank B is empty: no data, no
+  red), [PTN] + trig 5 cues B05, yellow on the next [PTN], its box blinks in bank B, it lands on B05: 15 / 24 / 24 PASS;
+  whole window vs CL38 (cmp_clyps_windows.py, 7 windows across cue / SEQ / FULL / cancel / landings): PASS, 0 px
+  outside the cued cell; draws from the UI tick in its own task: 0 in every run; diag_clyps_ui ABCDY PASS on all three
+  (incl. the peek post count). Gate fixes found on the way (no firmware change): a lone [PTN] tap opens stock's pattern
+  window on release (the paging op re-picks instead), and a cancelled cue on the select box's slot shows the box solid.
+- **Images, CLB3 (KYOTI_ALLOW_WIP=1, private worktree out/rc3clyps/wt3 at 22d99f4; NOT promoted, NOT flashed; script
+  out/rc3clyps/build_clb3.sh):** KY18BCCLB3 `out/rc3clyps/wt3/out/KYOTI/OCTATRACK_OS1.40C_KYOTI_V1.8BC.syx` e0730eff…
+  (mainos df8e2d8c…); KY18C CLB3 `.../KYOTI/OCTATRACK_OS1.40C_KYOTI_V1.8C.syx` 2c6efaf0… (mainos cbf4bc1a…); CLYPS CLB3
+  `.../CLYPS/OCTATRACK_OS1.40C_CLYPS.syx` d0e436ee… (mainos da72ea94…). CLB2 stays in out/rc3clyps/wt2, CLB1 in wt / CLB1/.
+- **Hardware, CLB3 additions:** (8) [BANK] + arrow to another bank, hold [PTN]: that bank's patterns, no red; [PTN] +
+  trig: that bank's pattern cues (yellow on the next [PTN]), its box blinks there, it lands in that bank; (9) load a
+  slot's sequence (the box on that slot), then [PTN] + that pattern's trig: the select box itself blinks until the change
+  lands or is cancelled. Manual: §8 would also say [PTN] in Clyps acts on the bank shown.
