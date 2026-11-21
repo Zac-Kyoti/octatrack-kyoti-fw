@@ -129,6 +129,7 @@ unit that boots; if it doesn't, use §3b.
 | VARISPEED_EMUS VEMG4 (WIP: VEMG3 + the same bytes) | `140C_VEMG4` |
 | KYOTI V1.8 / V1.8C / V1.8BC with VARISPEED VRG3 (WIP) | `KY18 VRG3` / `KY18C VRG3` / `KY18BC VR3` |
 | RELEASE CANDIDATE RC1 (WIP: VRG3 + the `[BANK]` trigless-lock LED change): KYOTI V1.8BC / V1.8C / V1.8, VARISPEED_EMUS, VARISPEED, BATCH_BUGFIXES | `KY18BC RC1` / `KY18C RC1` / `KY18 RC1`, `140CVEMRC1`, `140C_VRRC1`, `140CFIXRC1` |
+| RELEASE CANDIDATE RC3 (WIP: RC2 + the BLKPYRAMD switch-blip fix): KYOTI V1.8BC, BLACKPYRAMIDS_303 | `KY18BC RC3`, `140C_BPRC3` |
 | RELEASE CANDIDATE RC2 (WIP: RC1 + ERASE on MIDI tracks + the BLKPYRAMD chooser fix): KYOTI V1.8BC / V1.8C / V1.8, ERASE_EMPTY_TRIGLESS_LOCKS, BLACKPYRAMIDS_303 | `KY18BC RC2` / `KY18C RC2` / `KY18 RC2`, `140C_ERRC2`, `140C_BPRC2` |
 | ERASE_EMPTY_TRIGLESS_LOCKS and the BATCH_BUGFIXES builds | `1.40C` (stock string — check by behaviour) |
 | a feature + BATCH_BUGFIXES | `BUG_` + the feature (`BUG_MUTEDT`, `BUG_DJV7`, `BUG_SC3X`, `BUG_RL3`, `BUG_QLREC`, `BUG_TRIGLK`, `BUG_RTM`, `BUG_BP303`, `BUG_VARI`, `BUG_VEM10`) |
@@ -136,6 +137,17 @@ unit that boots; if it doesn't, use §3b.
 PERSONALIZE is reset by every flash, so features are off until you re-enable them. A
 quick check for each:
 
+- **RELEASE CANDIDATE RC3** (WIP, NOT promoted, NOT flashed; branch `release-1119` `0c465ee`, NOTES 2026-11-20 cont.).
+  RC2 + one BLACKPYRAMIDS_303 fix: a track that stops being a BLKPYRAMD (chooser, SRC SETUP, a page paste, the net) no
+  longer plays a blip of its FLEX sample (a short fast loop) until its next trig. Only `KY18BC RC3` changes for the
+  flash: `out/rc3/OCTATRACK_OS1.40C_KYOTI_V1.8BC.syx` (syx `e28985dc…`, mainos `a3862c2c…`); `140C_BPRC3` (syx
+  `6b68a619…`) carries the same control.c, no flash needed. KY18 / KY18C / ERASE are RC2's.
+  1. Sequencer running, a track with samples in its FLEX and STATIC slots: BLKPYRAMD -> FLEX, -> STATIC, -> NEIGHBOR,
+     -> THRU, each from the chooser: no blip at the switch; the new machine plays normally from the track's next trig.
+  2. FLEX / STATIC / NEIGHBOR -> BLKPYRAMD: no blip, the voice sounds (RC2 item 1.1-1.4 again, briefly).
+  3. A cued Part switch with a BLKPYRAMD carrying a note into a Part where that track is FLEX: the note rings over the
+     change, then FLEX plays from its first trig; `ONE 303 PER CORE!` on a second one on T1-4.
+  Report pass / fail with OS VERSION `KY18BC RC3`.
 - **RELEASE CANDIDATE RC2** (WIP, NOT promoted, NOT flashed; branch `release-1119`, NOTES 2026-11-20). RC1 + two fixes
   from RC1's flashes 1-2 (the author's MKI, 2026-11-20: every other item passed): BLACKPYRAMIDS_303 -- a BLKPYRAMD chosen on
   a FLEX track played FLEX's live values (silent / ~-20 dB) until a machine change with a trig between, PLAY or a Part
