@@ -988,8 +988,7 @@ uint32_t ot_handovers = 0, ot_yields = 0;
  * OT-303 (the chooser, SRC SETUP, a page paste, the net), stock still renders that voice until the track's next trig --
  * as FLEX, also under NEIGHBOR / THRU / STATIC, whose voice only starts at that trig: the RC2 report's blip, a bit of the
  * FLEX sample, often a short fast loop. So a track that rendered as an OT-303 renders stock's idle record (0x400047f0's,
- * written here: its entry is ot_idle_hook) until its next trig flag. (Not for a yielding track: its FLEX record frees
- * the DSP voice at once for the track taking it.) */
+ * written here: its entry is ot_idle_hook) until its next trig flag, and while it yields the voice (below). */
 static uint8_t was_ot[8] = {0};
 uint32_t ot_quiet_frames = 0;
 static int render_idle(unsigned start, unsigned end) {
@@ -1009,8 +1008,14 @@ int ot_render(unsigned track, unsigned ping, unsigned start, unsigned end) {
         }
         return ((int (*)(unsigned, unsigned, unsigned, unsigned))FLEX_RENDER)(track, ping, start, end);
     }
-    if (yields(track) && (++ot_yields, 1))
+    if (yields(track) && (++ot_yields, 1)) {
+        /* the same hidden voice under a track that yields (the carrier of a cued Part switch once the incoming track's
+         * first trig has the voice): quiet too -- the idle record is no OT-303 record either, so the DSP frees the
+         * voice at it as at a FLEX one (host.asm sg_sig / sg_stock); a yielding track's own trig moves its pair, and
+         * the branch above takes it then */
+        if (was_ot[track]) { if (end == 16) ++ot_quiet_frames; return render_idle(start, end); }
         return ((int (*)(unsigned, unsigned, unsigned, unsigned))FLEX_RENDER)(track, ping, start, end);
+    }
     was_ot[track] = 1;
     ++ot_render_calls;
     volatile uint32_t *cursor = (volatile uint32_t *)(uintptr_t)U32(0x80001c80u);

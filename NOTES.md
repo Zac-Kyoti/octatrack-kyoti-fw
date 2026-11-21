@@ -40258,3 +40258,15 @@ the DSP claim hand-off unchanged (blip/h1.py, RC2 = fix); the chooser-silence ca
 carry-window cases (c1.py) as on 278b05e; the five verify_* gates ALL GOOD. Measured on the ColdFire side (stock-render
 calls per frame); this ot_emu sounds neither the BOTLI samples nor (in most builds) the voice. Evidence:
 out/bpsilent/blip/, gatesE/.
+
+**Follow-up (2026-11-20, raised by the BlackPyramids session's review of 0c465ee):** the yields() branch still called
+FLEX_RENDER -- the same hidden voice under the carrier of a cued Part switch once the incoming track's first trig had the
+voice, up to a whole pattern without an early trig. Now a yielding track that rendered as a BLKPYRAMD writes the idle
+record too (was_ot kept; its own trig moves its pair and the non-signed branch takes it). host.asm: sg_sig takes a record
+as the voice's only if word 0 & $ffff = $3303 and word 2 = $0909; anything else goes to sg_stock, which frees OWN / LIVE
+for the owner -- render_idle's header frees the voice at once, as a FLEX record did. ot_emu (blip/cv.py, verify_part_carry
+fwd / rev, carrier without a trig in the new pattern): hidden-voice frames 1,617 -> 0; the incoming note in the same frame
+(fwd 15883, rev 15884 with the one-frame hold), OWN / LIVE and the DSP record numbers identical to fixE. Five verify_*
+gates, e3 (incl. bank B), c1, h1 as before; kyoti_bc_check_erase 5/5 on the fixE image. Edge cases (b2.py nbfl): BP ->
+NEIGHBOR -> FLEX after NEIGHBOR's trig renders FLEX from its first trig in the same frame as RC2 (a fresh voice's first
+frame carries its trig flag, which clears was_ot); Part changes / loads likewise.
