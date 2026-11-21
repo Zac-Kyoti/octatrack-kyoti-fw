@@ -357,6 +357,7 @@ def main(argv):
             hid_ = linked() == 0 and rd(syms["cl_pkw"], 1) == 1        # CL36: released inside the double-tap window
             u.mem_write(0x460D5DE0, (100).to_bytes(4, "big"))
             main_call_r(0x40056C28)                                     # a UI tick past it: the view comes back
+            rt.run(ms=100)      # CL39b: the tick only posts; the sys task's UI tail shows it (cl_pkt there)
             check(hid_ and linked() == 1 and enc0() == e_before and rd(syms["cl_pk"], 1) == 0 and state()["open"] == 1
                   and rd(0x460BABF4, 4) == rd(syms["cl_win"], 4),
                   "... released: Clyps waits out the double-tap window, then its window is back (on top), its encoders locked")
@@ -369,6 +370,7 @@ def main(argv):
             def screen():
                 u.mem_write(0x460D5DE0, (100).to_bytes(4, "big"))   # past stock's double-tap window (route A has no LED tick)
                 main_call_r(0x40056C28)                             # one UI tick: a deferred return shows (cl_pkt)
+                rt.run(ms=100)                                      # CL39b: ... in the sys task's UI tail
                 rt.run(ms=200)
                 tailmsg()
                 # the screen AS COMPOSED (windows included): PLANE is stock's page layer only -- Clyps' window never
@@ -2483,6 +2485,7 @@ def main(argv):
         check(peek_su, f"SETUP before Clyps: the first peek at AMP shows SETUP (handle {su():#x})")
         u.mem_write(0x460D5DE0, (100).to_bytes(4, "big"))
         main_call_r(0x40056C28)
+        rt.run(ms=100)          # CL39b: the tick only posts; the sys task's UI tail returns from the peek
         lay_ = state()["layers"]
         check(lay_ and lay_[-1] == syms["cl_layer"], f"back from the peek: Clyps' key layer on top again ({[hex(x) for x in lay_]})")
         tap(NO)

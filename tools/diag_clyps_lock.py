@@ -26,6 +26,11 @@ grades it against DIRECT JUMP's position model.
        with another bank shown); ql = wait for the landing (the solid highlight, steady); qv = sample the cue
        already up (after k+ / k-); qc = cancel ([PTN] + the
        playing pattern's trig: no bar, steady); qdK = [PTN] + trig K with DIRECT JUMP on (--dj), sampled to its landing.
+  CL39b (the cue's box is the select box's frame; no draws from the UI tick): press-only ops cK / c- ([PTN] + trig K /
+       the playing pattern's trig), pK (trig K: a SEQ load), FK ([FUNC] + trig K: a FULL load), L (wait for a Clyps
+       landing), WN (the whole composed window into the record's "windows", taken in the arrows' on phase) -- compare
+       two images' runs with tools/cmp_clyps_windows.py; the run counts cl_draw calls made inside cl_uitick (on the unit:
+       the UI task drawing over the sys task) and FAILs a CL39b image on any.
 """
 import argparse, json, os, pathlib, sys
 
@@ -329,7 +334,25 @@ def main(argv):
         cx = syms["cl_colx"] + (8 if slot >= 8 else 0)
         return 8 + rd(cx + 2, 2), 8 + rd(cx + 4, 2)
 
+    def qbox(slot):         # a cell's bar / box on the composed screen (measured on CL39's bars: row r at y 12 + 6r ..
+        x0, x1 = qcell(slot)    # 18 + 6r, x as cl_colx; adjacent rows share a pixel row)
+        return (x0, 12 + 6 * (slot & 7), x1, 18 + 6 * (slot & 7))
+
     qst = {}
+    # CL39b: a cl_draw entered while cl_uitick runs = a draw in the UI task on the unit (prio 3, preempting the sys
+    # task's draws: the CL39 garbage). The gate calls the tick from main, so here it only shows up as nesting.
+    tkst = dict(inside=False, draws=0)
+    if "cl_uitick" in syms and "uk_out" in syms:
+        u.hook_add(er.eb.UC_HOOK_CODE, lambda uc, ad, sz, ud: tkst.update(inside=True),
+                   begin=syms["cl_uitick"], end=syms["cl_uitick"])
+        u.hook_add(er.eb.UC_HOOK_CODE, lambda uc, ad, sz, ud: tkst.update(inside=False),
+                   begin=syms["uk_out"], end=syms["uk_out"])
+
+        def on_draw(uc, ad, sz, ud):
+            if tkst["inside"]:
+                tkst["draws"] += 1
+        u.hook_add(er.eb.UC_HOOK_CODE, on_draw, begin=syms["cl_draw"], end=syms["cl_draw"])
+    wins = {}
 
     def qblink(code, label):    # the cue is up: its slot blinks as a second highlight in the arrows' phase
         seq = qsample(48)
@@ -347,14 +370,17 @@ def main(argv):
         if on and off:
             d = qdiff(on[-1]["scr"], off[-1]["scr"])
             r_ = qrect(d)
-            if same:
-                x0, x1 = qcell(code & 15)
-                qcheck(r_ is not None and (r_[0], r_[2]) == (x0, x1) and r_[3] - r_[1] + 1 == 7,
-                       f"{label}: on vs off differ by exactly one inverted bar on slot {(code & 15) + 1}'s cell "
-                       f"(x {x0}..{x1}, 7 rows): {r_} ({len(d)} px)")
+            R = qbox(code & 15)
+            if same:        # CL39b: the select box's 1 px frame (the user), minus pixels already set (arrows on it)
+                border = {(x, y) for x in range(R[0], R[2] + 1) for y in range(R[1], R[3] + 1)
+                          if x in (R[0], R[2]) or y in (R[1], R[3])}
+                cols = [sum(1 for p_ in d if p_[0] == c) for c in (R[0], R[2])]
+                qcheck(bool(d) and d <= border and min(cols) >= 2,
+                       f"{label}: on vs off differ by one 1 px frame on slot {(code & 15) + 1}'s cell {R}: {len(d)} px, "
+                       f"{len(d - border)} outside its border, its sides {cols} px")
             else:
                 qcheck(not d, f"{label}: another bank shown -- the on and off phases draw the same screen ({len(d)} px differ)")
-            qst.update(code=code, on=on[-1]["scr"], off=off[-1]["scr"], rect=r_, act=rd(ACT, 1))
+            qst.update(code=code, on=on[-1]["scr"], off=off[-1]["scr"], rect=R, act=rd(ACT, 1))
         # the screen is stable within a phase (no flicker): every on-phase screen equal, every off-phase one too
         non, noff = len({qwin(x["scr"]) for x in on}), len({qwin(x["scr"]) for x in off})
         qcheck(non <= 1 and noff <= 1, f"{label}: one window screen per phase ({non} on, {noff} off)")
@@ -367,6 +393,8 @@ def main(argv):
         qcheck(nw == 1, f"{label}: the window is steady over {len(seq)} UI ticks (no blink): {nw} screen(s)")
         if ref is not None and qst.get("rect") and qst.get("code") == code and code >> 8 == rd(syms["cl_bank"], 1):
             c1, c0 = qcrop(seq[-1]["scr"], qst["rect"]), qcrop(qst[ref], qst["rect"])
+            if ref == "on":     # CL39b: the cue's box is a frame now -- the highlight = the off phase's cell inverted
+                c0 = [tuple(1 - v for v in r) for r in qcrop(qst["off"], qst["rect"])]
             k_, o_ = code & 15, qst.get("act", -1)
             shared = ""
             if ref == "on" and o_ >= 0 and o_ // 8 == k_ // 8 and abs(o_ - k_) == 1:
@@ -391,7 +419,7 @@ def main(argv):
             g += 1
         qcheck(rd(ACT, 1) == (code & 15), f"{label}: landed on pattern {(code & 15) + 1} after {g} UI ticks")
         settle(200)
-        qsettled(label, code, "on", "the full highlight, unblinking")
+        qsettled(label, code, "on", "the off phase's cell inverted: the full highlight, unblinking")
 
 
     if a.partreads:     # the playing pattern's Part, from here on (after the start: the stock start's own reads stay out)
@@ -421,6 +449,44 @@ def main(argv):
             continue
         if op == "w":
             settle(1000)
+            continue
+        if op[0] == "W":                      # CL39b: the whole Clyps window (x 8..119) after 40 UI ticks, taken in the
+            g = 0                             # arrows' on phase if anything blinks; masked by the compare: the cued
+            for g in range(40):               # pattern's cell
+                rt.run(ms=17)
+                main_call(0x40056C28)
+                tail()
+            for g in range(40):
+                if rd(syms["cl_cph"], 1):
+                    break
+                rt.run(ms=17)
+                main_call(0x40056C28)
+                tail()
+            settle(68)
+            pend = (rd(0x800065BF, 1), rd(0x800065C0, 1))
+            wins[op[1:]] = dict(scr=composed().hex(), cph=rd(syms["cl_cph"], 1), act=rd(ACT, 1), pend=pend,
+                                bank=rd(syms["cl_bank"], 1))
+            print(f"#{i} {op}: window taken (cph {rd(syms['cl_cph'], 1)}, act {rd(ACT, 1)}, pend {pend})", flush=True)
+            continue
+        if op[0] == "c":                      # CL39b: press only -- cK = [PTN] + trig K, c- = [PTN] + the playing trig
+            k_ = rd(ACT, 1) if op[1:] == "-" else int(op[1:])
+            key(0x2E, 1); key(k_, 1); key(k_, 0); key(0x2E, 0)
+            settle(100)
+            continue
+        if op[0] in "pF" and op[1:].isdigit():   # CL39b: press only -- pK = trig K (a SEQ load), FK = [FUNC] + trig K
+            k_ = int(op[1:])
+            if op[0] == "F":
+                key(FUNC, 1); key(k_, 1); key(k_, 0); key(FUNC, 0)
+            else:
+                key(k_, 1); key(k_, 0)
+            settle(100)
+            continue
+        if op == "L":                         # CL39b: wait for the next Clyps landing (up to ~20 s)
+            nl0, g = len(lands), 0
+            while len(lands) == nl0 and g < 600:
+                settle(34)
+                g += 1
+            print(f"#{i} L: landed {lands[-1] if len(lands) > nl0 else None}", flush=True)
             continue
         if op[0] == "q":                      # CL39: stock pattern cues -- qK = [PTN] + trig K (a stock cue made in
             act0 = rd(ACT, 1)                 # Clyps), rK = [PTN]+[BANK]+trig K (a card reload of another pattern:
@@ -581,9 +647,13 @@ def main(argv):
     out.write_text(json.dumps(dict(meta=dict(name=a.name, dj=a.dj, chain=a.chain, pokes=a.poke, ops=a.ops,
                                              track=a.track, pattern=act, bank=bank),
                                    states=states, builds=builds, fires=fires, lands=lands, reqs=reqs, snaps=snaps,
-                                   purges=purges, applies=applies, parts=parts,
+                                   purges=purges, applies=applies, parts=parts, windows=wins,
                                    preads=[[pc, off] + v for (pc, off), v in sorted(preads.items())])))
     print(f"wrote {out}: ticks {st['tick']}, landings {len(lands)}", flush=True)
+    print(f"CL39b: cl_draw entered inside the UI tick (cl_uitick) {tkst['draws']} time(s) -- the unit's UI task "
+          f"(prio 3) drawing over the sys task", flush=True)
+    if "cl_dreq" in syms:
+        qcheck(tkst["draws"] == 0, "CL39b: no cl_draw from the UI tick (the redraws go to the sys task's tail)")
     if fails:
         print(f"CL39 checks: {len(fails)} FAIL", flush=True)
         return 1

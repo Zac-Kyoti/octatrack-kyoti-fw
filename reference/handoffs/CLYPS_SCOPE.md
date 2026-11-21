@@ -1603,6 +1603,17 @@ the investigation (NOTES "CL24 timing investigation", harness `tools/diag_clyps_
   DIRECT JUMP's `dj_hide` (V7.1.1) makes `PEND` read as the playing pattern for one sequencer tick at a wrap while a
   jump is armed: at most one UI tick of the bar's on phase can be missed there.
 - Gate: `diag_clyps_lock.py` ops `qK` / `rK` / `qv` / `ql` / `qc` / `qdK` (composed screens per UI tick).
+- **CL39b (the user on KY18BCCLB1, 2026-11-20):** (1) the cue's box is the select box's 1 px frame (`cd_frame`), not
+  the highlight's bar; arrows on it notch it as on the select box. (2) **Garbage after loads** (blank target cells,
+  garbage text in the source cell, stray pixels): `cl_uitick` runs in the **UI task** (prio 3, `0x40056c40`, queue
+  `0x460d1664`), every other `cl_draw` (keys, the UI tail) in the **sys task** (prio 1, queue `0x460d17ae`). CL39's
+  `cl_cblink` drew on every blink phase and cue change, so a tick draw preempted a sys-task draw midway (shared `cl_buf`,
+  the surface cleared and redrawn, XORed cells twice). Latent since CLYPM in `cl_flashtick` and CL34's arrow blink
+  (rarer: the CL34 "blank summary" sighting). Now the tick only asks (`cl_dreq`: `cl_drq` + a type-0 message on the sys
+  queue, which the loop sends to its tail 0x40062d1c) and `cl_uitail` draws; the peek's deferred return (`cl_pkt`,
+  CL36: window bit, layers, redraw from the tick) moved there the same way. The emulator cannot show the preemption
+  (route A calls the tick from main); `diag_clyps_lock.py` counts `cl_draw` entered inside `cl_uitick` (CL39 > 0, CL39b
+  0) and `cmp_clyps_windows.py` compares whole windows against CL38.
 
 ### 1.27 Combinations that must never ship (the user, 2026-11-07)
 

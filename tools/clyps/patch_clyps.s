@@ -149,7 +149,9 @@
     .equ FL_HALF,     5                 | 2026-10-30), its phase toggling every 5 ticks: 3 inverted /
                                         | normal cycles (6 Hz)
     .equ TOAST_T,     0x460d1e6c        | stock's toast countdown, read by the UI tick 0x40056c28
-    .equ UITICK_RES,  0x40056c2e        | after `move.l 0x460d1e6c,%d0` (stock's beq follows)
+    .equ SYS_Q,       0x460d17ae        | CL39b: the sys task's queue (keys, the UI tail run there; prio 1)
+    .equ KPOST,       0x40000c3c        | CL39b: kernel post(queue, msg) -- from a task only (CLAUDE.md)
+    .equ UITICK_RES,  0x40056c2e       | after `move.l 0x460d1e6c,%d0` (stock's beq follows)
     .equ CL_BLINK,    30                | the flash period: stock's trig LED tick (0x400340e4, period 30)
     .equ LED_FLASH,   0x40013784        | (die, n): invert the die for n LED ticks -- stock's p-lock
                                         | flash: its trig tick gives a locked trig's green die 3 ticks
@@ -1446,10 +1448,10 @@ ft_go:
     move.b  cl_fph,%d0
     eori.l  #1,%d0
     move.b  %d0,cl_fph
-    jmp     cl_draw
+    jmp     cl_dreq                     | CL39b: drawn by the sys task (cl_uitail)
 ft_end:
     clr.b   cl_fph
-    jmp     cl_draw
+    jmp     cl_dreq
 ft_out:
     rts
 
@@ -1646,8 +1648,25 @@ cb_set:
     beq.b   cb_out
 cb_draw:
     move.b  %d1,cl_cph
-    jsr     cl_draw
+    jmp     cl_dreq                     | CL39b: the sys task draws (cl_uitail), never this UI task
 cb_out:
+    rts
+
+| cl_dreq / cl_dpost (CL39b, 2026-11-20; the UI task's tick only): the UI tick (cl_uitick) runs in the UI task (prio 3,
+| 0x40056c40, queue 0x460d1664), every other cl_draw -- keys, the UI tail -- in the sys task (prio 1, queue 0x460d17ae).
+| A draw from the tick preempted a sys-task draw midway (CL39 on the unit: garbage text, blank cells, stray pixels after
+| loads: cl_buf, the surface and the XORed cells are shared). So the tick only asks: cl_drq, and a type-0 message on the
+| sys queue, which the loop sends straight to its tail 0x40062d1c (msg[0] - 1 = 255 > 77, 0x40061ce2; the UI gate's
+| own tail post): cl_uitail draws there. The kernel post 0x40000c3c from a task (not the frame path), as DIRECT JUMP
+| posts on this queue. Uses d0-d1/a0-a1.
+cl_dreq:
+    moveq   #1,%d0
+    move.b  %d0,cl_drq
+cl_dpost:
+    pea     cl_dmsg
+    pea     SYS_Q
+    jsr     KPOST
+    addq.l  #8,%sp
     rts
 
 | cl_hideunder / cl_showunder (CL37, the user 2026-11-15): Clyps' window is 112 px wide; a SETUP window under it (full
@@ -6745,6 +6764,12 @@ cl_uitail:
 .ifdef BP_UITAIL
     jsr     BP_UITAIL                   | KYOTI V1.8BC: BLACKPYRAMIDS_303's net first (the site is ours: SUPERSEDE)
 .endif
+    jsr     cl_pkt                      | CL39b: what the UI tick asked for, drawn here in the sys task: a peek's
+    tst.b   cl_drq                      | deferred return, the blink / flash phases (cl_dreq)
+    beq.b   ut_ndq
+    clr.b   cl_drq
+    jsr     cl_draw                     | (Clyps closed meanwhile: cl_draw draws nothing)
+ut_ndq:
     tst.b   cl_ptngo                    | a pattern reload from the card finished: go to that pattern
     beq.b   ut_ng
     jsr     cl_ptnswitch
@@ -7028,7 +7053,10 @@ cl_uitick:
     cmpi.l  #CL_MAGIC,%d0
     bne.b   uk_out
     jsr     cl_cblink                   | CL34: a cued load's arrows blink
-    jsr     cl_pkt                      | CL36: a peek's deferred return
+    tst.b   cl_pkw                      | CL36: a peek's deferred return -- CL39b: shown by the sys task (cl_uitail
+    beq.b   uk_npk                      | -> cl_pkt: window, layers, redraw), this task only asks
+    jsr     cl_dpost
+uk_npk:
     tst.b   cl_flk
     beq.b   uk_out
     jsr     cl_flashtick
@@ -7729,10 +7757,10 @@ cd_next:
     bsr.w   cl_xor
     lea     16(%sp),%sp
 cd_nlf:
-|   CL39 (the user, 2026-11-20): stock's cued pattern change (cl_pcue) -- its slot gets a second highlight, an
-|   inverted bar as the highlight's, blinking in the arrows' phase (cl_cph, cl_cblink) until it lands (the pattern
-|   you are on then: the highlight, solid) or the cue goes. Only in the cue's bank, as the arrows; not while the
-|   load confirmation inverts that same cell (it flashes as any load). Arrows on it are inverted (cl_pbq, cd_arrows).
+|   CL39 (the user, 2026-11-20): stock's cued pattern change (cl_pcue) -- its slot gets a second box, the select
+|   box's 1 px frame (CL39b, the user: not the highlight's bar), blinking in the arrows' phase (cl_cph, cl_cblink)
+|   until it lands (the pattern you are on then: the highlight, solid) or the cue goes. Only in the cue's bank, as
+|   the arrows. Arrows on it notch its frame as on the select box (cl_pbq, cd_arrows).
     moveq   #-1,%d0
     move.l  %d0,cl_pbq
     tst.b   cl_cph
@@ -7744,17 +7772,6 @@ cd_nlf:
     lsr.l   #8,%d1
     cmp.b   cl_bank,%d1
     bne.b   cd_npb
-    tst.b   cl_fph
-    beq.b   cd_pb
-    moveq   #1,%d1
-    cmp.b   cl_ftgt,%d1
-    beq.b   cd_pb                       | the header flashes, not a cell
-    moveq   #0,%d1
-    move.w  cl_fcode,%d1
-    andi.l  #0x0f0f,%d1
-    cmp.l   %d1,%d0
-    beq.b   cd_npb
-cd_pb:
     move.l  %d0,cl_pbq
     moveq   #15,%d2
     and.l   %d0,%d2
@@ -7763,13 +7780,7 @@ cd_pb:
     move.w  2(%a3),%d5
     moveq   #0,%d6
     move.w  4(%a3),%d6
-    bsr.w   cl_bary
-    move.l  %d1,-(%sp)
-    move.l  %d6,-(%sp)
-    move.l  %d0,-(%sp)
-    move.l  %d5,-(%sp)
-    bsr.w   cl_xor
-    lea     16(%sp),%sp
+    bsr.w   cd_frame
 cd_npb:
 |   the select box
     moveq   #0,%d0
@@ -7840,14 +7851,6 @@ cd_arrows:
     bne.b   cd_pg
     moveq   #1,%d3                      | on the highlight bar: inverted
 cd_pg:
-    moveq   #0,%d0                      | CL39: on a stock cue's second highlight (drawn now): inverted too
-    move.b  cl_bank,%d0
-    lsl.l   #8,%d0
-    or.l    %d2,%d0
-    cmp.l   cl_pbq,%d0
-    bne.b   cd_pg2
-    moveq   #1,%d3
-cd_pg2:
     bsr.w   cd_glyph
     tst.l   %d3                         | on the select box (set, not the highlight): its frame's pixel beside
     bne.b   ca2_out                     | each end of each arrow's column off, so the arrows stand out (the
@@ -7856,7 +7859,10 @@ cd_pg2:
     lsl.l   #8,%d0
     or.l    %d2,%d0
     cmp.l   %d7,%d0
+    beq.b   ca2_n
+    cmp.l   cl_pbq,%d0                  | CL39b: or on the stock cue's box (drawn now)
     bne.b   ca2_out
+ca2_n:
     move.l  %d5,%d0
     bsr.w   cd_notch
     move.l  %d6,%d0
@@ -8851,6 +8857,9 @@ cl_ledrec:  .long 0, cl_paint, cl_blink
 cl_win:     .long 0
 cl_pbq:     .long -1                    | CL39: the stock cue's second highlight as cl_draw drew it (-1: not drawn)
 cl_pcq:     .short 0xffff               | CL39: stock's cued pattern as cl_cblink last saw it (cl_pcue, 0xffff: none)
+cl_dmsg:    .byte 0, 0                  | CL39b: the type-0 sys message (cl_dpost: its tail only)
+cl_drq:     .byte 0                     | CL39b: the UI tick asks the sys task for a redraw (cl_dreq -> cl_uitail)
+            .byte 0
             .short 0
 cl_gmask:   .long 0                    | the painters' group test (cl_gupd): 0 = none, else 0x10000 | members
 cl_tabsig:  .long 0                     | the tabs' last group / active / side (cl_tabhook)
