@@ -116,10 +116,15 @@ real `m68k-elf-ld` output at `0x400d7300` and `0x400d6d00`.
 ## Measured
 
 Bugs 1 and 3 are hardware-confirmed on the author's Octatrack **MKI**. Bug 2: the
-original fix was hardware-confirmed; the current version (stock's test first, the
-`[BANK]` grid left to stock) is confirmed on hardware to end the `[BANK]`-held stall,
-and in the emulator gives the same answer as the original for all 256 patterns and
-finds a planted lock at the first and last byte of both lock arrays. Nothing tested
+original fix was hardware-confirmed; the version before this one (stock's test first, the
+`[BANK]` grid left to stock) ended the `[BANK]`-held stall on hardware, and in the emulator
+gives the same `[PTN]` answer as the original for all 256 patterns and finds a planted lock
+at the first and last byte of both lock arrays. This version (318 B, the `[BANK]`
+trigless-lock check) on the author's MKI, 20 Nov 2026, in KYOTI V1.8BC / V1.8C release
+candidates and the VARISPEED_EMUS image (the same bytes): audio and MIDI trigless locks with
+and without a locked value light (or not) as specified under `[PTN]` and `[BANK]`, and
+`[BANK]` held with the sequencer running stays responsive. Gates:
+`tools/led_trigless_matrix.py`, `tools/led_bank_stall.py`. Nothing tested
 on an MKII.
 
 ## Licence

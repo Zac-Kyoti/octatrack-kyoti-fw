@@ -57,8 +57,10 @@ present but does nothing -- no effect, no crash; bugs 1 and 2 are unaffected. Wh
 carryover bugs occur on her Kit change is untested.
 
 MEASURED: bugs 1 and 3 hardware-confirmed on the author's MKI; bug 2's original fix
-too, and its current version confirmed on hardware to end the [BANK]-held stall (its
-[PTN] answers emulator-verified identical to the original). In this repo the
+too, its previous version ended the [BANK]-held stall on hardware (its [PTN] answers
+emulator-verified identical to the original), and this 318-byte version on the author's
+MKI, 20 Nov 2026, in KYOTI V1.8BC / V1.8C release candidates and VARISPEED_EMUS (the
+[PTN] / [BANK] LED checks as specified, [BANK] held with the sequencer running). In this repo the
 three ship together (tools/build_batch_bugfixes.py), and
 tools/feature_image.py composes all three onto every feature image and
 asserts on every run that the composite's changes are the disjoint union of the

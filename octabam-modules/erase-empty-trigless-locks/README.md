@@ -43,8 +43,13 @@ The unit is **position-independent** (verified byte-identical linked at `0x400d7
 ## Measured
 
 Audio: hardware-confirmed on the author's Octatrack **MKI** — the gesture was traced on
-the unit, which is how the real worker was found. MIDI (2026-11-20): emulator-verified,
-not yet on hardware. Nothing tested on an MKII.
+the unit, which is how the real worker was found. Both sides, these 240 bytes: confirmed on
+the author's MKI on 20 Nov 2026 in a KYOTI V1.8BC release candidate (`KY18BC RC2`): on a
+MIDI track, erasing the only lock of a trigless lock darkens the step, with two locks only
+the second erase does, an empty `FUNC` + `TRIG` one stays, and a note or trigless trig with
+a lock keeps its trig; the same on an audio track; a BLKPYRAMD track left alone. The
+standalone image was not flashed as such. Emulator: `tools/erase_trigless_test.py`.
+Nothing tested on an MKII.
 
 240 bytes, sha256 `0fa04f4dad79809c…` linked at `0x400d7200`.
 

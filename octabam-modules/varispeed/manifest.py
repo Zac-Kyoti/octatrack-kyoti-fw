@@ -40,7 +40,8 @@ MEASURED. The unit, linked at the standalone image's address, is that image's by
 standalone image in ot_emu with real hardware-exported projects: VARI increments bit-identical
 with VARISPEED_EMUS's on OT, stock tracks' with stock 1.40C (reference/handoffs/
 VARISPEED_IMPL.md §14). On hardware: the author's MKI, 15 Oct 2026 (the VARI1
-build).
+build); this version (VRG3) on 20 Nov 2026 in KYOTI V1.8BC / V1.8C release candidates and
+VARISPEED_EMUS (the same source), the standalone image not flashed as such.
 """
 
 import dataclasses
@@ -173,6 +174,7 @@ MODULE = Module(
     author="Zac-Kyoti",
     author_url="https://github.com/Zac-Kyoti/octatrack-kyoti-fw",
     proof=Proof.HARDWARE,
-    proof_note="the author's MKI, 15 Oct 2026 (the VARI1 build)",
+    proof_note="the author's MKI: 15 Oct 2026 (the VARI1 build); VRG3 on 20 Nov 2026 in KYOTI and "
+               "VARISPEED_EMUS images with the same source",
     **_SETTINGS,
 )

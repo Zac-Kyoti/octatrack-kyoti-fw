@@ -27,10 +27,10 @@ by their stock bytes.
 The unit is position-independent (both entries reach the shared rule with bsr.w;
 byte-identical linked at 0x400d7200, 0x400d7500, 0x400d6f00 and 0x400c45b0).
 
-MEASURED: the AUDIO side is hardware-confirmed on the author's MKI (the 296-byte
-form before the 2026-11-20 refactor; the same rule, re-run in the emulator on the
-new bytes). The MIDI side is emulator-verified only (tools/erase_trigless_test.py),
-not yet on hardware. The standalone image is tools/build_erase_empty_trigless_locks.py,
+MEASURED: both sides hardware-confirmed on the author's MKI, 20 Nov 2026, with these
+240 bytes in a KYOTI V1.8BC release candidate (KY18BC RC2: MIDI and audio trigless locks
+erased, the empty FUNC + TRIG one kept, note / trigless trig with a lock kept); the AUDIO
+side earlier too (the 296-byte form). Emulator: tools/erase_trigless_test.py. The standalone image is tools/build_erase_empty_trigless_locks.py,
 which deliberately does NOT bump the version string -- one bug fix, stock-transparent;
 it refuses to build when REFERENCE below is not its source linked at 0x400d7200.
 """
