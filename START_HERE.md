@@ -170,8 +170,13 @@ are lowercase-hyphen, because octabam requires a module's name to equal its fold
   identical). Open questions when picked up: which DJ landings carry (any tied landing vs boundary only), Clyps' hook.
   Also (the author, 2026-11-20, KY18BCCLB1): a tie across a cued **Part switch between two different tracks** (the
   outgoing BLKPYRAMD ends tied on track A, the incoming Part's BLKPYRAMD on track B of the same core begins with ties)
-  is cut at the change -- tie_xfer is same-track only, and the incoming tie on step 1 takes the core's one voice and
-  starts nothing. Expected so far, never scoped; a cross-track carry would continue the note on the voice.
+  is cut at the change: tie_xfer is same-track only, so the outgoing note's gate ends where it was computed (wrapping into
+  its own pattern's step 1); the incoming ties set no trig flag and claim nothing. ot_emu (out/bpsilent/blip/tx.py,
+  cvx.py): RC2, FINAL V1.8BC and KY18BCCLB1 identical -- not a regression. Expected so far, never scoped. Design sketch
+  (not built): at B's step 0 of the other Part, if B starts with ties and the core's carrier A has a note tied to the
+  end with its gate open, run tie_xfer's arithmetic with A's note and B's masks / GATE and send NOTE|SLIDE on A (A keeps
+  the voice; play_rank / one-per-core / own_prev / dfr untouched; the tail sounds through A's old Part); gate = a
+  verify_tie_xfer variant with A != B, reverse order, ties as trigless trigs.
 - **2026-11-19: RELEASE CANDIDATE RC1 (WIP, NOT flashed, NOT promoted, branch `release-1119`)** -- VRG3 (`emus-guard`)
   + the `[BANK]` trigless-lock LED change (`led-fix`) in one release. Images `KY18BC RC1` (syx `0a8e18c7…`), `KY18C RC1`
   (`281b10fa…`), `KY18 RC1` (`4edb7163…`), `140CVEMRC1` (`bbb2c863…`), `140C_VRRC1` (`f752032d…`), `140CFIXRC1`
