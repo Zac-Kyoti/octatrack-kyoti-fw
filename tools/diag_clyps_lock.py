@@ -341,16 +341,22 @@ def main(argv):
     qst = {}
     # CL39b: a cl_draw entered while cl_uitick runs = a draw in the UI task on the unit (prio 3, preempting the sys
     # task's draws: the CL39 garbage). The gate calls the tick from main, so here it only shows up as nesting.
-    tkst = dict(inside=False, draws=0)
+    # The current TCB (0x800068fc) tells the tick's own task from another one that ran meanwhile: here the tick runs
+    # as main (prio 0), so the sys task (prio 1) its post wakes preempts it and draws in its tail -- on the unit the
+    # poster is the UI task (prio 3), which the sys task cannot preempt. Only draws in the tick's own task count.
+    tkst = dict(inside=False, draws=0, other=0, tcb=0)
     if "cl_uitick" in syms and "uk_out" in syms:
-        u.hook_add(er.eb.UC_HOOK_CODE, lambda uc, ad, sz, ud: tkst.update(inside=True),
+        u.hook_add(er.eb.UC_HOOK_CODE, lambda uc, ad, sz, ud: tkst.update(inside=True, tcb=rd(0x800068FC, 4)),
                    begin=syms["cl_uitick"], end=syms["cl_uitick"])
         u.hook_add(er.eb.UC_HOOK_CODE, lambda uc, ad, sz, ud: tkst.update(inside=False),
                    begin=syms["uk_out"], end=syms["uk_out"])
 
         def on_draw(uc, ad, sz, ud):
             if tkst["inside"]:
-                tkst["draws"] += 1
+                if rd(0x800068FC, 4) == tkst["tcb"]:
+                    tkst["draws"] += 1
+                else:
+                    tkst["other"] += 1
         u.hook_add(er.eb.UC_HOOK_CODE, on_draw, begin=syms["cl_draw"], end=syms["cl_draw"])
     wins = {}
 
@@ -650,8 +656,8 @@ def main(argv):
                                    purges=purges, applies=applies, parts=parts, windows=wins,
                                    preads=[[pc, off] + v for (pc, off), v in sorted(preads.items())])))
     print(f"wrote {out}: ticks {st['tick']}, landings {len(lands)}", flush=True)
-    print(f"CL39b: cl_draw entered inside the UI tick (cl_uitick) {tkst['draws']} time(s) -- the unit's UI task "
-          f"(prio 3) drawing over the sys task", flush=True)
+    print(f"CL39b: cl_draw entered inside the UI tick (cl_uitick), in its own task, {tkst['draws']} time(s) -- on the "
+          f"unit the UI task (prio 3) drawing over the sys task; meanwhile in another task {tkst['other']}", flush=True)
     if "cl_dreq" in syms:
         qcheck(tkst["draws"] == 0, "CL39b: no cl_draw from the UI tick (the redraws go to the sys task's tail)")
     if fails:
