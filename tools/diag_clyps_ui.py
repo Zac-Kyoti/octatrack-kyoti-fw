@@ -355,6 +355,21 @@ def main(argv):
                   f"[AMP] held: the Clyps window off screen, the encoders reach the page ({[hex(x) for x in e_peek]}; "
                   f"Clyps': {[hex(x) for x in e_before]}), [LFO] too: the page follows ({pg_amp} -> {pg_lfo})")
             hid_ = linked() == 0 and rd(syms["cl_pkw"], 1) == 1        # CL36: released inside the double-tap window
+            if "dp_post" in syms:   # CL39c: the tick posts once, and only past stock's double-tap window
+                npost = [0]
+                hp_ = u.hook_add(er.eb.UC_HOOK_CODE, lambda uc, ad, sz, ud: npost.__setitem__(0, npost[0] + 1),
+                                 begin=syms["dp_post"], end=syms["dp_post"])
+                u.mem_write(0x460D5DE0, (5).to_bytes(4, "big"))
+                for _ in range(5):
+                    main_call_r(0x40056C28)
+                n_in = npost[0]
+                u.mem_write(0x460D5DE0, (100).to_bytes(4, "big"))
+                for _ in range(5):
+                    main_call_r(0x40056C28)                             # 5 ticks before the sys task runs: one post
+                n_out = npost[0] - n_in
+                u.hook_del(hp_)
+                check(n_in == 0 and n_out == 1, f"... the peek's return: {n_in} posts inside the double-tap window, "
+                      f"{n_out} for 5 UI ticks past it (one, until the tail runs)")
             u.mem_write(0x460D5DE0, (100).to_bytes(4, "big"))
             main_call_r(0x40056C28)                                     # a UI tick past it: the view comes back
             rt.run(ms=100)      # CL39b: the tick only posts; the sys task's UI tail shows it (cl_pkt there)

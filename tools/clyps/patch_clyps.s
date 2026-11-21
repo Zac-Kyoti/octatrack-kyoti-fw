@@ -1601,6 +1601,52 @@ pq_none:
     moveq   #-1,%d0
     rts
 
+| cl_ptnbank / cl_ptnbank2 / cl_ptnpat (CL39c, the user 2026-11-20): [PTN] pressed in Clyps (cl_ptfwd) acts on the bank
+| Clyps shows (cl_bank, paged with [BANK] + arrows): stock's [PTN] + trig 0x40056b2c cues (that bank, N) -- the call
+| stock's own cross-bank cue makes (0x4007b36e) -- and stock's [PTN] LED painter 0x400353d4 shows that bank: its
+| patterns' data (green), a cue in it (yellow), no red (cl_ptnpat 16: the playing pattern is not in it). Splices
+| `mvzb <bank / pattern>,%d0` -> jsr (build_clyps.py DETOURS). A bank stock refuses (0x4007b30c: "BANK UNAVAILABLE")
+| is not paged to. Only reached with stock's [PTN] layer up, long after the DRAM part is in place. Keep all but d0.
+cl_ptnbank:                             | 0x40056b60, 0x40035522: stock reads the current bank 0x100b14ce
+    moveq   #0,%d0
+    move.b  0x100b14ce,%d0
+    bra.b   pb_go
+cl_ptnbank2:                            | 0x400354ae: stock reads its twin 0x80000002
+    moveq   #0,%d0
+    move.b  UI_BANK,%d0
+pb_go:
+    tst.b   cl_open
+    beq.b   pb_out
+    tst.b   cl_ptfwd
+    beq.b   pb_out
+    lea     -12(%sp),%sp
+    movem.l %d0-%d1/%a0,(%sp)
+    moveq   #0,%d0
+    move.b  cl_bank,%d0
+    andi.l  #15,%d0
+    move.l  #BANKSTRIDE,%d1
+    muls.l  %d0,%d1
+    movea.l %d1,%a0
+    adda.l  #BLOB+0x9b336,%a0
+    tst.l   (%a0)                       | stock's "BANK UNAVAILABLE" flag (0x4007b30c)
+    bne.b   pb_keep
+    move.l  %d0,(%sp)                   | the paged bank
+pb_keep:
+    movem.l (%sp),%d0-%d1/%a0
+    lea     12(%sp),%sp
+pb_out:
+    rts
+cl_ptnpat:                              | 0x40035432: stock reads the playing pattern 0x100b14d0 (its red LED)
+    bsr.b   cl_ptnbank
+    cmp.b   0x100b14ce,%d0
+    bne.b   pp_none
+    moveq   #0,%d0
+    move.b  0x100b14d0,%d0
+    rts
+pp_none:
+    moveq   #16,%d0                     | a paged bank: none of its patterns plays
+    rts
+
 | cl_cblink (the UI task's 1/60 s tick, cl_uitick; Clyps open): while the active track has a load cued, its arrows
 | blink at a fixed 120 BPM whatever the tempo (the user, 2026-11-13: as the grid's red / yellow flash) -- a 0.5 s period
 | of 30 ticks, shown for the first two thirds (20 ticks), hidden for the last (10); each cue starts shown. The
@@ -1662,11 +1708,17 @@ cb_out:
 cl_dreq:
     moveq   #1,%d0
     move.b  %d0,cl_drq
-cl_dpost:
+cl_dpost:                               | CL39c: one message outstanding at most (cl_dpend, cleared by the tail)
+    tst.b   cl_dpend
+    bne.b   dp_out
+    moveq   #1,%d0
+    move.b  %d0,cl_dpend
+dp_post:
     pea     cl_dmsg
     pea     SYS_Q
     jsr     KPOST
     addq.l  #8,%sp
+dp_out:
     rts
 
 | cl_hideunder / cl_showunder (CL37, the user 2026-11-15): Clyps' window is 112 px wide; a SETUP window under it (full
@@ -6764,6 +6816,7 @@ cl_uitail:
 .ifdef BP_UITAIL
     jsr     BP_UITAIL                   | KYOTI V1.8BC: BLACKPYRAMIDS_303's net first (the site is ours: SUPERSEDE)
 .endif
+    clr.b   cl_dpend                    | CL39c: the UI tick may post again
     jsr     cl_pkt                      | CL39b: what the UI tick asked for, drawn here in the sys task: a peek's
     tst.b   cl_drq                      | deferred return, the blink / flash phases (cl_dreq)
     beq.b   ut_ndq
@@ -7054,7 +7107,10 @@ cl_uitick:
     bne.b   uk_out
     jsr     cl_cblink                   | CL34: a cued load's arrows blink
     tst.b   cl_pkw                      | CL36: a peek's deferred return -- CL39b: shown by the sys task (cl_uitail
-    beq.b   uk_npk                      | -> cl_pkt: window, layers, redraw), this task only asks
+    beq.b   uk_npk                      | -> cl_pkt: window, layers, redraw), this task only asks -- CL39c: once
+    moveq   #14,%d0                     | stock's double-tap window is past (cl_pkt's own test)
+    cmp.l   0x460d5de0,%d0
+    bge.b   uk_npk
     jsr     cl_dpost
 uk_npk:
     tst.b   cl_flk
@@ -7789,6 +7845,12 @@ cd_npb:
     move.b  ACT_PAT,%d0
     cmp.l   %d7,%d0
     beq.b   cd_nosel                    | the playing slot: none
+    tst.b   cl_cph                      | CL39c (the user): the stock cue's slot is the select box's -- the box
+    bne.b   cd_sel                      | itself blinks (not drawn in the off phase)
+    jsr     cl_pcue
+    cmp.l   %d7,%d0
+    beq.b   cd_nosel
+cd_sel:
     move.l  %d7,%d0
     lsr.l   #8,%d0
     cmp.b   cl_bank,%d0
@@ -8859,7 +8921,7 @@ cl_pbq:     .long -1                    | CL39: the stock cue's second highlight
 cl_pcq:     .short 0xffff               | CL39: stock's cued pattern as cl_cblink last saw it (cl_pcue, 0xffff: none)
 cl_dmsg:    .byte 0, 0                  | CL39b: the type-0 sys message (cl_dpost: its tail only)
 cl_drq:     .byte 0                     | CL39b: the UI tick asks the sys task for a redraw (cl_dreq -> cl_uitail)
-            .byte 0
+cl_dpend:   .byte 0                     | CL39c: its message is posted, the tail has not run yet
             .short 0
 cl_gmask:   .long 0                    | the painters' group test (cl_gupd): 0 = none, else 0x10000 | members
 cl_tabsig:  .long 0                     | the tabs' last group / active / side (cl_tabhook)

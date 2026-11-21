@@ -26,6 +26,9 @@ grades it against DIRECT JUMP's position model.
        with another bank shown); ql = wait for the landing (the solid highlight, steady); qv = sample the cue
        already up (after k+ / k-); qc = cancel ([PTN] + the
        playing pattern's trig: no bar, steady); qdK = [PTN] + trig K with DIRECT JUMP on (--dj), sampled to its landing.
+  CL39c: gK = after k+ / k-, [PTN] held shows the shown bank's grid (data green, no red), [PTN] + trig K cues that
+       bank's pattern (yellow on the next [PTN]), its box blinks there; ql then checks the landing's bank too. The run
+       counts the sys-queue posts of cl_dpost per UI tick.
   CL39b (the cue's box is the select box's frame; no draws from the UI tick): press-only ops cK / c- ([PTN] + trig K /
        the playing pattern's trig), pK (trig K: a SEQ load), FK ([FUNC] + trig K: a FULL load), L (wait for a Clyps
        landing), WN (the whole composed window into the record's "windows", taken in the arrows' on phase) -- compare
@@ -346,7 +349,8 @@ def main(argv):
     # poster is the UI task (prio 3), which the sys task cannot preempt. Only draws in the tick's own task count.
     tkst = dict(inside=False, draws=0, other=0, tcb=0)
     if "cl_uitick" in syms and "uk_out" in syms:
-        u.hook_add(er.eb.UC_HOOK_CODE, lambda uc, ad, sz, ud: tkst.update(inside=True, tcb=rd(0x800068FC, 4)),
+        u.hook_add(er.eb.UC_HOOK_CODE, lambda uc, ad, sz, ud: tkst.update(inside=True, tcb=rd(0x800068FC, 4),
+                                                                           calls=tkst.get("calls", 0) + 1),
                    begin=syms["cl_uitick"], end=syms["cl_uitick"])
         u.hook_add(er.eb.UC_HOOK_CODE, lambda uc, ad, sz, ud: tkst.update(inside=False),
                    begin=syms["uk_out"], end=syms["uk_out"])
@@ -359,6 +363,10 @@ def main(argv):
                     tkst["other"] += 1
         u.hook_add(er.eb.UC_HOOK_CODE, on_draw, begin=syms["cl_draw"], end=syms["cl_draw"])
     wins = {}
+    posts = dict(n=0, t0=None)          # CL39c: cl_dpost's real posts (dp_post), against the transport's ticks
+    if "dp_post" in syms:
+        u.hook_add(er.eb.UC_HOOK_CODE, lambda uc, ad, sz, ud: posts.update(n=posts["n"] + 1),
+                   begin=syms["dp_post"], end=syms["dp_post"])
 
     def qblink(code, label):    # the cue is up: its slot blinks as a second highlight in the arrows' phase
         seq = qsample(48)
@@ -423,7 +431,8 @@ def main(argv):
             main_call(0x40056C28)
             tail()
             g += 1
-        qcheck(rd(ACT, 1) == (code & 15), f"{label}: landed on pattern {(code & 15) + 1} after {g} UI ticks")
+        qcheck(rd(ACT, 1) == (code & 15) and rd(0x800065BD, 1) == code >> 8,
+               f"{label}: landed on {chr(65 + (code >> 8))}{(code & 15) + 1:02d} after {g} UI ticks")
         settle(200)
         qsettled(label, code, "on", "the off phase's cell inverted: the full highlight, unblinking")
 
@@ -455,6 +464,32 @@ def main(argv):
             continue
         if op == "w":
             settle(1000)
+            continue
+        if op[0] == "g":                      # CL39c: gK -- after k+ / k-: [PTN] in Clyps acts on the bank shown
+            k_, vb, ub = int(op[1:]), rd(syms["cl_bank"], 1), rd(0x80000002, 1)
+            base_ = lambda: bytes(u.mem_read(0x460BA98C, 17))
+            die = lambda b_, d_: (b_[d_ // 8] >> (d_ % 8)) & 1
+
+            def grid():
+                main_call(0x4007E998, 0)          # repaint the grid (route A runs no LED tick)
+                b_ = base_()
+                return [(die(b_, ledtbl[n]), die(b_, ledtbl[n] + 1)) for n in range(16)]
+            qcheck(vb != ub, f"#{i} {op}: the view is on another bank ({chr(65 + vb)}) than the current ({chr(65 + ub)})")
+            want = [1 if main_call(0x4009A464, n, vb) & 0xFFFFFFFF else 0 for n in range(16)]
+            key(0x2E, 1)
+            g0 = grid()
+            qcheck([x[1] for x in g0] == want and not any(x[0] for x in g0),
+                   f"#{i} {op}: [PTN] held: the grid = bank {chr(65 + vb)}'s patterns with data {''.join(map(str, want))}, "
+                   f"no red ({g0})")
+            key(k_, 1); key(k_, 0); key(0x2E, 0)
+            settle(100)
+            pend = (rd(0x800065BF, 1), rd(0x800065C0, 1))
+            qcheck(pend == (vb, k_), f"#{i} {op}: [PTN] + trig {k_ + 1} cued {chr(65 + vb)}{k_ + 1:02d} (PEND {pend})")
+            key(0x2E, 1)
+            g1 = grid()
+            key(0x2E, 0)
+            qcheck(g1[k_] == (1, 1), f"#{i} {op}: [PTN] held again: {chr(65 + vb)}{k_ + 1:02d} yellow ({g1[k_]})")
+            qblink((vb << 8) | k_, f"#{i} {op}")
             continue
         if op[0] == "W":                      # CL39b: the whole Clyps window (x 8..119) after 40 UI ticks, taken in the
             g = 0                             # arrows' on phase if anything blinks; masked by the compare: the cued
@@ -658,6 +693,10 @@ def main(argv):
     print(f"wrote {out}: ticks {st['tick']}, landings {len(lands)}", flush=True)
     print(f"CL39b: cl_draw entered inside the UI tick (cl_uitick), in its own task, {tkst['draws']} time(s) -- on the "
           f"unit the UI task (prio 3) drawing over the sys task; meanwhile in another task {tkst['other']}", flush=True)
+    if "dp_post" in syms:
+        nt = tkst.get("calls", 0)           # the unit's UI tick: 60 per second
+        print(f"CL39c: cl_dpost posted {posts['n']} sys message(s) in {nt} UI ticks: {posts['n'] / max(nt, 1):.3f} per "
+              f"tick = {60 * posts['n'] / max(nt, 1):.1f} per second at the unit's 60 ticks / s", flush=True)
     if "cl_dreq" in syms:
         qcheck(tkst["draws"] == 0, "CL39b: no cl_draw from the UI tick (the redraws go to the sys task's tail)")
     if fails:

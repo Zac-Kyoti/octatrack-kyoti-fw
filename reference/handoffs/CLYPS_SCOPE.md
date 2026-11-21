@@ -1614,6 +1614,15 @@ the investigation (NOTES "CL24 timing investigation", harness `tools/diag_clyps_
   CL36: window bit, layers, redraw from the tick) moved there the same way. The emulator cannot show the preemption
   (route A calls the tick from main); `diag_clyps_lock.py` counts `cl_draw` entered inside `cl_uitick` (CL39 > 0, CL39b
   0) and `cmp_clyps_windows.py` compares whole windows against CL38.
+- **CL39c (the user, 2026-11-20):** (1) the cued slot is also the select box's: the select box itself blinks (not drawn
+  in the off phase). (2) **[PTN] in Clyps acts on the bank Clyps shows** (after [BANK] + arrows; pre-existing, a wanted
+  change): `cl_ptnbank` / `cl_ptnbank2` / `cl_ptnpat` behind four guarded `mvzb` -> `jsr` splices: stock's [PTN] + trig
+  `0x40056b60` (its bank -> `0x400a1030(bank, N)`, the call stock's own cross-bank cue makes, `0x4007b36e`), its [PTN]
+  LED painter `0x400353d4` at `0x40035522` (data: green), `0x400354ae` (a cue in that bank: yellow), `0x40035432` (the
+  playing pattern's red: 16 = none in another bank; the painter's own loop then repaints every slot). Only with
+  `cl_ptfwd` (a lone [PTN] pressed in Clyps); a bank stock refuses ("BANK UNAVAILABLE", 0x4007b30c) is not paged to.
+  (3) The tick's posts are latched (`cl_dpend`, one message outstanding, cleared by the tail) and the peek's return
+  posts only past stock's double-tap window.
 
 ### 1.27 Combinations that must never ship (the user, 2026-11-07)
 
