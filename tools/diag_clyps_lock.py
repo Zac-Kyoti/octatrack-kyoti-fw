@@ -40,7 +40,8 @@ grades it against DIRECT JUMP's position model.
        confirmation flash on the picked slot first (cl_flk, cl_fcode), the blink's box after it; O = close and reopen
        Clyps: the view on the playing bank; T = two lone [PTN] taps (the second closes stock's SELECT PATTERN): the grid
        is the shown bank's on every press, release and in the window; P checks ORIG PTN+PRT's flash on its slot;
-       tK = trig K (a cued SEQ load): the flash on its slot, then the select box's frame blinking there.
+       tK = trig K (a cued SEQ load): the flash on its slot, then the select box's frame blinking there; uK = a lone
+       [PTN] tap, then trig K in stock's SELECT PATTERN: the bank shown is cued.
 """
 import argparse, json, os, pathlib, sys
 
@@ -573,6 +574,15 @@ def main(argv):
                        f"one 1 px frame on slot {k_ + 1}'s cell: {len(d)} px, {len(d - border)} outside, sides {cols}")
             else:
                 qcheck(False, f"#{i} {op}: blink phases after the flash ({len(on)} on, {len(off)} off)")
+            continue
+        if op[0] == "u" and op[1:].isdigit():  # CL40: uK = a lone [PTN] tap (stock's SELECT PATTERN opens), then trig
+            k_, vb_ = int(op[1:]), rd(syms["cl_bank"], 1)   # K in that window: it cues the bank shown
+            key(0x2E, 1); key(0x2E, 0); settle(100)
+            w_ = rd(WIN_SLOT_, 4)
+            key(k_, 1); key(k_, 0); settle(100)
+            pend = (rd(0x800065BF, 1), rd(0x800065C0, 1))
+            qcheck(w_ != 0 and pend == (vb_, k_), f"#{i} {op}: [PTN] tap (window {w_:#x}), then trig {k_ + 1}: cued "
+                   f"{chr(65 + pend[0])}{pend[1] + 1:02d}, the bank shown {chr(65 + vb_)}")
             continue
         if op == "O":                         # CL40: close ([NO]) and reopen Clyps -- the view on the playing bank
             key(0x32, 1); key(0x32, 0)

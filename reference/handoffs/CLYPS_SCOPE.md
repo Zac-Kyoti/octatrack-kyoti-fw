@@ -1624,6 +1624,69 @@ the investigation (NOTES "CL24 timing investigation", harness `tools/diag_clyps_
   (3) The tick's posts are latched (`cl_dpend`, one message outstanding, cleared by the tail) and the peek's return
   posts only past stock's double-tap window.
 
+### 1.40 One cue mark, one set of arrows; the view opens on the playing bank (the user on KY18BCCLB3, 2026-11-21; test images CLB4)
+
+- **The user (CLB3, no drawing artifacts any more):** (1) a pattern picked in Clyps gets the same fast confirmation flash
+  as the other loads; (2) no arrow blinking for cued loads -- everything uniform: the fast flash, then the slow cued
+  blink as the box outline, then the solid mark on landing; (3) never two sets of arrows; (4) Clyps opens on the
+  playing pattern's bank; (5) bank B playing, view paged to A, a whole-pattern load from A did nothing visible;
+  (6) intermittent: in bank B, two [PTN] presses brought bank A's grid.
+- **Built (CL40):**
+  - **Every cue is one mark** (`cd_cbox`): the active track's cued load (`cl_cueslot`: a slot SEQ / FULL, a group's
+    active member -- the existing per-track rule, only the active track's cue is marked; an original / saved / card
+    source on the pattern's own slot) and stock's cued pattern change (`cl_pcue`, CL39) are the select box's 1 px frame
+    on the slot, in the cue's bank only, in the on phase of the old arrow blink (`cl_cph`: 20 on / 10 off UI ticks), not
+    while the load confirmation flashes that cell; on the highlight (the pattern you are on) the frame is XORed (the
+    bar's outline goes dark: CL13's rule). A cue on the select box's own slot: the box itself blinks (CL39c, now for
+    the track's cue too). Landing: the box (a track) / the highlight (a pattern), solid; a cancel removes it. The two
+    marks may both show (a track cue and a pattern cue, different slots, one phase).
+  - **The confirmation flash for pattern picks** (`cl_flcode`, the slot flash of every load): `[PTN]` + trig in Clyps
+    (`cl_ptnpick` at the CL39c splice 0x40056b60, unless it is the pattern you are on: a cancel), `[PTN]+[BANK]` + trig
+    (`cl_k_trig`), `[PTN]+[BANK]+[YES]` begun inside (`kp_pat`: the pattern's slot, was the header's ORIG PTN+PART box,
+    `cl_flhdr`). Every flash restarts the blink (`cl_bt`): the flash is one blink period (30 ticks), the blink's frame
+    follows in its on phase. The flash and the cue frames show while the chord is held too (the select box and the
+    arrows still hide).
+  - **One set of arrows:** the cued slot's blinking arrows (CL34, `cd_cq`) were a second set beside the cursor's --
+    the user's "two sets" (arrows on slot 2, a trig load of slot 6: arrows on both, those on 6 blinking until the
+    landing). Removed: `cd_arrows` has one caller, the cursor (`cl_sbank` / `cl_cur`, shown by `cl_pmoved`, tucked by
+    `cl_tuck`, the shown bank only). Arrows on a cue's frame notch it (`cl_cqd`, `cl_pbq`).
+  - **The view opens on the playing pattern's bank** (`cl_vplay` in `cl_enter`, after the track's arrows / box are
+    loaded): was the arrows' bank (`cl_pload`) or the box's (`cl_boxhome`) -- arrows left in bank A (a paging, or
+    a load from A) opened the view on A with B playing. The arrows follow the view (`cl_pfollow`, §1.35).
+  - **The [PTN]+[BANK] chord takes the view to the playing bank** when it forms inside Clyps (`kc_pch` / `kc_bch` ->
+    `cl_vplay`): its gestures act on the playing bank (ORIG PTN+PRT: the pattern you are on; the card reload: pattern
+    N of the playing bank, clyps_reload.s) and its grid is the playing bank's pattern view (`cl_paint` cp_pview).
+  - **A lone [PTN] tap keeps the bank shown:** its release latches stock's SELECT PATTERN (0x4005a088: PTN_CONSUMED
+    0, the tap flag 0x460d1ab2 set) -- CL39c cleared `cl_ptfwd` there, so the window's grid and picks were the
+    current bank's while the press before and the press after showed the paged bank's: the grid flipped A / B / A. Now
+    `cl_ptfwd` stays for that window; the next [PTN]'s release (no tap) ends it.
+  - **The arrows' record keeps the bank shown:** an arrow press (`ku_set` / `kl_set`) saved the track's record
+    (`cl_pshow` -> `cl_psave`, every member's with [CUE] held) BEFORE `cl_sbank` took the shown bank, so the first
+    arrow after a paging stored the bank the arrows came from (a later track change or reopen restored them there).
+    Found by the gate (`r3a`: one arrow in A after a paging, reopen -> arrows on B); `cl_sbank` is set first now.
+- **Causes:** (3) `cd_cq` (CL34) drew arrows on the cued slot in the on phase whenever it was not the cursor's;
+  (5) `[PTN]` HELD + trig in bank A with B playing works in the emulator on CLB3 (cue A06, its box in A, lands on A06
+  with the view on A: run `r3d`); a `[PTN]` TAP then the trig in stock's SELECT PATTERN cued the current bank's B06
+  (CL39c cleared `cl_ptfwd` on the tap's release -- the likely hardware case; gate op `uK`); the two chord gestures act on the playing bank by design (§1.8 / §1.31) -- the card reload
+  of B06 homed the box (`cl_boxreq` -> `cl_boxhome`), so the view jumped back to B; ORIG PTN+PRT restored B's pattern
+  with A shown: nothing visible in A; (6) the latched SELECT PATTERN from a lone tap used the current bank (`cl_ptfwd`
+  cleared on release) between two presses that used the shown bank, and the shown bank itself could be A with B
+  playing at the open (item 4).
+- **Open (the user to decide):** the card's `[PTN]+[BANK]` + trig for a pattern of the bank SHOWN (A06 with B playing)
+  needs the card job (clyps_reload.s) to target another bank (about 20 sites read PLAY_BANK: the file, the Part
+  link / apply / edited mark, the names, the mirror, the switch) -- not built; ORIG PTN+PRT of a pattern in the shown
+  bank has no defined meaning (which pattern?). A track change still puts the view on that track's arrows' / box's
+  bank (`cl_pload` / `cl_boxhome`, §1.14 / §1.19) -- the one remaining way the view lands on a bank you did not page
+  to; option: keep the view, the track's arrows follow it (as at the open).
+- **Gates (emulator, OT DEMO, route A; `diag_clyps_lock.py`, logs in out/rc3clyps/gates4):** new: `--bankb` (bank A
+  copied to B in RAM, stock's [BANK] + B + pattern pick), ops `O` (close / reopen: the view on the playing bank), `T`
+  (two lone [PTN] taps: every grid the shown bank's), `tK` (a cued SEQ load: the flash first, then one 1 px frame
+  blinking on its cell), `uK` ([PTN] tap, then trig in SELECT PATTERN), `P` (ORIG PTN+PRT: its slot's flash, the view
+  on its bank), flash-aware q / r checks, and an arrow-set count per window draw (FAIL on two). CLB3 reproduces:
+  two arrow sets in 9 draws (`d,p5,L`), the grid flip (`k-,T`), reopen on A with B playing (`k-,d,d,O` arrows;
+  `k-,p3,L,O` box). CLB4 at the time of this entry: T / O / P / tK / chord-view checks PASS on V1.8C, V1.8BC and
+  CLYPS; the CL39 set, the window compare vs CL38 and the UI gate were still running (see NOTES).
+
 ### 1.27 Combinations that must never ship (the user, 2026-11-07)
 
 - Clyps + RELOAD_FROM_PROJECT never; Clyps + DIRECT_JUMP_KYOTI only as KYOTI's integrated pair (SUPERSEDE).

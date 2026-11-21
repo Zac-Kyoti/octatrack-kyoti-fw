@@ -40378,3 +40378,47 @@ unchanged (V1.8BC CAVE 636, ENC 96, SPRING 82, PERS1 128, PERS2 64).
   trig: that bank's pattern cues (yellow on the next [PTN]), its box blinks there, it lands in that bank; (9) load a
   slot's sequence (the box on that slot), then [PTN] + that pattern's trig: the select box itself blinks until the change
   lands or is cancelled. Manual: §8 would also say [PTN] in Clyps acts on the bank shown.
+
+## 2026-11-21 (`release-1119`, CLYPS) — CL40: one cue mark (flash, then the box blinks), one set of arrows; the view opens on the playing bank (WIP, NOT flashed, NOT promoted)
+
+- **The user on KY18BCCLB3 (no drawing artifacts any more):** pattern picks get the fast confirmation flash; no arrow
+  blinking -- every cue = fast flash, then the slow blink as the box outline, then solid on landing; never two arrow
+  sets; open on the playing pattern's bank; bank B playing + view paged to A: whole-pattern loads from A did nothing
+  visible; intermittent: two [PTN] presses in B brought A's grid. Scope §1.40 has the design and causes.
+- **Code (ad9199a):** `cd_cbox` (the cue's frame, for the active track's cue and stock's pattern cue; XOR on the
+  highlight; not under the flash), `cd_cq`'s blinking arrows removed (the second arrow set), `cl_flcode` (slot flash)
+  used by `cl_ptnpick` (new symbol at the CL39c splice 0x40056b60), `[PTN]+[BANK]`+trig and ORIG PTN+PRT, `cl_bt`
+  reset per flash, `cl_vplay` (open + chord: the view to the playing bank, arrows follow), the lone [PTN] tap's
+  SELECT PATTERN keeps `cl_ptfwd`, and `ku_set` / `kl_set` set `cl_sbank` before `cl_pshow` (the arrows' record kept
+  the old bank -- found by the gate). No new splice, no cave bytes; Clyps DRAM unit 28,972 -> 29,180 B (V1.8C /
+  CLYPS), 29,636 -> 29,844 B (V1.8BC); arena pages 1,709 / 1,722 unchanged; V1.8BC CAVE 636 B left (unchanged).
+- **Added code / data lines vs CL39c (23f8a9d, comments and labels out):** cue marks +55 / -41 (net +14), pattern-pick
+  flashes +37 / -2 (+35), view to the playing bank -1 net, tap window +6, arrows' record 0 net (reordered), data +1;
+  total net about +55. DETOURS: one line changed (symbol), none added.
+- **Causes:** two arrow sets = `cd_cq` (CL34) drew blinking arrows on the cued slot beside the cursor's; open on A =
+  `cl_enter` took the arrows' (`cl_pload`) or the box's (`cl_boxhome`) bank; grid flip = the tap's release cleared
+  `cl_ptfwd`, so stock's latched SELECT PATTERN used the current bank between two presses that used the shown one;
+  "nothing happened" = [PTN] held + trig works (CLB3 emulator: A06 cued, boxed, landed), but a [PTN] tap then trig cued
+  the playing bank's pattern (same cause as the flip), and the two chord gestures act on the playing bank by design
+  (the card reload's box-home then jumped the view back to B; ORIG PTN+PRT restored B's pattern unseen).
+- **Gates (diag_clyps_lock.py, out/rc3clyps/gates4; repro on CLB3 V1.8C):** r3c two arrow sets in 9 draws FAIL; r3b grid
+  A / B(red) / A FAIL; r3e / r3f reopen on A with B playing FAIL (arrows / box); r3d [PTN] held + trig in A PASS.
+  **CLB4:** n4b (T + O) 5 PASS, n4f (arrows-record reopen) 3 PASS, n4c / b4t / s4t (T, then tK: flash 29 UI ticks, then
+  a 1 px frame, 112 px, 0 outside its border) PASS on V1.8C / V1.8BC / CLYPS, n4e ORIG PTN+PRT flash on its slot +
+  view PASS, the arrow-set count 0 draws with two on every finished run; first-image runs (pre/) g4a-g4q, n4a, n4d
+  all PASS so far (CL39 set incl. DJ, paging, card reload: the chord took the view to B). STILL RUNNING when this
+  was written: the final-image CL39 set (g4a-d, g4s, g4q), w4 (window vs CL38: compare with
+  `tools/cmp_clyps_windows.py out/rc3clyps/gates2/w_cl38.json out/rc3clyps/gates4/w4.json`), n4a, n4d, n4g, b4a/b4n,
+  s4a/s4n, n4u / r3u (tap then trig) -- `out/rc3clyps/gates4/lock_run.out`; diag_clyps_ui (`gates4/ui_run.sh`) not run.
+- **Images, CLB4 (KYOTI_ALLOW_WIP=1, private worktree out/rc3clyps/wt4 at ad9199a; NOT promoted, NOT flashed; scripts
+  out/rc3clyps/build_clb4*.sh):** KY18BCCLB4 `out/rc3clyps/wt4/out/KYOTI/OCTATRACK_OS1.40C_KYOTI_V1.8BC.syx` 8fb03d74…
+  (mainos fc14c6de…); KY18C CLB4 `.../KYOTI/OCTATRACK_OS1.40C_KYOTI_V1.8C.syx` 5f7bb01f… (mainos 64313507…); CLYPS CLB4
+  `.../CLYPS/OCTATRACK_OS1.40C_CLYPS.syx` d5f24828… (mainos 46c71deb…).
+- **Open (the user):** `[PTN]+[BANK]`+trig of the bank SHOWN needs the card job to target another bank (~20 PLAY_BANK
+  sites in clyps_reload.s) -- not built; ORIG PTN+PRT for a shown bank has no defined pattern; a track change still
+  moves the view to that track's arrows' / box's bank.
+- **Manual (docs/clyps/MANUAL.md, not edited):** §4 Open (opens on the playing bank); §4 marks (a cued slot = the box
+  outline blinking; arrows = your aim only, never blink); §4 Flashes (every load and pattern pick flashes its slot;
+  ORIG PTN+PRT flashes the active pattern's slot, not the header); §5.1 Cued (outline, not arrows); §5.5 (a different
+  pattern: toast at once, flash, outline until it lands); §8 ([PTN] in Clyps -- held or a tap's SELECT PATTERN -- acts
+  on the bank shown; the [PTN]+[BANK] chord acts on and shows the playing bank).
