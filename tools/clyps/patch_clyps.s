@@ -461,6 +461,9 @@ ce_fail:
 cl_close:
     tst.b   cl_open
     beq.w   cc_out
+    moveq   #0,%d0                      | CL42: the screen's arrows into their track's record -- while closed the
+    move.b  cl_lastt,%d0                | records are what landings hide (cl_ychk / cl_phide) and the open loads
+    jsr     cl_psave
     clr.b   cl_open
     clr.b   cl_pkw                      | CL36: no deferred return
     jsr     cl_showunder                | CL37: a SETUP hidden under ours back on screen
@@ -1866,14 +1869,20 @@ pv3_out:
     lea     20(%sp),%sp
     rts
 
-| cl_tuck -> d0 = 1: the active track's arrows are tucked under its select box -- the slot under them has landed
-| (cl_ysup) and the box is there: its sequence came from that slot, or (an original) the pattern's own slot, whose
-| highlight stands for the box (the user, 2026-11-13). Tucked arrows and
-| their solid yellow are not shown; when the box goes (an original, ORIG PTN+PRT, SAVED, a card reload, a pattern
-| change) or moves (a trig load elsewhere) they show again where they were (the user, 2026-11-13). Uses d0, d1, a0.
+| cl_tuck -> d0 = 1: the active track's arrows are hidden (cl_ysup) -- CL42 (the user, 2026-11-21): a mark landed on
+| their slot (the select box or the highlight, any mechanism, any bank: the slot number, cl_ychk / cl_phide); they
+| and their solid yellow stay hidden until the next arrow moves them (cl_pshow) -- no longer shown again when the box
+| goes or moves (CL34). Uses d0.
 cl_tuck:
-    tst.b   cl_ysup
-    beq.b   tk_no
+    moveq   #0,%d0
+    move.b  cl_ysup,%d0
+    rts
+| cl_atbox -> d0 = 1: the select box (an original: the highlight) is on the arrows' slot, in the bank shown -- hidden
+| arrows aim [YES] only then (CL42: [YES] loads what you see). Uses d0, d1, a0.
+cl_atbox:
+    move.b  cl_bank,%d0
+    cmp.b   cl_sbank,%d0
+    bne.b   tk_no
     jsr     cl_srccode                  | (an original / saved / card source: the pattern's own slot -- its
     andi.l  #0x0f0f,%d0                 | highlight stands for the box: the user, 2026-11-13)
     moveq   #0,%d1
@@ -2470,6 +2479,12 @@ ex2_trig:
 ex2_act:
     tst.b   cl_pmoved
     beq.b   ex2_none
+    tst.b   cl_ysup                     | CL42: hidden arrows only under the box / the highlight, in the bank shown
+    beq.b   ex2_vis
+    jsr     cl_atbox
+    tst.l   %d0
+    beq.w   ex2_none
+ex2_vis:
     moveq   #0,%d3                      | the active track's arrows (on screen)
     move.b  cl_sbank,%d3
     lsl.l   #8,%d3
@@ -3201,6 +3216,7 @@ pl_tp:
     subq.l  #1,%d0
     bne.b   pl_tp
     clr.b   cl_ysup
+    clr.b   cl_pmoved                   | (CL42: cl_close saves the screen's arrows -- none now)
     lea     cl_svalid,%a0               | ... and no saved sequence survives
     clr.l   (%a0)+
     clr.l   (%a0)+
@@ -4922,8 +4938,12 @@ cl_ychk:
     lea     -16(%sp),%sp
     movem.l %d2-%d4/%a2,(%sp)
     move.l  %d0,%d4                     | d4 = the mask
+    moveq   #-1,%d3                     | CL42: Clyps closed -- the records only (cl_close saved the screen's)
+    tst.b   cl_open
+    beq.b   yc_c
     jsr     cl_trk
     move.l  %d0,%d3                     | d3 = the active track
+yc_c:
     moveq   #0,%d2
 yc_l:
     btst    %d2,%d4
@@ -4944,11 +4964,11 @@ yc_s:
     bne.b   yc_m
     tst.b   cl_pmoved                   | the active track: the screen's arrows
     beq.b   yc_t
-    moveq   #0,%d1
-    move.b  cl_sbank,%d1
-    lsl.l   #8,%d1
-    move.b  cl_cur,%d1
-    cmp.l   %d1,%d0
+    tst.b   cl_ysup                     | CL42: hidden ones count as none -- they tuck under the new box
+    bne.b   yc_t
+    moveq   #15,%d1                     | CL42 (the user): visible ones hide when the slot under them lands --
+    and.l   %d0,%d1                     | the slot number, whatever the bank (they follow the view)
+    cmp.b   cl_cur,%d1
     bne.b   yc_n
     moveq   #1,%d0
     move.b  %d0,cl_ysup
@@ -4977,8 +4997,8 @@ yc_m:
     move.w  (%a2),%d1
     btst    #15,%d1
     beq.b   yc_n
-    andi.l  #0x0f0f,%d1
-    cmp.l   %d1,%d0
+    eor.l   %d0,%d1                     | CL42: the slot number only
+    andi.l  #15,%d1
     bne.b   yc_n
     move.w  (%a2),%d1
     ori.l   #0x4000,%d1
@@ -4989,6 +5009,48 @@ yc_n:
     bne.w   yc_l
     movem.l (%sp),%d2-%d4/%a2
     lea     16(%sp),%sp
+    rts
+
+| cl_phide (d0 = the playing pattern's slot; UI tail, Clyps open or not): CL42 (the user, 2026-11-21) a pattern landed
+| (a stock cue, [PTN] + trig, a card reload, DIRECT JUMP, MIDI / the arranger -- any way, any bank): its highlight is on
+| that slot, so every track's visible arrows on that slot number hide until the next arrow -- the screen's (the
+| active track, Clyps open) and the records. Uses d0-d1/a0.
+cl_phide:
+    lea     -8(%sp),%sp
+    movem.l %d2-%d3,(%sp)
+    move.l  %d0,%d2                     | d2 = the slot
+    moveq   #-1,%d3                     | d3 = the screen's track (closed: none)
+    tst.b   cl_open
+    beq.b   ph_r
+    jsr     cl_trk
+    move.l  %d0,%d3
+    tst.b   cl_pmoved
+    beq.b   ph_r
+    move.b  cl_cur,%d0
+    cmp.b   %d2,%d0
+    bne.b   ph_r
+    moveq   #1,%d0
+    move.b  %d0,cl_ysup
+ph_r:
+    lea     cl_pre,%a0
+    moveq   #0,%d1
+ph_l:
+    cmp.l   %d3,%d1
+    beq.b   ph_n
+    moveq   #0,%d0
+    move.w  (%a0),%d0
+    bpl.b   ph_n                        | (bit 15: shown)
+    eor.l   %d2,%d0
+    andi.l  #15,%d0
+    bne.b   ph_n
+    bset    #6,(%a0)                    | 0x4000: hidden
+ph_n:
+    addq.l  #2,%a0
+    addq.l  #1,%d1
+    cmpi.l  #16,%d1
+    bne.b   ph_l
+    movem.l (%sp),%d2-%d3
+    lea     8(%sp),%sp
     rts
 
 | cl_pre[16] (the user, 2026-11-06): per track, its pre-select arrows: 0x8000 = shown | bank << 8 | slot
@@ -6925,6 +6987,16 @@ ut_nlk:
 ut_nsp:
     clr.b   cl_self                     | stopped before it landed: ORIG PTN+PART's request goes
 ut_run:
+    moveq   #0,%d0                      | CL42: the pattern you are on changed (any way, Clyps open or not): the
+    move.b  PLAY_BANK,%d0               | arrows on its slot hide (cl_phide)
+    lsl.l   #8,%d0
+    move.b  ACT_PAT,%d0
+    cmp.w   cl_lasth,%d0
+    beq.b   ut_run2
+    move.w  %d0,cl_lasth
+    andi.l  #15,%d0
+    jsr     cl_phide
+ut_run2:
     tst.b   cl_open
     bne.b   ut_op
     clr.b   cl_pclose
@@ -9053,6 +9125,7 @@ cl_cls:     .space 16
 | the valid marks: inside the loaded image, so every boot's depack zeroes them (the buffers they
 | describe are not)
 cl_lastp:   .short 0xffff               | the pattern you were on at the last redraw (cl_uitail)
+cl_lasth:   .short 0                    | CL42: the pattern you were on at the last UI tail (cl_phide)
 cl_magic:   .long CL_MAGIC              | the DRAM part is in place (the boot loader put it there)
 cl_svalid:  .space 16                   | per track: a saved sequence is held
 cl_namesok: .byte 0                     | the names are cleared (at the first project load) and usable

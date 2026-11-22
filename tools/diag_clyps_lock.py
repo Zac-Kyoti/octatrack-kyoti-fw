@@ -897,6 +897,7 @@ def main(argv):
         if op == "H":                         # CL42: [PTN] alone held -- the header "PTN LOAD: CURR PTN+PRT" (drawn by
             h0 = list(hdr)                    # the UI tail, the sys task), back as before on its release
             key(0x2E, 1)
+            settle(100)                       # the tail runs in the sys task: let it
             h1 = list(hdr)
             key(0x2E, 0)
             settle(100)
