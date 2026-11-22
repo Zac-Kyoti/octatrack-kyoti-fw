@@ -1870,7 +1870,7 @@ pv3_out:
     rts
 
 | cl_tuck -> d0 = 1: the active track's arrows are hidden (cl_ysup) -- CL42 (the user, 2026-11-21): a mark landed on
-| their slot (the select box or the highlight, any mechanism, any bank: the slot number, cl_ychk / cl_phide); they
+| their slot in the bank viewed (the select box or the highlight, any mechanism; cl_ychk / cl_phide); they
 | and their solid yellow stay hidden until the next arrow moves them (cl_pshow) -- no longer shown again when the box
 | goes or moves (CL34). Uses d0.
 cl_tuck:
@@ -4939,11 +4939,14 @@ cl_ychk:
     movem.l %d2-%d4/%a2,(%sp)
     move.l  %d0,%d4                     | d4 = the mask
     moveq   #-1,%d3                     | CL42: Clyps closed -- the records only (cl_close saved the screen's)
+    move.b  PLAY_BANK,%d0               | ... and the bank viewed is the one it opens on
     tst.b   cl_open
     beq.b   yc_c
     jsr     cl_trk
     move.l  %d0,%d3                     | d3 = the active track
+    move.b  cl_bank,%d0
 yc_c:
+    move.b  %d0,cl_hvb                  | CL42 (the user): only a landing in the bank viewed hides arrows
     moveq   #0,%d2
 yc_l:
     btst    %d2,%d4
@@ -4966,8 +4969,12 @@ yc_s:
     beq.b   yc_t
     tst.b   cl_ysup                     | CL42: hidden ones count as none -- they tuck under the new box
     bne.b   yc_t
-    moveq   #15,%d1                     | CL42 (the user): visible ones hide when the slot under them lands --
-    and.l   %d0,%d1                     | the slot number, whatever the bank (they follow the view)
+    move.l  %d0,%d1                     | CL42 (the user): visible ones hide when the slot under them lands in
+    lsr.l   #8,%d1                      | the bank viewed (they follow the view: that is where they show)
+    cmp.b   cl_hvb,%d1
+    bne.b   yc_n
+    moveq   #15,%d1
+    and.l   %d0,%d1
     cmp.b   cl_cur,%d1
     bne.b   yc_n
     moveq   #1,%d0
@@ -4997,7 +5004,12 @@ yc_m:
     move.w  (%a2),%d1
     btst    #15,%d1
     beq.b   yc_n
-    eor.l   %d0,%d1                     | CL42: the slot number only
+    move.l  %d0,%d1                     | CL42: a landing in the bank viewed, on their slot number
+    lsr.l   #8,%d1
+    cmp.b   cl_hvb,%d1
+    bne.b   yc_n
+    move.w  (%a2),%d1
+    eor.l   %d0,%d1
     andi.l  #15,%d1
     bne.b   yc_n
     move.w  (%a2),%d1
@@ -5012,10 +5024,17 @@ yc_n:
     rts
 
 | cl_phide (d0 = the playing pattern's slot; UI tail, Clyps open or not): CL42 (the user, 2026-11-21) a pattern landed
-| (a stock cue, [PTN] + trig, a card reload, DIRECT JUMP, MIDI / the arranger -- any way, any bank): its highlight is on
+| (a stock cue, [PTN] + trig, a card reload, DIRECT JUMP, MIDI / the arranger -- any way): its highlight is on
 | that slot, so every track's visible arrows on that slot number hide until the next arrow -- the screen's (the
-| active track, Clyps open) and the records. Uses d0-d1/a0.
+| active track, Clyps open) and the records; only when it landed in the bank viewed (the user: a landing in another
+| bank hides nothing; Clyps closed: it opens on the playing bank). Uses d0-d1/a0.
 cl_phide:
+    tst.b   cl_open
+    beq.b   ph_go
+    move.b  cl_bank,%d1
+    cmp.b   PLAY_BANK,%d1
+    bne.b   ph_out
+ph_go:
     lea     -8(%sp),%sp
     movem.l %d2-%d3,(%sp)
     move.l  %d0,%d2                     | d2 = the slot
@@ -5051,6 +5070,7 @@ ph_n:
     bne.b   ph_l
     movem.l (%sp),%d2-%d3
     lea     8(%sp),%sp
+ph_out:
     rts
 
 | cl_pre[16] (the user, 2026-11-06): per track, its pre-select arrows: 0x8000 = shown | bank << 8 | slot
@@ -9126,6 +9146,7 @@ cl_cls:     .space 16
 | describe are not)
 cl_lastp:   .short 0xffff               | the pattern you were on at the last redraw (cl_uitail)
 cl_lasth:   .short 0                    | CL42: the pattern you were on at the last UI tail (cl_phide)
+cl_hvb:     .byte 0                     | CL42: cl_ychk's bank viewed (a landing elsewhere hides no arrows)
 cl_magic:   .long CL_MAGIC              | the DRAM part is in place (the boot loader put it there)
 cl_svalid:  .space 16                   | per track: a saved sequence is held
 cl_namesok: .byte 0                     | the names are cleared (at the first project load) and usable

@@ -520,6 +520,7 @@ def main(argv):
             qcheck(rd(syms["cl_bank"], 1) == vb0, f"{label}: the view stays on {chr(65 + vb0)} (CL42: never to a landing)")
         elif CL40:
             qcheck(rd(syms["cl_bank"], 1) == code >> 8, f"{label}: the view on the landed pattern's bank")
+        if CL40:
             while rd(syms["cl_flk"], 1) and g < cap:      # a quick landing (DIRECT JUMP): the flash ends first
                 settle(34)
                 g += 1
@@ -547,7 +548,11 @@ def main(argv):
         if op[0] == "j":                      # a stock cue: PEND_BANK / PEND_PAT (diag_reflock's way)
             u.mem_write(0x800065BF, bytes([bank]))
             u.mem_write(0x800065C0, bytes([int(op[1:])]))
-            settle(3000)
+            g = 0                             # CL42: until it lands (was a fixed 3 s)
+            while rd(ACT, 1) != int(op[1:]) and g < 400:
+                settle(34)
+                g += 1
+            settle(300)
             snaps.append([st["tick"], params(rd(ACT, 1))])
             print(f"#{i} {opx}: cued, act now {rd(ACT, 1)} at tick {st['tick']}", flush=True)
             continue
@@ -795,7 +800,8 @@ def main(argv):
         if op == "P":                         # ORIG PTN+PRT: [PTN]+[BANK]+[YES]
             psad = BLOB + rd(0x800065BD, 1) * BANKSTRIDE + rd(ACT, 1) * PATSTRIDE    # CL42: an in-RAM edit of the
             pre_p0 = rd(psad, 1)                                                     # playing pattern's T1: the
-            if CL42:                                                                 # originals undo it
+            if CL42:                                                                 # originals (the snapshot) undo it
+                pre_p0 = rd(syms["cl_bss"] + rd(0x800065BD, 1) * syms["BANKSZ"] + rd(ACT, 1) * PATSTRIDE, 1)
                 u.mem_write(psad, bytes([pre_p0 ^ 0x81]))
             if CL41:                          # [BANK] first (the other order than r's): the chord's grid and the view
                 vb_, pb_ = rd(syms["cl_bank"], 1), rd(0x800065BD, 1)    # before the [YES], the view moves at it
@@ -830,6 +836,20 @@ def main(argv):
                    f"#{i} {op}: track {t_ + 1}; the view stays on {chr(65 + vb_)} (now {chr(65 + rd(syms['cl_bank'], 1))}); "
                    f"{view()}")
             continue
+        if op == "Ru":                        # CL42: [PTN] + the active TRACK on an UNEDITED track: the card's copy is
+            t_ = rd(0x80000000, 1)            # what plays -- the job runs, nothing lands, no toast (cl_cueload's same
+            g0, nl0, nt0 = rd(syms["rq_gen"], 1), len(lands), len(toasts)   # test; cl_rqarm1 "nothing to land")
+            key(0x2E, 1); key(0x10 + t_, 1); key(0x10 + t_, 0); key(0x2E, 0)
+            g = 0
+            while (rd(syms["rq_busy"], 1) or rd(syms["rq_jgen"], 1) != rd(syms["rq_gen"], 1) or g < 20) and g < 120:
+                settle(34)
+                g += 1
+            settle(600)
+            qcheck(rd(syms["rq_gen"], 1) != g0 and rd(syms["rq_busy"], 1) == 0 and len(lands) == nl0
+                   and len(toasts) == nt0,
+                   f"#{i} Ru: unedited T{t_ + 1}: request {g0} -> {rd(syms['rq_gen'], 1)}, job done; "
+                   f"{len(lands) - nl0} landing(s), {len(toasts) - nt0} toast(s) (by design: none)")
+            continue
         if op[0] == "R" and (len(op) == 1 or op[1] in "Bh0123456789"):   # CL41 / CL42: a card TRACK reload
             # R[B][h][N]: [PTN] (B: [BANK], the FULL form) + TRACK N (1-8; default the active one); h = hold the
             # modifier 600 ms first (UI ticks run: its hold events, as a hand does). CL42 checks the real effect: an
@@ -851,8 +871,8 @@ def main(argv):
                 u.mem_write(pad + 0x2A, bytes([pre_m ^ 0x55]))
             mk_ = 0x2F if full_ else 0x2E
             key(mk_, 1)
-            if hold_:
-                settle(600)
+            if hold_:                         # held 600 ms (SET_KEY takes press / release only; stock's [PTN]
+                settle(600)                   # hold event only sets the tap flag 0x460d1ab2, 0x4005a0cc)
             key(0x10 + t_, 1); key(0x10 + t_, 0); key(mk_, 0)
             g = 0
             while (len(lands) == nl0 or rd(syms["rq_busy"], 1)) and g < 240:
@@ -923,6 +943,11 @@ def main(argv):
             settle(600)
             qcheck(len(reqs) == nr_, f"#{i} Y0: [YES] with no arrows shown and none under the box: {len(reqs) - nr_} "
                    f"request(s); {view()}")
+            continue
+        if op == "N":                         # CL42: [NO] -- close Clyps (the stock screen)
+            key(0x32, 1); key(0x32, 0)
+            settle(200)
+            print(f"#{i} N: Clyps open {rd(syms['cl_open'], 1)}", flush=True)
             continue
         if op == "Y":                         # a bare [YES]: whatever the screen shows
             nl0 = len(reqs)
