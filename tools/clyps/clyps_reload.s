@@ -637,8 +637,10 @@ rj_lv:
 rj_exit:
     tst.l   %d0                         | CL42: a failed read (never saved, a bad file) reaches no cl_rldone (doneFn's
     bpl.b   rj_ex2                      | success path): not busy any more, or every later chord waits on it for
-    clr.b   rq_busy                     | good (rr_nq) -- and no toast of ours (stock's says why)
-    clr.b   rq_msg
+    clr.b   rq_busy                     | good (rr_nq) -- and no toast of ours (stock's says why); CL43: the
+    clr.b   rq_msg                      | target is still unread, so the next chord for it reads it again
+    moveq   #1,%d1
+    move.b  %d1,rq_need
 rj_ex2:
     move.w  rq_cksum,%d1
     move.w  %d1,RL_CKSUM
@@ -1035,7 +1037,7 @@ q1_run:
     lea     cl_cue,%a0
     move.b  (%a0,%d0.l),%d0
     cmpi.b  #SRC_CARD,%d0
-    bne.b   q1_out                      | nothing to land (it already plays)
+    bne.b   q1_same                     | nothing to land (it already plays)
     jsr     cl_live
     adda.l  #TRAILER,%a0
     tst.b   T_SMODE(%a0)
@@ -1055,6 +1057,10 @@ q1_rate:
     move.b  %d0,cl_togr
     move.b  #SRC_CARD,%d0
     move.b  %d0,cl_togs
+    bra.b   q1_out
+q1_same:
+    moveq   #1,%d0                      | CL43 (the user): already as on the card -- its toast all the same, as
+    move.b  %d0,cl_ctoast               | stopped (no "unchanged" wording)
 q1_out:
     move.l  (%sp)+,%d2
     rts

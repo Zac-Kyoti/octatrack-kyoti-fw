@@ -93,6 +93,7 @@ def main(argv):
     CL40 = "cl_flcode" in syms
     CL41 = "rq_jbk" in syms
     CL42 = "cl_s_currp" in syms      # the view never follows a landing (the user, 2026-11-21); the header
+    CL43 = "cl_trlui" in syms        # the user's CL43 answers (the silent-path audit)
     out = pathlib.Path(a.out)
     if not out.is_absolute():
         out = ROOT / out
@@ -850,10 +851,11 @@ def main(argv):
                 settle(34)
                 g += 1
             settle(600)
+            wt_ = 1 if CL43 else 0            # CL43 (the user): the same toast as when something lands
             qcheck(rd(syms["rq_gen"], 1) != g0 and rd(syms["rq_busy"], 1) == 0 and len(lands) == nl0
-                   and len(toasts) == nt0,
+                   and len(toasts) == nt0 + wt_,
                    f"#{i} Ru: unedited T{t_ + 1}: request {g0} -> {rd(syms['rq_gen'], 1)}, job done; "
-                   f"{len(lands) - nl0} landing(s), {len(toasts) - nt0} toast(s) (by design: none)")
+                   f"{len(lands) - nl0} landing(s), {len(toasts) - nt0} toast(s) (want {wt_})")
             continue
         if op[0] == "R" and (len(op) == 1 or op[1] in "Bh0123456789"):   # CL41 / CL42: a card TRACK reload
             # R[B][h][N]: [PTN] (B: [BANK], the FULL form) + TRACK N (1-8; default the active one); h = hold the
@@ -946,13 +948,74 @@ def main(argv):
             nr_ = len(reqs)
             key(0x31, 1); key(0x31, 0)
             settle(600)
-            qcheck(len(reqs) == nr_, f"#{i} Y0: [YES] with no arrows shown and none under the box: {len(reqs) - nr_} "
-                   f"request(s); {view()}")
+            qcheck(len(reqs) == nr_ and (not CL43 or rd(syms["cl_flk"], 1) == 0),
+                   f"#{i} Y0: [YES] with no arrows shown and none under the box: {len(reqs) - nr_} "
+                   f"request(s), flash {rd(syms['cl_flk'], 1)}; {view()}")
             continue
         if op == "N":                         # CL42: [NO] -- close Clyps (the stock screen)
             key(0x32, 1); key(0x32, 0)
             settle(200)
             print(f"#{i} N: Clyps open {rd(syms['cl_open'], 1)}", flush=True)
+            continue
+        if op == "Yf":                        # CL43 (D1 / D3): [YES] with the arrows hidden under the box / highlight --
+            fc_ = main_call(syms["cl_srccode"]) & 0x0F0F   # that slot again: the execute flash even when nothing differs
+            key(0x31, 1); key(0x31, 0)
+            fl_, fc2 = rd(syms["cl_flk"], 1), rd(syms["cl_fcode"], 2)
+            settle(600)
+            qcheck(fl_ > 0 and fc2 == fc_, f"#{i} Yf: [YES] on the hidden arrows' slot {fc_:#06x}: flash {fl_} on {fc2:#06x}")
+            continue
+        if op in ("PT", "RT"):                # CL43 (H3, H1 / G13): only the trailer differs (CHAIN AFTER +6), running --
+            sl_ = BLOB + rd(0x800065BD, 1) * BANKSTRIDE + rd(ACT, 1) * PATSTRIDE + 0x8E50   # ORIG PTN+PRT (PT) / the card
+            src_ = (syms["cl_bss"] + rd(0x800065BD, 1) * syms["BANKSZ"] + rd(ACT, 1) * PATSTRIDE + 0x8E50  # reload of
+                    if op == "PT" else None)                                                 # the pattern you are on
+            pre_ = bytes(u.mem_read(sl_, 12))
+            u.mem_write(sl_ + 6, bytes([3 if pre_[6] != 3 else 4]))
+            nt0, nl0, k_ = len(toasts), len(lands), rd(ACT, 1)
+            if op == "PT":
+                key(0x2E, 1); key(0x2F, 1); key(0x31, 1); key(0x31, 0); key(0x2F, 0); key(0x2E, 0)
+            else:
+                key(0x2E, 1); key(0x2F, 1); key(k_, 1); key(k_, 0); key(0x2F, 0); key(0x2E, 0)
+            fl_, fc2 = rd(syms["cl_flk"], 1), rd(syms["cl_fcode"], 2)
+            g = 0
+            while (rd(syms["rq_busy"], 1) or g < 30) and g < 200:
+                settle(34)
+                g += 1
+            settle(600)
+            want_ = bytes(u.mem_read(src_, 12)) if src_ else bytes(u.mem_read(syms["RQ_SLAB"] + 0x8E50, 12))
+            now_ = bytes(u.mem_read(sl_, 12))
+            qcheck(now_ == want_ and now_[6] == pre_[6], f"#{i} {op}: tracks equal, CHAIN AFTER changed: the trailer "
+                   f"restored ({now_.hex()} want {want_.hex()}, before the poke {pre_.hex()}); {len(lands) - nl0} landing(s)")
+            qcheck(fl_ > 0 and fc2 == ((rd(0x800065BD, 1) << 8) | k_),
+                   f"#{i} {op}: the execute flash on the pattern's slot ({fl_}, {fc2:#06x})")
+            if op == "RT":
+                l1_ = bytes(u.mem_read(syms['rq_line1'], 12)).split(b'\0')[0].decode()
+                qcheck(len(toasts) > nt0 and l1_ == f"PATTERN {chr(65 + rd(0x800065BD, 1))}{k_ + 1:02d}",
+                       f"#{i} RT: its toast as when something differs ({len(toasts) - nt0}, {l1_!r})")
+            continue
+        if op[:2] == "I5":                    # CL43 (I5): the chord opens Clyps, [BANK] let go, [PTN] held + trig K: a
+            k_ = int(op[2:])                  # plain stock pattern pick (a cue), never a Clyps slot load
+            key(0x32, 1); key(0x32, 0); settle(200)
+            nr_ = len(reqs)
+            key(0x2E, 1); key(0x2F, 1); key(0x2F, 0)
+            settle(100)
+            op_ = rd(syms["cl_open"], 1)
+            key(k_, 1); key(k_, 0); key(0x2E, 0)
+            settle(200)
+            pend = (rd(0x800065BF, 1), rd(0x800065C0, 1))
+            qcheck(op_ == 1 and len(reqs) == nr_ and pend == (rd(syms["cl_bank"], 1), k_) and rd(syms["cl_open"], 1) == 1,
+                   f"#{i} {op}: Clyps opened by the chord ({op_}), [BANK] up, [PTN] + trig {k_ + 1}: stock's cue "
+                   f"{chr(65 + pend[0])}{pend[1] + 1:02d}, {len(reqs) - nr_} Clyps load(s), open {rd(syms['cl_open'], 1)}")
+            continue
+        if op == "B2":                        # CL43 (B2): arrows while the chord is held do nothing
+            c0_, b0_, m0_ = rd(syms["cl_cur"], 1), rd(syms["cl_bank"], 1), rd(syms["cl_pmoved"], 1)
+            key(0x2E, 1); key(0x2F, 1)
+            for k2 in (0x20, 0x33, 0x21, 0x34, 0x20):
+                key(k2, 1); key(k2, 0)
+            key(0x2F, 0); key(0x2E, 0)
+            settle(200)
+            qcheck((rd(syms["cl_cur"], 1), rd(syms["cl_bank"], 1), rd(syms["cl_pmoved"], 1)) == (c0_, b0_, m0_),
+                   f"#{i} B2: arrows with the chord held: cur {c0_ + 1} -> {rd(syms['cl_cur'], 1) + 1}, view "
+                   f"{chr(65 + b0_)} -> {chr(65 + rd(syms['cl_bank'], 1))}, shown {m0_} -> {rd(syms['cl_pmoved'], 1)}")
             continue
         if op == "Y":                         # a bare [YES]: whatever the screen shows
             nl0 = len(reqs)

@@ -542,6 +542,9 @@ cl_k_ud:
     FWDCHK
     tst.l   8(%sp)
     beq.b   ku_out
+    jsr     cl_hstate                   | CL43 (the user, B2): the [PTN]+[BANK] chord held -- arrows do nothing
+    btst    #1,%d0
+    bne.b   ku_out
     clr.b   cl_flash
     tst.l   BANK_HELD
     beq.b   ku_sel
@@ -591,6 +594,9 @@ cl_k_lr:
     move.l  8(%sp),%d0
     cmpi.l  #1,%d0
     bne.b   kl_out
+    jsr     cl_hstate                   | CL43 (B2): as cl_k_ud
+    btst    #1,%d0
+    bne.b   kl_out
     clr.b   cl_flash
     tst.l   BANK_HELD
     beq.b   kl_sel
@@ -638,7 +644,7 @@ cl_k_trig:
     tst.l   BANK_HELD                   | [BANK] held alone (from the chord that opened Clyps):
     beq.b   kt_go                       | nothing; with [PTN] too: the pattern reload
     tst.l   PTN_HELD
-    beq.b   kt_out
+    beq.w   kt_out
     moveq   #0,%d0                      | CL41 (the user, 2026-11-21): pattern N of the bank SHOWN, from the card
     move.b  cl_bank,%d0                 | (was the playing bank's) -- not one stock refuses ("BANK UNAVAILABLE",
     move.l  #BANKSTRIDE,%d1             | 0x4007b30c, the status cl_ptnbank reads)
@@ -663,6 +669,17 @@ cl_k_trig:
     clr.b   cl_chordout
     bra.w   cl_close
 kt_go:
+    tst.l   PTN_HELD                    | CL43 (the user, I5): [PTN] alone held + trig is always stock's pattern
+    beq.b   kt_slot                     | pick (e.g. the chord opened Clyps, [BANK] let go first): its [PTN] +
+    moveq   #1,%d0                      | trig handler, of the bank shown (cl_ptfwd: CL39c's splices)
+    move.b  %d0,cl_ptfwd
+    move.l  8(%sp),-(%sp)
+    move.l  8(%sp),-(%sp)
+    jsr     0x40056b2c
+    addq.l  #8,%sp
+    clr.b   cl_ptfwd
+    rts
+kt_slot:
     move.l  4(%sp),%d0                  | an execution: the active track takes the trig's slot, every other
     andi.l  #15,%d0                     | member its own (cl_exec; the user, 2026-11-06)
     move.l  %d0,-(%sp)
@@ -2483,7 +2500,7 @@ ex2_act:
     beq.b   ex2_vis
     jsr     cl_atbox
     tst.l   %d0
-    beq.w   ex2_none
+    beq.w   ex2_n                       | CL43 (the user, D2): else nothing -- not the box's slot either
 ex2_vis:
     moveq   #0,%d3                      | the active track's arrows (on screen)
     move.b  cl_sbank,%d3
@@ -4819,8 +4836,9 @@ ta_mn:
     bne.b   ta_m
     move.w  %d1,cl_tog
     bne.b   ta_out
-    clr.b   cl_togr                     | nothing differs (no rate, no link change): only the Part's rest
-    clr.b   cl_togp
+    clr.b   cl_togr                     | nothing differs (no rate, no link change): only the Part's rest --
+    jsr     cl_togpre                   | CL43 (H3): and the trailer (CHAIN AFTER +6, +8..+0xb; the rate and the
+    jsr     cl_trlui                    | link already equal), into the engine's slab now and the UI's mirror
 ta_rest:
     tst.b   cl_pwhole                   | the rest of the Part when no FULL landing took it: now (data)
     beq.b   ta_t
@@ -4840,12 +4858,10 @@ ta_rest:
     moveq   #1,%d0
     move.b  %d0,cl_wpart
 ta_t:
-    tst.l   RUNNING
-    bne.b   ta_out
-    cmpi.l  #SRC_CARD,%d3
-    bne.b   ta_out
+    cmpi.l  #SRC_CARD,%d3               | CL43 (the user, G13): the card's toast now -- stopped (it landed) or
+    bne.b   ta_out                      | running with nothing to land, as when something differs
     moveq   #1,%d0
-    move.b  %d0,cl_ctoast               | stopped: it landed now
+    move.b  %d0,cl_ctoast
 ta_out:
     movem.l (%sp),%d2-%d3/%a2
     lea     12(%sp),%sp
@@ -6001,6 +6017,37 @@ tp2_l:
     andi.l  #3,%d0
     move.b  %d0,0x80000003              | the playing pattern's Part (mirror, as stock's pattern change)
 tp2_out:
+    rts
+| cl_trlui (CL43): the playing pattern's trailer -> its SRAM mirror (the UI bank only), the bank changed, a
+| redraw -- the UI side of cl_togpre when no track lands to carry it (cl_postmask). Uses d0-d1/a0-a1.
+cl_trlui:
+    move.b  PLAY_BANK,%d0
+    cmp.b   UI_BANK,%d0
+    bne.b   tu_d
+    bsr.w   cl_live
+    adda.l  #TRAILER,%a0
+    move.l  %a0,%a1
+    moveq   #0,%d0
+    move.b  ACT_PAT,%d0
+    move.l  #PATSTRIDE,%d1
+    muls.l  %d1,%d0
+    addi.l  #SRAM_PAT+TRAILER,%d0
+    pea     PATSTRIDE-TRAILER
+    move.l  %a1,-(%sp)
+    move.l  %d0,-(%sp)
+    jsr     MEMCPY
+    lea     12(%sp),%sp
+tu_d:
+    moveq   #0,%d0
+    move.b  PLAY_BANK,%d0
+    move.l  #BANKSTRIDE,%d1
+    muls.l  %d1,%d0
+    movea.l #BLOB+BDIRTY,%a0
+    adda.l  %d0,%a0
+    moveq   #1,%d0
+    move.l  %d0,(%a0)
+    move.l  %d0,DIRTY2
+    move.l  %d0,RDRAW
     rts
 
 | cl_mrate (a0 = a slab) -> d0 = the master's ticks per step, d1 = the master length (0 = INF), d2 = its
