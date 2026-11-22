@@ -635,6 +635,11 @@ rj_lv:
     bsr.w   rq_ncopy                    | ... a pattern you are not on: they land with it now
     moveq   #1,%d0
 rj_exit:
+    tst.l   %d0                         | CL42: a failed read (never saved, a bad file) reaches no cl_rldone (doneFn's
+    bpl.b   rj_ex2                      | success path): not busy any more, or every later chord waits on it for
+    clr.b   rq_busy                     | good (rr_nq) -- and no toast of ours (stock's says why)
+    clr.b   rq_msg
+rj_ex2:
     move.w  rq_cksum,%d1
     move.w  %d1,RL_CKSUM
     movem.l (%sp),%d2-%d7/%a2-%a5

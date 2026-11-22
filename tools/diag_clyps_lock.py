@@ -92,6 +92,7 @@ def main(argv):
     syms = {k: int(v, 16) for k, v in (l.split() for l in pathlib.Path(sp).read_text().splitlines())}
     CL40 = "cl_flcode" in syms
     CL41 = "rq_jbk" in syms
+    CL42 = "cl_s_currp" in syms      # the view never follows a landing (the user, 2026-11-21); the header
     out = pathlib.Path(a.out)
     if not out.is_absolute():
         out = ROOT / out
@@ -227,6 +228,26 @@ def main(argv):
     u.hook_add(er.eb.UC_HOOK_CODE, on_wrapin, begin=syms["cl_wrap"], end=syms["cl_wrap"])
     u.hook_add(er.eb.UC_HOOK_CODE, on_landone, begin=syms["cl_landone"], end=syms["cl_landone"])
     u.hook_add(er.eb.UC_HOOK_CODE, on_req, begin=syms["cl_cueload"], end=syms["cl_cueload"])
+    hdr = []             # CL42: the header's texts as drawn (cl_text at HDR_Y 57), the latest draw's
+    if "cl_text" in syms:
+        def on_text(uc, ad, sz, ud):
+            s_ = uc.reg_read(er.eb.UC_M68K_REG_A7)
+            if rd(s_ + 8, 4) == 57:
+                hdr.append(bytes(uc.mem_read(rd(s_ + 12, 4), 24)).split(b"\0")[0].decode("latin-1"))
+        u.hook_add(er.eb.UC_HOOK_CODE, on_text, begin=syms["cl_text"], end=syms["cl_text"])
+        u.hook_add(er.eb.UC_HOOK_CODE, lambda uc, ad, sz, ud: hdr.clear(), begin=syms["cl_draw"], end=syms["cl_draw"])
+    zfail = dict(n=0, hit=0)   # CL42 op Z: the next card job's open fails as a never-saved bank's does (-12): a fault
+    if "rj_opened" in syms:    # injected at its result test (tst.l %d0, 10 B before rj_opened), the data untouched
+        def on_open(uc, ad, sz, ud):
+            if zfail["n"]:
+                zfail["n"] -= 1
+                zfail["hit"] += 1
+                uc.reg_write(er.eb.UC_M68K_REG_D0, 0xFFFFFFF4)
+        u.hook_add(er.eb.UC_HOOK_CODE, on_open, begin=syms["rj_opened"] - 10, end=syms["rj_opened"] - 10)
+    toasts = []          # CL42: every card-reload toast (cl_toast2), its tick
+    if "cl_toast2" in syms:
+        u.hook_add(er.eb.UC_HOOK_CODE, lambda uc, ad, sz, ud: toasts.append(st["tick"]),
+                   begin=syms["cl_toast2"], end=syms["cl_toast2"])
     applies = []         # CL25b: every engine-facing apply, its tick (what changes the SOUND, and when)
     for name, ad in (("TRK_APPLY", 0x40001F18), ("PART_APPLY", 0x40009094), ("LIGHT_APPLY", 0x40009E00),
                      ("PICKUP_SET", 0x40097290), ("cl_fullone", syms.get("cl_fullone")), ("cl_slice", syms.get("cl_slice"))):
@@ -486,7 +507,7 @@ def main(argv):
         return seq
 
     def qland(code, label, cap=4000):       # wait for the landing, then it must be the solid highlight
-        g = 0
+        g, vb0 = 0, rd(syms["cl_bank"], 1)
         while rd(ACT, 1) != (code & 15) and g < cap:
             rt.run(ms=17)
             main_call(0x40056C28)
@@ -495,7 +516,9 @@ def main(argv):
         qcheck(rd(ACT, 1) == (code & 15) and rd(0x800065BD, 1) == code >> 8,
                f"{label}: landed on {chr(65 + (code >> 8))}{(code & 15) + 1:02d} after {g} UI ticks")
         settle(200)
-        if CL40:
+        if CL42:
+            qcheck(rd(syms["cl_bank"], 1) == vb0, f"{label}: the view stays on {chr(65 + vb0)} (CL42: never to a landing)")
+        elif CL40:
             qcheck(rd(syms["cl_bank"], 1) == code >> 8, f"{label}: the view on the landed pattern's bank")
             while rd(syms["cl_flk"], 1) and g < cap:      # a quick landing (DIRECT JUMP): the flash ends first
                 settle(34)
@@ -770,6 +793,10 @@ def main(argv):
             print(f"#{i} d: cur {rd(syms['cl_cur'], 1) + 1} shown {rd(syms['cl_pmoved'], 1)}", flush=True)
             continue
         if op == "P":                         # ORIG PTN+PRT: [PTN]+[BANK]+[YES]
+            psad = BLOB + rd(0x800065BD, 1) * BANKSTRIDE + rd(ACT, 1) * PATSTRIDE    # CL42: an in-RAM edit of the
+            pre_p0 = rd(psad, 1)                                                     # playing pattern's T1: the
+            if CL42:                                                                 # originals undo it
+                u.mem_write(psad, bytes([pre_p0 ^ 0x81]))
             if CL41:                          # [BANK] first (the other order than r's): the chord's grid and the view
                 vb_, pb_ = rd(syms["cl_bank"], 1), rd(0x800065BD, 1)    # before the [YES], the view moves at it
                 key(0x2F, 1); key(0x2E, 1)
@@ -782,10 +809,15 @@ def main(argv):
                 key(0x2E, 1); key(0x2F, 1); key(0x31, 1); key(0x31, 0); key(0x2F, 0); key(0x2E, 0)
             if CL40:
                 mine = (rd(0x800065BD, 1) << 8) | rd(ACT, 1)
+                vw_ = (vb_ if CL41 else mine >> 8) if CL42 else mine >> 8
                 qcheck(rd(syms["cl_flk"], 1) > 0 and rd(syms["cl_fcode"], 2) == mine and rd(syms["cl_ftgt"], 1) == 0
-                       and rd(syms["cl_bank"], 1) == mine >> 8,
-                       f"#{i} P: ORIG PTN+PRT's confirmation flash on its slot {mine:#06x}, the view on its bank")
+                       and rd(syms["cl_bank"], 1) == vw_,
+                       f"#{i} P: ORIG PTN+PRT's confirmation flash on its slot {mine:#06x} (drawn only with its bank shown), "
+                       f"the view on {chr(65 + vw_)} ({'CL42: it stays' if CL42 else 'its bank'})")
             settle(3000)
+            if CL42:
+                qcheck(rd(psad, 1) == pre_p0, f"#{i} P: the playing pattern's originals restored (T1's edited byte "
+                       f"{rd(psad, 1):#04x}, as loaded {pre_p0:#04x})")
             print(f"#{i} P: cur {rd(syms['cl_cur'], 1) + 1} shown {rd(syms['cl_pmoved'], 1)} "
                   f"sbank {rd(syms['cl_sbank'], 1)}", flush=True)
             continue
@@ -798,19 +830,98 @@ def main(argv):
                    f"#{i} {op}: track {t_ + 1}; the view stays on {chr(65 + vb_)} (now {chr(65 + rd(syms['cl_bank'], 1))}); "
                    f"{view()}")
             continue
-        if op == "R":                         # CL41: [PTN] + the active TRACK: its sequence from the card -- the view stays
-            vb_, g0, nl0 = rd(syms["cl_bank"], 1), rd(syms["rq_gen"], 1), len(lands)
-            t_ = rd(0x80000000, 1)
-            key(0x2E, 1); key(0x10 + t_, 1); key(0x10 + t_, 0); key(0x2E, 0)
+        if op[0] == "R" and (len(op) == 1 or op[1] in "Bh0123456789"):   # CL41 / CL42: a card TRACK reload
+            # R[B][h][N]: [PTN] (B: [BANK], the FULL form) + TRACK N (1-8; default the active one); h = hold the
+            # modifier 600 ms first (UI ticks run: its hold events, as a hand does). CL42 checks the real effect: an
+            # in-RAM edit of the track's record (and, FULL on T1, its machine slice) undone by the card, the toast
+            # (cl_toast2 called, line 1 TRK SEQ / TRK FULL), a SRC_CARD landing on that track, the view staying.
+            rest = op[1:]
+            full_ = rest.startswith("B")
+            rest = rest[1:] if full_ else rest
+            hold_ = rest.startswith("h")
+            rest = rest[1:] if hold_ else rest
+            t_ = int(rest) - 1 if rest else rd(0x80000000, 1)
+            vb_, g0, nl0, nr0, nt0 = rd(syms["cl_bank"], 1), rd(syms["rq_gen"], 1), len(lands), len(reqs), len(toasts)
+            pb_, pp_ = rd(0x800065BD, 1), rd(ACT, 1)
+            sad = BLOB + pb_ * BANKSTRIDE + pp_ * PATSTRIDE + t_ * TRAC_A
+            pad = BLOB + pb_ * BANKSTRIDE + 0x8ED80 + (rd(BLOB + pb_ * BANKSTRIDE + pp_ * PATSTRIDE + 0x8E57, 1) & 3) * 0x18B2
+            pre_r, pre_m = rd(sad, 1), rd(pad + 0x2A, 1)
+            u.mem_write(sad, bytes([pre_r ^ 0x81]))
+            if full_ and t_ == 0:
+                u.mem_write(pad + 0x2A, bytes([pre_m ^ 0x55]))
+            mk_ = 0x2F if full_ else 0x2E
+            key(mk_, 1)
+            if hold_:
+                settle(600)
+            key(0x10 + t_, 1); key(0x10 + t_, 0); key(mk_, 0)
             g = 0
-            while (len(lands) == nl0 or rd(syms["rq_busy"], 1)) and g < 600:
+            while (len(lands) == nl0 or rd(syms["rq_busy"], 1)) and g < 240:
                 settle(34)
                 g += 1
             settle(300)
-            qcheck(rd(syms["rq_gen"], 1) != g0 and len(lands) > nl0 and rd(syms["cl_open"], 1) == 1
-                   and rd(syms["cl_bank"], 1) == vb_ and rd(syms["cl_boxreq"], 1) == 0,
-                   f"#{i} R: T{t_ + 1}'s card SEQ reload landed ({len(lands) - nl0} landing(s), box home asked and done); "
-                   f"the view stays on {chr(65 + vb_)} (now {chr(65 + rd(syms['cl_bank'], 1))}); {view()}")
+            print(f"      #{i} {opx}: waited {g} x 34 ms", flush=True)
+            line1 = bytes(u.mem_read(syms['rq_line1'], 12)).split(b'\0')[0].decode()
+            cards = [x for x in reqs[nr0:] if x[1] == t_ and (x[2] >> 8) & 0xFF == 0xFC]
+            qcheck(rd(syms["rq_gen"], 1) != g0 and cards and len(lands) > nl0 and rd(syms["rq_busy"], 1) == 0,
+                   f"#{i} {opx}: T{t_ + 1}'s card {'FULL' if full_ else 'SEQ'} reload: a request (generation {g0} -> "
+                   f"{rd(syms['rq_gen'], 1)}), {len(cards)} SRC_CARD load(s) on T{t_ + 1}, {len(lands) - nl0} landing(s), "
+                   f"the job done")
+            qcheck(len(toasts) > nt0 and line1 == ("TRK FULL" if full_ else "TRK SEQ"),
+                   f"#{i} {opx}: its toast ({len(toasts) - nt0} shown, line 1 {line1!r})")
+            want_r = rd(syms["RQ_SLAB"] + t_ * TRAC_A, 1) if a.bankb else pre_r   # --bankb: B is A's copy in RAM,
+            qcheck(rd(sad, 1) == want_r and rd(sad, 1) != pre_r ^ 0x81       # the card's B differs: its staged copy
+                   and (not (full_ and t_ == 0) or a.bankb or rd(pad + 0x2A, 1) == pre_m),
+                   f"#{i} {opx}: the in-RAM edit undone by the card's copy (record byte {rd(sad, 1):#04x} want {want_r:#04x}"
+                   + (f", machine byte {rd(pad + 0x2A, 1):#04x} want {pre_m:#04x}" if full_ and t_ == 0 else "") + ")")
+            qcheck(rd(syms["cl_open"], 1) == 1 and rd(syms["cl_bank"], 1) == vb_ and rd(syms["cl_boxreq"], 1) == 0,
+                   f"#{i} {opx}: the view stays on {chr(65 + vb_)} (now {chr(65 + rd(syms['cl_bank'], 1))}); {view()}")
+            continue
+        if op in ("a+", "a-") or (op[0] == "a" and op[1:-1].isdigit() and op[-1] in "+-"):
+            # CL42 (the user's arrow rule): a+ / a- = the active track's arrows shown / hidden -- the state
+            # (cl_pmoved and not hidden) AND the window as drawn now (cd_arrows calls in one cl_draw); aN+ / aN- =
+            # track N's record (shown = 0x8000 without 0x4000). The trig LED under shown arrows is yellow (except the
+            # pattern you are on, CL34 option b).
+            want_ = op[-1] == "+"
+            if len(op) == 2:
+                main_call(syms["cl_draw"])
+                tk_ = main_call(syms["cl_tuck"]) & 0xFF
+                sh_ = bool(rd(syms["cl_pmoved"], 1)) and not tk_ and rd(syms["cl_sbank"], 1) == rd(syms["cl_bank"], 1)
+                qcheck(sh_ == want_ and (arw["n"] == 1) == want_,
+                       f"#{i} {op}: the arrows {'shown' if want_ else 'hidden'} (state {sh_}, drawn {arw['n']}); {view()}")
+            else:
+                t_ = int(op[1:-1]) - 1
+                rec_ = rd(syms["cl_pre"] + 2 * t_, 2)
+                qcheck(((rec_ & 0xC000) == 0x8000) == want_,
+                       f"#{i} {op}: T{t_ + 1}'s arrows {'shown' if want_ else 'hidden'} in its record ({rec_:#06x})")
+            continue
+        if op == "H":                         # CL42: [PTN] alone held -- the header "PTN LOAD: CURR PTN+PRT" (drawn by
+            h0 = list(hdr)                    # the UI tail, the sys task), back as before on its release
+            key(0x2E, 1)
+            h1 = list(hdr)
+            key(0x2E, 0)
+            settle(100)
+            h2 = list(hdr)
+            qcheck(h1[:2] == ["PTN LOAD:", "CURR PTN+PRT"] and h2 == h0 and rd(syms["cl_hdrst"], 1) == 0,
+                   f"#{i} H: [PTN] held: header {h1}; released: {h2} (before {h0})")
+            continue
+        if op == "Z":                         # CL42: the next card job fails at its open (a never-saved bank, -12)
+            zfail["n"] = 1
+            continue
+        if op == "Zc":                        # ... and afterwards: it did fail, and nothing of it is left busy
+            qcheck(zfail["hit"] == 1 and rd(syms["rq_busy"], 1) == 0,
+                   f"#{i} Zc: the injected failure hit {zfail['hit']} job(s); busy after it {rd(syms['rq_busy'], 1)}")
+            continue
+        if op == "^":                         # CL42: one UP arrow
+            key(0x33, 1); key(0x33, 0)
+            settle(300)
+            print(f"#{i} ^: cur {rd(syms['cl_cur'], 1) + 1} shown {rd(syms['cl_pmoved'], 1)}", flush=True)
+            continue
+        if op == "Y0":                        # CL42: a bare [YES] with nothing to aim at on screen: loads nothing
+            nr_ = len(reqs)
+            key(0x31, 1); key(0x31, 0)
+            settle(600)
+            qcheck(len(reqs) == nr_, f"#{i} Y0: [YES] with no arrows shown and none under the box: {len(reqs) - nr_} "
+                   f"request(s); {view()}")
             continue
         if op == "Y":                         # a bare [YES]: whatever the screen shows
             nl0 = len(reqs)

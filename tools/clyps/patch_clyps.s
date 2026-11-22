@@ -515,7 +515,7 @@ cl_page:
     bra.w   cl_refresh
 
 | cl_vplay: the view to the playing pattern's bank, the arrows with it (CL40: opening Clyps, the user 2026-11-21 --
-| was the arrows' / the box's bank; CL41: ORIG PTN+PRT's [YES]). Uses d0.
+| was the arrows' / the box's bank). Only there: CL42 (the user) the view moves only when you page or open Clyps. Uses d0.
 cl_vplay:
     move.b  PLAY_BANK,%d0
     move.b  %d0,cl_bank
@@ -1146,7 +1146,6 @@ kp_in:
     tst.b   cl_bpno                     | refused (cl_bpgate): no flash
     bne.w   cl_refresh
 .endif
-    jsr     cl_vplay                    | CL41: the view to the playing pattern's bank, at the [YES] (the user)
     moveq   #0,%d0                      | begun inside: CL40 (the user, 2026-11-21) the pattern's slot flashes, as
     move.b  PLAY_BANK,%d0               | every load's (was the ORIG PTN+PART header box)
     lsl.l   #8,%d0
@@ -1155,16 +1154,21 @@ kp_in:
     bra.w   cl_refresh
 
 | d0: bit 0 = [BANK] held without [PTN] (the arrows page: "BANK A" boxed), bit 1 = the [PTN]+[BANK]
-| chord held (ORIG PTN/PART). Uses d0.
+| chord held (ORIG PTN/PART), bit 2 = [PTN] held without [BANK] (CL42: "PTN LOAD: CURR PTN+PRT"). Uses d0.
 cl_hstate:
     moveq   #0,%d0
     tst.l   BANK_HELD
-    beq.b   hs_out
+    beq.b   hs_p
     moveq   #1,%d0
     tst.l   PTN_HELD
     beq.b   hs_out
     moveq   #2,%d0
 hs_out:
+    rts
+hs_p:
+    tst.l   PTN_HELD
+    beq.b   hs_out
+    moveq   #4,%d0
     rts
 
 | TRACK 1-8 (0x10..0x17): every event goes through stock's own base handler, as the base keymap
@@ -6928,7 +6932,7 @@ ut_run:
 ut_op:
 |   a project load closes Clyps (the user, 2026-11-07; cl_projload asks). A pattern picked the stock way inside
 |   Clyps -- [PTN] + trig, SELECT PATTERN, a [BANK] + trig bank then a trig -- no longer closes it (the user,
-|   2026-11-07; scope §1.0 step 2 superseded): the view follows the pattern change (ut_pm)
+|   2026-11-07; scope §1.0 step 2 superseded): the highlight follows the pattern change, the view stays (ut_pm, CL42)
     tst.b   cl_pclose
     beq.b   ut_box
     clr.b   cl_pclose
@@ -6964,12 +6968,9 @@ ut_pm:
     moveq   #0,%d1
     move.w  cl_lastp,%d1
     move.w  %d0,cl_lastp
-    eor.l   %d0,%d1                     | another bank (a stock pick inside Clyps; the user, 2026-11-07):
-    andi.l  #0xff00,%d1                 | the view goes to it; the arrows go with it, same slot number (CL34,
-    beq.b   ut_refr                     | cl_pfollow), without arrows the box goes home
-    lsr.l   #8,%d0
-    move.b  %d0,cl_bank
-    jsr     cl_pfollow
+    eor.l   %d0,%d1                     | another bank: CL42 (the user, 2026-11-21) the view stays -- it moves only
+    andi.l  #0xff00,%d1                 | when you page or open Clyps, never to a landing (was: the view to it,
+    beq.b   ut_refr                     | §1.26); without arrows the box goes home
     tst.b   cl_pmoved
     bne.b   ut_refr
     jsr     cl_boxhome
@@ -7492,6 +7493,9 @@ cl_draw:
     move.l  %d0,%d7                     | d7 = header state (free until the cells)
     jsr     cl_trk
     move.l  %d0,%d6                     | d6 >= 8: the MIDI side
+    lea     cl_s_currp,%a2              | CL42 (the user, 2026-11-21): [PTN] alone held, "PTN LOAD: CURR PTN+PRT"
+    btst    #2,%d7                      | (46 px, as ORIG PTN+PRT: its box ends at x 86)
+    bne.b   cd_rl
     btst    #1,%d7
     beq.b   cd_r1
     lea     cl_s_origp,%a2
@@ -7530,14 +7534,16 @@ cd_rl:
     move.l  %d0,%d5                     | d5 = the label's width
 |   a group ("MULTI LOAD:") or the [PTN]+[BANK] chord held ("PTN LOAD:", the user 2026-11-05) at x 3 and the
 |   label 2 dark columns after it -- "PTN LOAD: ORIG PTN+PRT"'s box ends at x 86
-    btst    #1,%d7
+    moveq   #6,%d0                      | the chord, or [PTN] alone (CL42)
+    and.l   %d7,%d0
     bne.b   cd_mh
     jsr     cl_ismulti
     tst.l   %d0
     beq.b   cd_one
 cd_mh:
     lea     cl_s_multi,%a0              | a group: "MULTI LOAD:"
-    btst    #1,%d7
+    moveq   #6,%d0
+    and.l   %d7,%d0
     beq.b   cd_mh2
     lea     cl_s_ptnld,%a0              | the chord: "PTN LOAD:" (the user, 2026-11-05)
 cd_mh2:
@@ -9163,6 +9169,7 @@ cl_s_orig:  .asciz "ORIG"
 cl_s_origs: .asciz "ORIG TRK SEQ"
 cl_s_origf: .asciz "ORIG TRK FULL"
 cl_s_origp: .asciz "ORIG PTN+PRT"         | 46 px: its box ends at x 86, as T6 LOAD:'s longest
+cl_s_currp: .asciz "CURR PTN+PRT"         | 46 px too: [PTN] alone held (CL42, the user)
 cl_s_saved: .asciz "SAVED TRK"           | 34 px: the slot label after a temp reload (the user, 2026-11-02)
 cl_fmt_srct:.asciz "%c%02d %02d TR"       | 33 px: "B14 06 TR" (the user, 2026-10-29)
 cl_fmt_srcl:.asciz "%c%02d %02d LK"       | as cl_fmt_lk
