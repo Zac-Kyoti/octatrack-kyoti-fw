@@ -945,6 +945,10 @@ def main(argv):
             print(f"#{i} ^: cur {rd(syms['cl_cur'], 1) + 1} shown {rd(syms['cl_pmoved'], 1)}", flush=True)
             continue
         if op == "Y0":                        # CL42: a bare [YES] with nothing to aim at on screen: loads nothing
+            g = 0                             # (CL43: no flash -- the last load's flash ends first)
+            while rd(syms["cl_flk"], 1) and g < 100:
+                settle(34)
+                g += 1
             nr_ = len(reqs)
             key(0x31, 1); key(0x31, 0)
             settle(600)

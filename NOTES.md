@@ -40494,3 +40494,98 @@ unchanged (V1.8BC CAVE 636, ENC 96, SPRING 82, PERS1 128, PERS2 64).
   pattern lands in another bank (CL41); "Change track: the TRACK keys, with the view following" -> the view stays
   (CL41); a cued change blinks an outline on its slot (CL39); §13: "[PTN] + [BANK] + trig: reload that pattern of the
   bank shown from the card".
+
+## 2026-11-21 cont. (2) (`release-1119`, CLYPS) — CL42: card reloads unblocked after a failed read; the view never follows a landing; [PTN] alone's header; the arrows' rule (test images CLB6 / CLB7 / CLB8; WIP, NOT flashed, NOT promoted)
+
+- **The user on KY18BCCLB5 (MKI):** (A) card track reloads ([PTN]/[BANK]+TRACK) "no longer working", nothing at all;
+  (B) [PTN]+[BANK]+[YES] = ORIG PTN+PRT of the PLAYING pattern (the RAM originals, not the card), in the background, no
+  view move; (C) [PTN] alone held: header `PTN LOAD: CURR PTN+PRT`; (D) Clyps never moves the view to a landing; (E) the
+  arrows: hidden until the user moves them, hidden whenever a mark lands on their slot. Scope §1.42 has the design,
+  the per-path arrow table and the answers.
+- **A:** in the emulator CLB5 reloads tracks correctly from a fresh state in every form (playing bank and paged,
+  [PTN] / [BANK], held, other tracks, after a cross-bank pattern reload, other patterns, DIRECT JUMP on). Found on the
+  way, a real latent wedge: a card job that fails (never-saved bank, unreadable file) never reaches `cl_rldone`, so
+  `rq_busy` stayed set and every later card request returned silently (`rr_nq`) until a reboot -- reproduced with an
+  injected failed open (`Z`): CLB5 `Zc` busy 1; fixed in `rj_exit` (CL42a). The user then answered: they also tried
+  the stock screen (card track reloads are Clyps-only by design, manual §5.5; the stock [PTN] record's held sub-map
+  sends TRACK to 0x40083dc4 there; no detour wanted) and probably an unedited track: a card reload of a track that
+  already equals the card lands nothing and shows no toast by design (`cl_cueload`'s same-data test) -- emulator CLB5
+  `Ru`: request and job done, 0 landings, 0 toasts; closed Clyps (`N,R`): no request at all. So most likely no
+  regression. n5t missed nothing real but checked too little (no edit to undo, no toast, a fresh state): op R now
+  edits first and checks the edit undone (the staged card copy), the toast, the SRC_CARD landing, the view.
+- **Code:** CL42a 779ca3f (B: `kp_pat` -> `cl_vplay` removed; C: `cl_hstate` bit 2, `cl_s_currp`, 46 px like ORIG
+  PTN+PRT, box ends x 86; D: `ut_pm`'s view move removed -- `cl_bank` is written only by paging and the open; A:
+  `rj_exit` clears `rq_busy` / `rq_msg` on failure). CL42b 56a5c43 (E: `cl_tuck` = hidden (`cl_ysup`) until the next
+  arrow; `cl_ychk` hides shown arrows when their slot lands, hidden ones go under the new box, records only while
+  closed; new `cl_phide` from the UI tail (`cl_lasth`) for pattern landings of any kind, open or closed; `cl_close`
+  saves the screen's arrows; a project load clears `cl_pmoved`; [YES] with hidden arrows only when the box / highlight
+  sits on them in the bank shown, `cl_atbox`). CL42c 2c5b375 (the user: only a landing in the bank VIEWED hides arrows,
+  `cl_hvb`; Clyps closed: the playing bank). No splice, no cave bytes (all `.dram`).
+- **Net code lines (comments and labels out) vs CL41 (ac0af8c):** A +4 (clyps_reload.s); B -1; C +10; D -3; E +77
+  (CL42b +59, CL42c +18: `cl_phide` ~34, `cl_ychk` ~17, UI tail call 9, `cl_tuck` / `cl_atbox` 7, [YES] 5, `cl_close`
+  3, project load 1, data 2). Total patch_clyps.s +83, clyps_reload.s +4.
+- **Gates on CLB8 (emulator, OT DEMO / JAM2, route A; out/rc3clyps/gates6):** arrow scenarios e1c/e1b/e1s 19 each, e2c 15,
+  e3c/e3b/e3s 6, e4c 9, e5c/e5b/e5s 17, e6c 11, e7c 9 -- all PASS (two first runs FAILed on gate expectations, fixed:
+  the flash wait in qland under CL42, R's expected value = the staged card copy, the cue cell compare when the arrows
+  hide at the landing); card reloads rtc/rtb/rts 19, rpc/rpb/rps 15 (paged), rxc/rxb 27 (cross-bank pattern reload,
+  then track SEQ / FULL) PASS; rzc/rzb (an injected failed read): busy cleared, but the next chord for the SAME target
+  read nothing -- fixed in CL43 (rq_need); CL40/41 sets c8a 41, c8b 23, c8c 12, c8d 33, c8s 13, c8q 30, m8a 15, m8b 5,
+  m8f 3, m8g 3, m8j 11, m8u 3, m8x 7, n8p 5 PASS; the CLB8 runs not started when CL43 came were run on CLB9 instead.
+  Whole window vs CL38 (w8): W1-W6 PASS, W7 8 px = CL38's arrows reappearing on slot 7 after the box moved (CL34),
+  hidden now (the user's rule) -- the expected difference. diag_clyps_ui on V1.8C: ABCDY, J, L, XOW, VZI, T, H, NPK,
+  EGRS, 8, 9 PASS, FQ and MU (JAM2) FAILed on CL32 expectations (arrows stay through a load) and PASS with the gate
+  updated to the rule (c8FQ2, c8MU2); ABCDY on V1.8BC and CLYPS PASS; diag_clyps_quant DJ off / on PASS.
+- **Images (KYOTI_ALLOW_WIP=1, nested worktree out/rc3clyps/wt6; copies in out/rc3clyps/CLB6, CLB7, CLB8; NOT
+  promoted, NOT flashed):** KY18BCCLB6 (779ca3f, A-D) syx 6f11a445... (mainos 0a67f09e...); CLB7 (56a5c43): V1.8BC syx
+  5d480f33... (mainos 85ecdc2d...), V1.8C syx 9aa8b2ef... (mainos de58a13b...), CLYPS syx 55c0059a... (mainos
+  9df34f68...); CLB8 (2c5b375): V1.8BC syx a06ea9c5... (mainos 0889b94e...), V1.8C syx e461de01... (mainos b5ffc84c...),
+  CLYPS syx 6525c073... (mainos 783dc846...). Script out/rc3clyps/build_clb6.sh (V=CLBn).
+- **Manual (docs/clyps/MANUAL.md, not edited) -- cumulative since CL39:** everything listed in the CL41 entry, except
+  that the view no longer moves at `[PTN]+[BANK]+[YES]` nor when the playing pattern lands in another bank (§4 Quick
+  gestures, §8: the view leaves a paged bank only when you page; Clyps still opens on the playing bank); plus CL42:
+  §4 header: [PTN] alone held reads `PTN LOAD: CURR PTN+PRT`; §5 / §4 ORIG PTN+PRT restores the playing pattern in the
+  background, its flash only with its bank shown; §5.5: a card reload of a track that already matches the card shows
+  nothing (no toast); still Clyps-only; §6 Aiming (lines ~301-316, the aiming.svg figure and §9's "Flip" tip): the
+  arrows show only after you move them and hide once a load or a pattern lands on their slot in the bank you are
+  viewing (any way: trigs, [YES], ORIG, card reloads, ORIG PTN+PRT, pattern changes, DIRECT JUMP, MIDI), and stay
+  hidden until you press an arrow -- they no longer "tuck" and reappear when the box moves; [YES] with nothing aimed
+  on screen does nothing (the flip: use the slot's trig or one arrow); a landing in another bank leaves them alone;
+  §4 marks: the solid-yellow LED follows the same rule.
+
+## 2026-11-22 (`release-1119`, CLYPS) — CL43: the silent paths the user answered (test images CLB9; WIP, NOT flashed, NOT promoted)
+
+- **Source:** the read-only audit out/rc3clyps/CLYPS_SILENT_AUDIT_CL42c.md and the user's answers; scope §1.43.
+- **Code (aae7dad):** H3 -- running, every track equal to the source, ORIG PTN+PRT / the card reload of the pattern
+  you are on now restore the trailer (CHAIN AFTER +6, +8..+0xb): `cl_togarm`'s nothing-differs path runs `cl_togpre`
+  and `cl_trlui` (mirror, bank changed, redraw); D2 -- [YES] with hidden arrows not under the box / highlight in the
+  bank shown does nothing (was: the box's slot re-fired); toasts when unchanged -- the card track reload (running as
+  stopped, `q1_same`) and the card reload of the pattern you are on (`ta_t`) show the same toast as when something
+  lands; I5 -- [PTN] held without [BANK] + trig = stock's pattern pick of the bank shown (chord-opened Clyps, [BANK]
+  let go first); B2 -- arrows do nothing while the chord is held; the card job after a failed read re-reads the same
+  target (`rq_need`). Not changed (the user): E3, G15, D4, G12 / I2.
+- **The unavailable-bank word (bank+0x9b336):** its only static writer is 0x4000fa98(mask, value), called at
+  0x4001fb58 (all banks set at a project load's start), 0x4001fb96 (the current bank cleared), 0x40085078 (all
+  cleared, storage job); readers 0x4004d5a0, 0x4007b318 (BANK UNAVAILABLE), 0x400a05a0 (pattern change), 0x4007afc0
+  (== 2). It reads as "this bank is not loaded yet" while a project loads its banks in the background.
+- **Net code lines vs CL42c (2c5b375), comments and labels out:** patch_clyps.s +51 / -9 (net +42): H3 +24 (`cl_trlui`
+  +25 with its call, the RUNNING test in `ta_t` -2, `cl_togpre` replacing a `clr` +1), I5 +10, B2 +6, D2 0 (a branch
+  target), branch widths +2; clyps_reload.s +8 / -3 (net +5): `q1_same` +3, the failed-read re-read +2.
+- **Gates on CLB9 (emulator, OT DEMO / JAM2; out/rc3clyps/gates6):** new: x9c/x9b/x9s (PT / RT: CHAIN AFTER poked,
+  tracks equal, running -> the trailer restored with 0 landings, the slot's flash, RT's `PATTERN A01` toast) 7 each,
+  y9* (I54: chord-opened Clyps, [BANK] up, [PTN] + trig 5 = stock's cue A05, 0 Clyps loads; B2) 4 each, z9* (Yf: the
+  flash on hidden arrows' slot; Y0 paged: nothing, no flash) 4 each, u9b/u9c/u9s (an unedited track's card reload,
+  running: 0 landings, 1 toast) 3 each; the same PT / RT on CLB8 (h8b) FAIL -- CHAIN AFTER stays as poked, no RT
+  toast: the H3 bug reproduced. rzc9r / rzb9r: after the injected failed read (R3, expected FAIL), the next R of the
+  same target re-reads and lands (both tracks of the generation), the toast, the edit undone -- the only FAIL is the
+  gate's "new generation" (a same-target retry keeps it). Arrow scenarios e1*/e2c/e3*/e4c/e5*/e6c/e7c/e8c/e8b, card
+  reloads rt* / rp* / rx*, the CL40/41 sets c9* / m9* / n9* / b9* / s9* all PASS (e1*'s first runs failed Y0 on the
+  previous load's flash still running: the gate now waits for it, e1*9r 19 each PASS). Window vs CL38 (w9): W1-W6
+  PASS, W7 the expected arrows difference (as CLB8). diag_clyps_ui on V1.8C: ABCDY, J, FQ, L, XOW, VZI, T, 8, 9, H,
+  MU (JAM2), NPK, EGRS PASS; ABCDY V1.8BC / CLYPS PASS; diag_clyps_quant DJ off / on PASS.
+- **Images (KYOTI_ALLOW_WIP=1, out/rc3clyps/wt6 at aae7dad; copies in out/rc3clyps/CLB9; NOT promoted, NOT flashed):**
+  KY18BCCLB9 `OCTATRACK_OS1.40C_KYOTI_V1.8BC.syx` 49f06994... (bin 44661531..., mainos f77a8569...); KY18C CLB9 syx
+  52df15f9... (mainos 57eebfde...); CLYPS CLB9 syx f18bae36... (mainos 9865c3fc...).
+- **Manual (not edited), CL43 on top of CL42's list:** §5.3 (ORIG PTN+PRT brings CHAIN AFTER back -- now true when
+  nothing else differs too); §5.5 (a card reload always shows its message, also when the track or pattern was
+  already as saved); §6 ([YES] with nothing aimed on screen does nothing); §8 ([PTN] + trig is always a pattern
+  pick, also right after the chord opened Clyps); arrows do nothing while [PTN]+[BANK] is held.

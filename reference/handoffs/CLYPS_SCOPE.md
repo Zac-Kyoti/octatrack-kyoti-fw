@@ -1823,6 +1823,42 @@ the investigation (NOTES "CL24 timing investigation", harness `tools/diag_clyps_
   track's record, track change, reopen, STOP / PLAY, paging hidden and shown, [YES] with nothing aimed), e8 (a landing in
   another bank hides nothing, the record too); `Ru` (unedited track), `N` (close Clyps); results in NOTES.
 
+### 1.43 The silent paths, as the user answered them (2026-11-22; test images CLB9)
+
+- **Source:** the read-only audit out/rc3clyps/CLYPS_SILENT_AUDIT_CL42c.md (ids below are its rows); the user's
+  answers via the coordinator.
+- **Built (CL43, aae7dad):**
+  - **H3 (bug):** running, every track's sequence and slice already equal to the source: ORIG PTN+PRT and the card
+    reload of the pattern you are on did not restore CHAIN AFTER (trailer +6) or +8..+0xb -- `cl_tog` = 0, so
+    `cl_togpre` never ran. Now `cl_togarm`'s nothing-differs path runs `cl_togpre` (the rate bytes and the link are
+    equal there, or tracks would land) and `cl_trlui` (the SRAM mirror's trailer for the UI bank, the bank changed,
+    a redraw). The engine reads the live slab's trailer, as after a landing.
+  - **D2:** [YES] with hidden arrows that the box / highlight does not sit on in the bank shown: nothing at all (no
+    load, no flash; was: the box's slot re-fired, `ex2_none`). D1 / D3 (hidden under the box or the highlight: that
+    slot again) already flash the execute flash when nothing differs -- gated (`Yf`).
+  - **Toasts when unchanged (G1 / G2 / G13):** a card track reload of a track already as on the card shows the same
+    `TRK SEQ` / `TRK FULL` + `RELOADED FROM PROJ`, running as stopped (`q1_same`); the card reload of the pattern you
+    are on with nothing differing shows `PATTERN A01` / `RELOADED FROM PROJ` at once (`ta_t`, running too). Its
+    slot's flash was already armed at the chord. ORIG PTN+PRT has no toast either way; its flash already ran. No
+    cued blink when nothing is cued. TRACK+[NO] (F1) keeps `TEMP TRK RELOADED`, unchanged.
+  - **I5:** [PTN] held without [BANK] + trig is always stock's pattern pick (its [PTN] + trig handler 0x40056b2c,
+    `cl_ptfwd` set around it so CL39c's splices take the bank shown), never a Clyps slot load -- e.g. the chord
+    opened Clyps and [BANK] was let go first. The header (CL42) already read `PTN LOAD: CURR PTN+PRT` there.
+  - **B2:** UP / DOWN / LEFT / RIGHT do nothing while the [PTN]+[BANK] chord is held (`cl_hstate` bit 1).
+  - **The card job after a failed read** (CL42a follow-up): the target stays to be read (`rq_need`), so the next chord
+    for the same target re-reads it; CLB8 only cleared `rq_busy` (gate `rzb` on CLB8: the second R of the same target
+    made no new generation and read nothing).
+- **Not changed (the user):** E3 (TRACK chords on a non-member of a Multi do nothing: the Multi takes over), G15 (no
+  feedback for a reload dropped by a pattern change), D4, G12 / I2 (the unavailable-bank guard, pending an
+  explanation to the user). The word at bank+0x9b336: stock's only writer is 0x4000fa98(mask, value) (static scan of
+  the image: no other store to 0x4017d516 + n x 0x9b340), called at 0x4001fb58 (every bank set at the start of a
+  project load), 0x4001fb96 (the current bank cleared) and 0x40085078 (all cleared, in the storage job). Readers:
+  0x4004d5a0, 0x4007b318 ([BANK] + trig: BANK UNAVAILABLE), 0x400a05a0 (the pattern change), 0x4007afc0 (compares 2).
+  So it reads as "not loaded yet" during a project's background bank loading.
+- **Gates (diag_clyps_lock.py):** `PT` / `RT` (CHAIN AFTER poked, every track equal, running: the trailer restored,
+  the flash, RT's toast), `Yf`, `Y0` (no flash either), `I5K` (chord-opened Clyps, [BANK] up, [PTN] + trig K: stock's
+  cue, no Clyps load), `B2`, `Ru` (the toast, CL43). Results in NOTES.
+
 ### 1.27 Combinations that must never ship (the user, 2026-11-07)
 
 - Clyps + RELOAD_FROM_PROJECT never; Clyps + DIRECT_JUMP_KYOTI only as KYOTI's integrated pair (SUPERSEDE).
