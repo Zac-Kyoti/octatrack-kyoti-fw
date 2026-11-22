@@ -1672,7 +1672,7 @@ the investigation (NOTES "CL24 timing investigation", harness `tools/diag_clyps_
   with A shown: nothing visible in A; (6) the latched SELECT PATTERN from a lone tap used the current bank (`cl_ptfwd`
   cleared on release) between two presses that used the shown bank, and the shown bank itself could be A with B
   playing at the open (item 4).
-- **Open (the user to decide):** the card's `[PTN]+[BANK]` + trig for a pattern of the bank SHOWN (A06 with B playing)
+- **Open (the user to decide; decided 2026-11-21, built CL41: §1.41):** the card's `[PTN]+[BANK]` + trig for a pattern of the bank SHOWN (A06 with B playing)
   needs the card job (clyps_reload.s) to target another bank (about 20 sites read PLAY_BANK: the file, the Part
   link / apply / edited mark, the names, the mirror, the switch) -- not built; ORIG PTN+PRT of a pattern in the shown
   bank has no defined meaning (which pattern?). A track change still puts the view on that track's arrows' / box's
@@ -1686,6 +1686,72 @@ the investigation (NOTES "CL24 timing investigation", harness `tools/diag_clyps_
   two arrow sets in 9 draws (`d,p5,L`), the grid flip (`k-,T`), reopen on A with B playing (`k-,d,d,O` arrows;
   `k-,p3,L,O` box). CLB4 at the time of this entry: T / O / P / tK / chord-view checks PASS on V1.8C, V1.8BC and
   CLYPS; the CL39 set, the window compare vs CL38 and the UI gate were still running (see NOTES).
+
+### 1.41 The bank shown is the bank acted on (the user on CL40's questions, 2026-11-21; test images CLB5)
+
+- **The principle (the user):** "when the user pages to a bank, the led grid should always reflect the data from THAT
+  bank." Once paged, every [PTN]-family grid shows the shown bank's data and every pattern gesture acts on it, until the
+  user pages elsewhere or something done on purpose moves the view.
+- **Decisions:** (1) `[PTN]+[BANK]` + trig = pattern N of the bank SHOWN from the card ("Shown bank"); the chord no
+  longer moves the view when it forms (CL40's `kc_pch` / `kc_bch` -> `cl_vplay` removed). (2) `[PTN]+[BANK]+[YES]` with
+  another bank shown: ORIG PTN+PRT of the playing pattern, as CLB4 ("Yes, as CLB4"); the view goes to the playing bank at
+  the [YES] (`kp_pat` -> `cl_vplay`), not when the chord forms. (3) A track change keeps the view ("Keep the view");
+  the new track's arrows follow it, as at the open -- replaces §1.14 / §1.19's move to the track's arrows' / box's bank.
+  (4) A card reload with no arrows shown homes the box (`cl_boxreq` -> `cl_boxhome`) without moving the view.
+- **Built (CL41):**
+  - **The card job takes its bank from the request** (`clyps_reload.s`): RQ_PTN's argument is `bank << 8 | N`
+    (`cl_k_trig`: `cl_bank`), the generation's target `rq_tgt` holds it, the job copies it to `rq_jbk` at its start and
+    every former PLAY_BANK site uses that: the job post's mask, the file (`cl_rlopen`), the live slab / Part
+    (`cl_slab` / `cl_partin`), the Part link and the edited mark (`cl_pmarkb`: `cl_pmark` with the bank in d0), the
+    provenance clear (`cl_home`), the SRAM mirror (only when that bank is the UI bank), the names (`rq_names`,
+    `rq_ncopy`) and the switch (`cl_ptnswitch`: `0x400a1030(rq_jbk, N)` -- the call and the refreshes stock's own
+    `[BANK]` + bank + trig makes, 0x4007b36e..0x4007b39a = 0x40056b5e..0x40056b8c). Track kinds: the playing bank, as
+    before. The tests "the pattern you are on" (the request's cancel, the job's stage-or-write choice, `cl_rqarm`,
+    `cl_ptnswitch`) compare bank AND pattern: A06 with B06 playing is another pattern.
+  - **Which Part:** another bank's pattern is written offline with its saved Part link, and the card's working Part
+    chunk goes into THAT bank's linked Part (never the sounding one: no `0x40009094` apply, the edited mark follows
+    "differs from its SAVE PART copy" for that bank); stock applies it when the cued change lands, as for any
+    cross-bank change. The playing bank: as before (the sounding Part applied, else marked). The job's dead
+    "P is the playing pattern" branch in the pattern path is gone (P never is there; with a bank it could have
+    matched A06 against B06 and applied A's Part to the sounding one).
+  - A bank stock refuses ("BANK UNAVAILABLE", the status `cl_ptnbank` reads) is not reloaded: the chord + trig does
+    nothing there.
+  - **The grid while the chord is held** (`cp_pview`): the shown bank's pattern view -- data green, a cue in that bank
+    yellow, red only when it is the playing bank.
+  - **The view stays** in `cl_boxhome` and `cl_pload` (both set `cl_bank` until CL40); both end in `cl_pfollow`, so the
+    track's arrows show in the shown bank on the same slot number (tucked arrows show there as after a paging).
+- **Per path:**
+
+| Path | The view | The gesture acts on |
+|---|---|---|
+| Open (the chord, either order; also when it opened Clyps) | the playing pattern's bank (CL40) | -- |
+| `[BANK]` + arrows (paging) | the next / previous bank; arrows follow | -- |
+| `[BANK]` alone + trig (stock's bank pick) then a pattern trig | stays until the change lands (row "lands") | the picked bank (stock) |
+| `[PTN]` held / a `[PTN]` tap's SELECT PATTERN / `[PTN]` + trig | stays | the shown bank (CL39c, CL40) |
+| `[PTN]+[BANK]` held | stays; the grid = the shown bank's pattern view | -- |
+| `[PTN]+[BANK]` + trig | stays | pattern N of the shown bank, from the card (CL41) |
+| `[PTN]+[BANK]` + [YES] | to the playing bank at the [YES] | the playing pattern (ORIG PTN+PRT) |
+| trig / [YES] / [FUNC] loads, [CUE] group loads | stays | the shown bank's slots |
+| `[PTN]` + TRACK / `[BANK]` + TRACK (card track reloads) | stays (box home without arrows: the view stays, CL41) | the playing pattern's track |
+| Temp save / reload, ORIG via the trig | stays | the playing pattern's track |
+| TRACK, [MIDI], a group's view change | stays; the track's arrows follow it (CL41) | -- |
+| STOP / PLAY | stays | -- |
+| A track load / reload landing | stays | -- |
+| The playing pattern lands in ANOTHER bank (a stock pick, `[PTN]` + trig, a card reload of another bank, a DIRECT JUMP jump, any external change) | to the new playing bank, arrows follow, the box home without arrows (§1.26, the user 2026-11-07: kept) | -- |
+| A project load | Clyps closes | -- |
+
+- **DIRECT JUMP landings (`cl_pfollow` at `ut_pm`):** a landing goes through the same UI-tail test as any pattern
+  change; §1.26's rule ("a bank change moves the view to the new bank", the user 2026-11-07) is kept as established.
+  In every new gesture the landing's bank is the bank shown already, so nothing moves. It differs only when the view
+  was paged to a third bank after cueing (cue A06 in A, page to C, A06 lands: the view goes to A). **Option for the
+  user:** keep a paged view there too -- move the view at a landing only when it showed the old playing bank (2
+  lines in `ut_pm`). Not built.
+- **Gates (emulator, OT DEMO, out/rc3clyps/gates5; NOTES 2026-11-21 cont.):** `diag_clyps_lock.py` r (CL41: an edit of
+  the target's slab / Part first; the chord's grid; the view; the toast; the card's copy back; the playing bank's
+  pattern untouched; DJ on: the landing), P ([BANK] first: grid and view before the [YES], the view after), new ops KN
+  (track change keeps the view) and R (a card track reload, paged); all PASS on CLB5 V1.8C / V1.8BC / CLYPS, the CL40
+  set too, the window compare vs CL38, diag_clyps_ui and diag_clyps_quant (DJ off / on). CLB4 fails KN (the view went
+  to the track's arrows' bank).
 
 ### 1.27 Combinations that must never ship (the user, 2026-11-07)
 

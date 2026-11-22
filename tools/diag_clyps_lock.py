@@ -709,7 +709,7 @@ def main(argv):
             else:
                 key(0x2E, 1); key(0x2F, 1); key(k_, 1); key(k_, 0); key(0x2F, 0); key(0x2E, 0)
             g = 0
-            while rd(syms["cl_pcq"], 2) != code and g < 600:
+            while rd(syms["cl_pcq"], 2) != code and g < 600 and (rd(ACT, 1), rd(0x800065BD, 1)) != (k_, code >> 8):
                 rt.run(ms=17)
                 main_call(0x40056C28)
                 tail()
@@ -720,7 +720,20 @@ def main(argv):
                 NOS = {0x899 + k * TRAC_A for k in range(8)} | set(range(0x8E5C, PATSTRIDE))
                 now_s = bytes(u.mem_read(sad, PATSTRIDE))
                 ds = [j for j in range(PATSTRIDE) if j not in NOS and now_s[j] != pre_s[j]]
-                dp = [j for j in range(0x18B2) if rd(pad + j, 1) != pre_p[j]]
+                pix = rd(sad + 0x8E57, 1) & 3      # the card's saved Part may differ from the loaded .work there:
+                wsd = set()                         # those bytes come back as saved (the reload's point), not as loaded
+                try:
+                    def _pc(fn):
+                        d_ = (pathlib.Path(a.project) / fn).read_bytes()
+                        st_ = 0x8EEC if ((d_[0x14] << 8) | d_[0x15]) >= 0x17 else 0x8EE8
+                        return d_[0x16 + 16 * st_ + 0x18BB * pix + 9:][:0x18B2]
+                    w_, c_ = _pc(f"bank{tb_ + 1:02d}.work"), _pc(f"bank{tb_ + 1:02d}.strd")
+                    wsd = {j for j in range(0x18B2) if w_[j] != c_[j]}
+                except OSError:
+                    pass
+                dp = [j for j in range(0x18B2) if rd(pad + j, 1) != pre_p[j] and j not in wsd]
+                if rd(pad + 0x2A, 1) != pre_p[0x2A]:
+                    dp.append(0x2A)
                 line1 = bytes(u.mem_read(syms['rq_line1'], 12)).split(b'\0')[0].decode()
                 qcheck(rd(syms["cl_bank"], 1) == vb_ and rd(syms["rq_jbk"], 1) == vb_
                        and line1 == f"PATTERN {chr(65 + vb_)}{k_ + 1:02d}",
@@ -736,6 +749,11 @@ def main(argv):
             qcheck(rd(syms["rq_gen"], 1) != g0 and rd(syms["rq_jgen"], 1) == rd(syms["rq_gen"], 1)
                    and rd(syms["rq_busy"], 1) == 0, f"#{i} {opx}: it was a card reload (request generation "
                    f"{g0} -> {rd(syms['rq_gen'], 1)}, its job done)")
+            if a.dj:                          # CL41: DIRECT JUMP on -- the jump lands at the next step (no blink to time)
+                qst.clear()
+                qst.update(code=code)
+                qland(code, f"#{i} {opx}")
+                continue
             qblink(code, f"#{i} {opx}")
             continue
         if op == "x":                         # STOP (stock's COND_RESET(-1), 0x400a12b8), then PLAY again

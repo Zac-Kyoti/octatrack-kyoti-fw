@@ -40422,3 +40422,75 @@ unchanged (V1.8BC CAVE 636, ENC 96, SPRING 82, PERS1 128, PERS2 64).
   ORIG PTN+PRT flashes the active pattern's slot, not the header); §5.1 Cued (outline, not arrows); §5.5 (a different
   pattern: toast at once, flash, outline until it lands); §8 ([PTN] in Clyps -- held or a tap's SELECT PATTERN -- acts
   on the bank shown; the [PTN]+[BANK] chord acts on and shows the playing bank).
+
+## 2026-11-21 cont. (`release-1119`, CLYPS) — CL41: the bank shown is the bank acted on (test images CLB5; WIP, NOT flashed, NOT promoted)
+
+- **The user's decisions on CL40's questions (2026-11-21):** (1) `[PTN]+[BANK]`+trig with another bank shown: "Shown
+  bank. But understand - when the user pages to a bank, the led grid should always reflect the data from THAT bank."
+  (2) `[PTN]+[BANK]+[YES]` with another bank shown: "Yes, as CLB4" -- the playing pattern, the view to its bank at the
+  [YES]. (3) Track change: "Keep the view". (4) A card reload with no arrows must not pull a paged view back. Scope
+  §1.41 has the design and the rule per path.
+- **Code (7b187ce):** `clyps_reload.s`: RQ_PTN's argument is `bank << 8 | N` (the bank shown, `cl_k_trig`), the job
+  takes its bank from the request (`rq_tgt` -> `rq_jbk` at its start) for the job post, the file, the slab / Part, the
+  Part apply-or-mark (`cl_pmarkb`), the provenance, the mirror (UI bank only), the names and the switch
+  (`cl_ptnswitch` -> `0x400a1030(bank, N)`, stock's own cross-bank cue with the same refreshes as its `[BANK]` pick,
+  0x4007b36e); the pattern-you-are-on tests compare bank and pattern (the request's cancel, the job's stage / write
+  choice, `cl_rqarm`, `cl_ptnswitch`); the job's dead "P is the playing pattern" branch removed (with a bank it would
+  have applied A06's Part as the sounding one while B06 plays). `patch_clyps.s`: the chord no longer moves the view
+  (`kc_pch` / `kc_bch`), its grid is the shown bank's pattern view (`cp_pview`), ORIG PTN+PRT's [YES] moves the view
+  (`kp_pat` -> `cl_vplay`), `cl_boxhome` / `cl_pload` keep `cl_bank` and end in `cl_pfollow`, the chord + trig
+  refuses a bank stock marks unavailable (0x9b336, as `cl_ptnbank`). No new splice, no cave bytes (all `.dram`).
+- **Net code lines (comments and labels out) vs CL40 (b23457c):** card job's bank +38 / -26 (net +12, data 1 incl.);
+  chord + trig of the shown bank incl. the unavailable-bank guard +14 / -9 (+5); the cross-bank switch / cancel
+  +11 / -4 (+7); `cl_pmark`'s bank +6 / -5 (+1); the chord keeps the view -2, the [YES] moves it +1; box home /
+  track change keep the view -2; the chord's grid +6 / -4 (+2). Total +24 (clyps_reload.s +12, patch_clyps.s +12).
+- **Step 0 -- CLB4's gate run (out/rc3clyps/gates4/lock_run.out), finished:** all 20 PASS, no FAIL (n4a-g, g4a-d,
+  g4q, g4s, w4, b4a / b4n / b4t, s4a / s4n / s4t); w4 vs CL38: 7/7 windows PASS; 0 draws from the UI tick. (The FAILs
+  in gates4 are r3*, the CLB3 repros, as recorded.)
+- **Gates on CLB5 (emulator, OT DEMO, route A; out/rc3clyps/gates5):** every lock run PASS, 0 draws from the UI tick, at most one arrow set per draw.
+  New (V1.8C unless named): n5a (`--bankb k-,r5,ql`: B playing, A shown -- the chord's grid = A's pattern view, the
+  view stays, toast `PATTERN A06`, the job read bank A, A06's slab + Part edited in RAM = the card's again, B06 + its
+  Part untouched, flash 28 UI ticks, the 1 px frame blinking 20 / 10 on A06 in the A view, landed on A06, the view on
+  A, the solid highlight) 19; b5r / s5r (the same on V1.8BC / CLYPS) 19 / 19; m5j (DJ on, cross-bank card reload:
+  lands at the next step) 11; m5x (DJ on, `[PTN]`+trig in A) 7; n5p (`[BANK]` first: grid A's and the view on A while
+  held, the [YES] flashes B01 and moves the view to B) 4; n5k / b5k / s5k (track changes with arrows in B, then paged
+  to A: the view stays, T2's arrows follow into A) 6 each -- the same run on CLB4 (r4k) FAILs twice (the view went to
+  the arrows' bank: the CL40 behaviour); n5t ([PTN]+TRACK card reload, paged: lands, the view stays) 3 (track and
+  in-place reloads stage and never homed the box, so CLB4 passes it too; the box-home pull was the other-pattern
+  reload's, covered by n5a). CL40 set: g5a 41, g5b 23, g5c (DJ) 12, g5d 32 + 1 FAIL -> g5e 33 PASS (below), g5s 13,
+  g5q 30, m5a 15, m5b (T + O) 5, m5c (T, tK) 6, m5f 3, m5g 3, m5u (tap + trig) 3, b5a 41, b5n 15, b5t 6, s5a 41, s5n 15,
+  s5t 6. Whole window vs CL38 (`cmp_clyps_windows.py gates2/w_cl38.json gates5/w5.json`): 7/7 PASS, 0 px outside the
+  cued cell. diag_clyps_ui on V1.8C: ABCDY, T, FQ, L, J, XOW, VZI, H, EGRS, NPK, 8, 9, M+U (JAM2) all PASS; ABCDY on
+  V1.8BC and CLYPS PASS. diag_clyps_quant (card reloads + ORIG in place, the playing bank) DJ off 43 ok / DJ on 39 ok,
+  PASS. **g5d's FAIL was the gate's:** the second reload (A04, Part 1) differed from RAM "as loaded" at Part +0x11 --
+  OT DEMO's bank01.work (loaded) holds 0x0e there, its bank01.strd (the card's saved copy) 0x0f (the Part's scene-B
+  byte, by the look of `00 0f` in every saved Part): the reload brought the saved value, as it should. The check now
+  leaves out the bytes where the project's .work and .strd Parts differ and checks the poked byte itself (g5e).
+- **Images, CLB5 (KYOTI_ALLOW_WIP=1, private worktree out/rc3clyps/wt5 at 7b187ce; script out/rc3clyps/build_clb5.sh;
+  symbols from the builds' maps, every unit merged with Clyps' last; NOT promoted, NOT flashed):** KY18BCCLB5
+  `out/rc3clyps/wt5/out/KYOTI/OCTATRACK_OS1.40C_KYOTI_V1.8BC.syx` ce1fa304… (bin ba7b9719…, mainos db64f5e7…); KY18C
+  CLB5 `.../KYOTI/OCTATRACK_OS1.40C_KYOTI_V1.8C.syx` a2cee363… (bin 6b5b0749…, mainos 5a758358…); CLYPS CLB5
+  `.../CLYPS/OCTATRACK_OS1.40C_CLYPS.syx` 6f218af3… (bin b660743a…, mainos 1d424fa6…).
+- **Open (the user):** a landing of the playing pattern in another bank while the view is paged to a third bank still
+  takes the view to the landing's bank (§1.26, kept as established); option: keep the paged view there (~2 lines).
+- **Hardware checklist (CLB5), bank B playing:** (1) [BANK]+arrow to A, hold [PTN]+[BANK]: A's patterns on the trigs,
+  view stays on A; (2) + trig 6: `PATTERN A06` / `RELOADED FROM PROJ`, the slot's flash, its outline blinking in A,
+  then A06 plays as saved (sound too); DJ on: next step; (3) A shown, [PTN]+[BANK]+[YES]: the grid stays on A while
+  held, B's pattern restored and the view on B at the [YES]; (4) paged to A, TRACK / [MIDI]: the view stays, the
+  track's arrows show in A; (5) paged, no arrows, a card reload: the view stays; (6) open: still the playing bank.
+- **Manual (docs/clyps/MANUAL.md, not edited) -- cumulative since CL39:** §4 Open / Quick gestures: Clyps opens on the playing pattern's bank (CL40); the chord that opened Clyps acts on the
+  playing bank, but inside Clyps the chord + trig reloads that pattern of the bank SHOWN (CL41) and chord + [YES]
+  restores the playing pattern and takes the view to its bank; §4 marks: a cued slot (a track load or a pattern cue)
+  = the box outline blinking on its slot, in its bank, then solid on landing (CL39-40); arrows = your aim only, never
+  blink, never two sets (CL40); §4 Flashes: every load and pattern pick flashes its slot; ORIG PTN+PRT flashes the
+  active pattern's slot, not the header (CL40); §4 The grid: with [PTN]+[BANK] held, stock's pattern view of the bank
+  SHOWN, not the playing bank (CL41); §5 table, card reload row: "that pattern of the bank shown"; a pattern of another
+  bank is cued as a bank change (CL41); §5.1 Cued: the outline blinks, not the arrows (CL40); §5.5: "[PTN] + [BANK] +
+  trig: that pattern of the bank shown" (CL41), "The message appears when the reload lands" -> for a different
+  pattern the toast shows at once, the slot flashes and its outline blinks until it lands (CL39-40); §6 Per track:
+  changing track keeps the view, that track's arrows come back on the same slot number in the bank you are looking at
+  (CL41); §8: [PTN] in Clyps (held, a tap's SELECT PATTERN, + trig) and the [PTN]+[BANK] chord act on the bank shown
+  (CL39c / CL40 / CL41); the view leaves a paged bank only when you page, at [PTN]+[BANK]+[YES], or when the playing
+  pattern lands in another bank (CL41); "Change track: the TRACK keys, with the view following" -> the view stays
+  (CL41); a cued change blinks an outline on its slot (CL39); §13: "[PTN] + [BANK] + trig: reload that pattern of the
+  bank shown from the card".
