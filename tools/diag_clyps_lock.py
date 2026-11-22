@@ -472,7 +472,9 @@ def main(argv):
                        f"{len(d - border)} outside its border, its sides {cols} px")
             else:
                 qcheck(not d, f"{label}: another bank shown -- the on and off phases draw the same screen ({len(d)} px differ)")
-            qst.update(code=code, on=on[-1]["scr"], off=off[-1]["scr"], rect=R, act=rd(ACT, 1))
+            qst.update(code=code, on=on[-1]["scr"], off=off[-1]["scr"], rect=R, act=rd(ACT, 1),
+                       arw=bool(rd(syms["cl_pmoved"], 1)) and not rd(syms["cl_ysup"], 1)       # CL42: the arrows
+                       and ((rd(syms["cl_sbank"], 1) << 8) | rd(syms["cl_cur"], 1)) == code)   # shown on the cue
         # the screen is stable within a phase (no flicker): every on-phase screen equal, every off-phase one too
         non, noff = len({qwin(x["scr"]) for x in on}), len({qwin(x["scr"]) for x in off})
         qcheck(non <= 1 and noff <= 1, f"{label}: one window screen per phase ({non} on, {noff} off)")
@@ -483,7 +485,10 @@ def main(argv):
                f"{label}: no cue left (cl_pcq 0xffff, cl_pbq -1 on all {len(seq)} UI ticks)")
         nw = len({qwin(x["scr"]) for x in seq})
         qcheck(nw == 1, f"{label}: the window is steady over {len(seq)} UI ticks (no blink): {nw} screen(s)")
-        if ref is not None and qst.get("rect") and qst.get("code") == code and code >> 8 == rd(syms["cl_bank"], 1):
+        if ref is not None and qst.get("arw") and "cl_phide" in syms and qst.get("code") == code:
+            print(f"      {label}: the cell vs the cue's {ref} phase not compared -- the arrows sat on the cued slot and "
+                  f"hide at its landing (CL42; the op list checks a-)", flush=True)
+        elif ref is not None and qst.get("rect") and qst.get("code") == code and code >> 8 == rd(syms["cl_bank"], 1):
             c1, c0 = qcrop(seq[-1]["scr"], qst["rect"]), qcrop(qst[ref], qst["rect"])
             if ref == "off" and (main_call(syms["cl_srccode"]) & 0x0F0F) == (code & 0x0F0F) and "cl_ptnbank" in syms:
                 ref = "on"      # CL39c: the cued slot is the select box's: it blinked, and after a cancel it is drawn
@@ -888,8 +893,8 @@ def main(argv):
                    f"the job done")
             qcheck(len(toasts) > nt0 and line1 == ("TRK FULL" if full_ else "TRK SEQ"),
                    f"#{i} {opx}: its toast ({len(toasts) - nt0} shown, line 1 {line1!r})")
-            want_r = rd(syms["RQ_SLAB"] + t_ * TRAC_A, 1) if a.bankb else pre_r   # --bankb: B is A's copy in RAM,
-            qcheck(rd(sad, 1) == want_r and rd(sad, 1) != pre_r ^ 0x81       # the card's B differs: its staged copy
+            want_r = rd(syms["RQ_SLAB"] + t_ * TRAC_A, 1)    # the card's staged copy (--bankb: B is A's copy in RAM;
+            qcheck(rd(sad, 1) == want_r and rd(sad, 1) != pre_r ^ 0x81      # after a slot load: another sequence)
                    and (not (full_ and t_ == 0) or a.bankb or rd(pad + 0x2A, 1) == pre_m),
                    f"#{i} {opx}: the in-RAM edit undone by the card's copy (record byte {rd(sad, 1):#04x} want {want_r:#04x}"
                    + (f", machine byte {rd(pad + 0x2A, 1):#04x} want {pre_m:#04x}" if full_ and t_ == 0 else "") + ")")

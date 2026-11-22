@@ -1753,6 +1753,76 @@ the investigation (NOTES "CL24 timing investigation", harness `tools/diag_clyps_
   set too, the window compare vs CL38, diag_clyps_ui and diag_clyps_quant (DJ off / on). CLB4 fails KN (the view went
   to the track's arrows' bank).
 
+### 1.42 Card reloads unblocked; the view never follows; the arrows' rule (the user on KY18BCCLB5, 2026-11-21; test images CLB6 / CLB7)
+
+- **The user (CLB5, MKI):** (A) "Track Card reloads via PTN + Track or BANK + Track are no longer working" --
+  "Nothing at all" (no toast, no change); (B) `[PTN]+[BANK]+[YES]` = ORIG PTN+PRT restores the PLAYING pattern's
+  originals (the RAM snapshot from power-on / project load -- not the card), in the background, the view stays, its
+  marks only when the playing bank is shown; (C) `[PTN]` alone held: the header reads `PTN LOAD: CURR PTN+PRT`, back
+  on release; (D) "I do not want Clyps to change views to move to a landing pattern or sequence, anywhere, or at any
+  time"; (E) the arrows are hidden until the user moves them, hidden whenever a mark lands on their slot (any
+  mechanism, any bank viewed); they coincide with a mark only after the user moved them onto it and nothing has
+  loaded or landed since.
+- **A, a latent wedge found on the way (emulator-reproduced; NOT the reported case, see the answers below):** a card job that FAILS (stock's -12 "THIS BANK HAS
+  NEVER BEEN SAVED!", a bad or unreadable file: `rj_exit` with d0 < 0) never reaches `cl_rldone` -- the hook sits on
+  doneFn's success path -- so `rq_busy` stayed 1 for good, and every later request ([PTN]/[BANK]+TRACK, chord + trig)
+  returned silently at `rr_nq` ("running: cl_rldone posts again"): no toast, no change, until a reboot. Latent since the
+  card reloads were built; CL41 made it reachable from a paged view: the chord + trig now reads the bank SHOWN, so a
+  paged reload of a bank never saved (or unreadable) wedges every reload after it. On a fresh state CLB5 reloads
+  tracks correctly in the emulator in every form tried (playing bank and paged, [PTN] / [BANK], held 600 ms, other
+  tracks, after a cross-bank pattern reload). **Fix:** `rj_exit` clears `rq_busy` and `rq_msg` on a failure.
+- **Why n5t missed it:** it ran on a fresh state (no failed read before it), on V1.8C, and only asked "a landing
+  happened, the generation moved, the view stayed" -- not the toast, nor that the track really came back (no edit to
+  undo), nor any history before it. **Gate now** (`diag_clyps_lock.py`): `R[B][h][N]` edits the track's record (and,
+  FULL on T1, a machine byte) in RAM first, then checks the edit undone by the card's copy (--bankb: the staged copy),
+  `cl_toast2` called with `TRK SEQ` / `TRK FULL`, a SRC_CARD load on that track and its landing, the job done, the view;
+  `Z` / `Zc` inject a failed open (the never-saved result at the open's test) and check nothing stays busy. CLB5:
+  `Z,R,Zc,R` -> Zc FAIL (busy 1), the next R nothing at all; CLB6 / CLB7 PASS.
+- **B:** CL41's `kp_pat` -> `cl_vplay` removed. `cl_restorepat` unchanged (the originals, as before CL41). Its slot's
+  flash is armed on the playing pattern's slot and drawn only with that bank shown (the flash's own bank test).
+- **C:** `cl_hstate` bit 2 = [PTN] held without [BANK]; `cl_draw` takes the "PTN LOAD:" prefix for bit 1 or 2 and the
+  label `cl_s_currp` "CURR PTN+PRT" for bit 2 -- 46 px in the header font (0x400c246a widths), as ORIG PTN+PRT: its
+  box ends at x 86, before "BNK A" (88). The UI tail already redraws when `cl_hstate` changes (the held flag is set
+  after the press handler), in the sys task.
+- **D:** `ut_pm` no longer moves the view to a landing's bank (§1.26's rule, kept in CL41, removed): stock cue,
+  [PTN] + trig, card reload, DIRECT JUMP, MIDI / arranger, a stock [BANK] pick, Clyps loads. `cl_bank` is written only by
+  paging (`cl_page`) and the open (`cl_vplay` in `cl_enter`, CL40). §1.41's table, rows changed: `[PTN]+[BANK]+[YES]`
+  -> the view stays; "the playing pattern lands in ANOTHER bank" -> the view stays (the box goes home without arrows,
+  as before); `[BANK]` alone + trig then a pattern -> stays. Every other row already kept the view.
+- **E, the arrows (`cl_pmoved` = they exist / aim [YES]; `cl_ysup` = hidden):**
+
+| Path | The arrows | Where |
+|---|---|---|
+| Open / reopen | the track's record: shown only if the user moved them and nothing landed on their slot since; none: hidden (the box home tucks a hidden cursor under the box) | `cl_enter` (`cl_pload` / `cl_boxhome`); `cl_close` now saves the screen's arrows (`cl_psave`) |
+| An arrow (UP / DOWN / LEFT / RIGHT) | shown on the new slot -- onto the box or the highlight too (the one allowed coincidence) | `cl_pshow` clears `cl_ysup` |
+| Paging ([BANK] + arrows) | follow the view, same slot number, same state (hidden stay hidden) | `cl_page` -> `cl_pfollow` |
+| Track change (TRACK, [MIDI], a group's view) | that track's record, following the view | `cl_refresh` (`cl_psave` / `cl_pload` / `cl_boxhome`) |
+| [BANK] held, [PTN] alone held | unchanged | -- |
+| The [PTN]+[BANK] chord held | hidden while held, back after (unchanged) | `cl_draw` (hdrst bit 1) |
+| A SEQ / FULL / [CUE] group load (trig, [YES], [FUNC]) lands on their slot | hidden | `cl_postmask` -> `cl_ychk` |
+| ... lands on another slot | shown ones stay; hidden ones go under the new box, still hidden | `cl_ychk` (`yc_t`) |
+| ORIG (the trig of your pattern), temp reload, card track reload, ORIG PTN+PRT | land on the pattern's own slot (the highlight): arrows there hide | `cl_ychk` |
+| A pattern lands (stock cue, [PTN] + trig, card pattern reload, DIRECT JUMP, MIDI / arranger, a [BANK] pick) in the bank viewed | every track's shown arrows on that slot number hide -- Clyps open or closed (closed: the playing bank counts, where it opens) | UI tail -> `cl_phide` (new; `cl_lasth`) |
+| A landing in a bank not shown | hides nothing (the user, CL42c): the arrows follow the view, a mark they do not sit on is not theirs; paging onto it later may show both | `cl_ychk` / `cl_phide` compare the bank viewed (`cl_hvb`) and the slot |
+| STOP / PLAY | unchanged (nothing lands) | -- |
+| Project load | none (the records and `cl_pmoved` cleared) | `cl_projload` |
+| Tucking | no longer a display state of its own: `cl_tuck` = hidden (`cl_ysup`) until the next arrow; CL34's "shown again when the box goes or moves" is gone | `cl_tuck` |
+| [YES] with hidden arrows | loads them only while the select box (an original: the highlight) sits on them in the bank shown; otherwise nothing ("[YES] loads what you see", §1.35) | `ex2_act` -> `cl_atbox` |
+
+- **The user's answers (2026-11-21, on CLB7):** (1) [YES] does not re-load hidden arrows: OK as built (the CL34
+  "flip" needs the slot's trig or one arrow now). (2) A landing hides the arrows ONLY in the bank viewed -- CL42c
+  (`cl_hvb`; CLB7 compared the slot number in any bank). (3) Item A: the user also tried the stock screen (card track
+  reloads are Clyps-only by design, manual §5.5: kept, no 0x40040250 detour) and probably an unedited track -- a
+  card reload of a track that already equals the card lands nothing and shows no toast (`cl_cueload`'s same-data
+  test; emulator, CLB5 `Ru`: request and job done, 0 landings, 0 toasts). A was most likely no regression; the
+  rq_busy wedge is a real latent bug, fixed.
+- **Gates (emulator, OT DEMO, out/rc3clyps/gates6):** new ops `a+` / `a-` (the state AND the arrow sets drawn in a fresh
+  `cl_draw`), `aN+` / `aN-` (track N's record), `^` (UP), `Y0` ([YES] loads nothing), `H` (the header's texts via
+  `cl_text` at y 57), `Z` / `Zc`; `j` waits for its landing; `qland` and `P` expect the view to stay (CL42). The arrow
+  scenarios e1-e7 (open, moves, SEQ / FULL / pattern / card / ORIG / ORIG PTN+PRT / DIRECT JUMP landings, off-view, another
+  track's record, track change, reopen, STOP / PLAY, paging hidden and shown, [YES] with nothing aimed), e8 (a landing in
+  another bank hides nothing, the record too); `Ru` (unedited track), `N` (close Clyps); results in NOTES.
+
 ### 1.27 Combinations that must never ship (the user, 2026-11-07)
 
 - Clyps + RELOAD_FROM_PROJECT never; Clyps + DIRECT_JUMP_KYOTI only as KYOTI's integrated pair (SUPERSEDE).

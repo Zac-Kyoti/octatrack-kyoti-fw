@@ -1300,9 +1300,13 @@ def main(argv):
         key(FUNC, 1)
         tap(sq)
         key(FUNC, 0)
-        check(pslice(t, dst) == ssl and state()["cur"] == act and rd(syms["cl_pmoved"], 1),
-              f"[FUNC]+trig again: ALL; the arrows stay on ORIG (the user, 2026-11-07 / 11-12: no load moves them; "
-              f"cur {state()['cur'] + 1})")
+        if "cl_phide" in syms:      # CL42 (the user's arrow rule): ORIG landed on the arrows' slot and hid them; hidden
+            check(pslice(t, dst) == ssl and state()["cur"] == sq and rd(syms["cl_ysup"], 1),   # ones are as none:
+                  f"[FUNC]+trig again: ALL; the hidden arrows go under its box (CL42; cur {state()['cur'] + 1})")  # CL22
+        else:
+            check(pslice(t, dst) == ssl and state()["cur"] == act and rd(syms["cl_pmoved"], 1),
+                  f"[FUNC]+trig again: ALL; the arrows stay on ORIG (the user, 2026-11-07 / 11-12: no load moves them; "
+                  f"cur {state()['cur'] + 1})")
         tap(rd(0x800065BE, 1))  # CL29: ORIG = the trig of the pattern you are on ([PAGE] does nothing)
         check(rec(act, 0) == oslot(act, 0) and pslice(t, dst) == ssl, "[PAGE] = ORIG SEQ: the sequence only")
         key(FUNC, 1)
@@ -2247,9 +2251,11 @@ def main(argv):
         tap(0x10 + other)
         check(rd(0x80000000, 1) == other and grp() == bits and state()["open"] == 1,
               f"TRACK {other + 1} (a member): the active track, the group stays")
-        while state()["cur"] != q3:
+        tap(DOWN)                          # CL42: always one arrow -- arrows a landing hid stay hidden (and aim no
+        while state()["cur"] != q3:        # [YES]) until an arrow moves them, even when already on the slot
             tap(DOWN)
         tap(0x10 + actv)
+        tap(DOWN)
         while state()["cur"] != q4:
             tap(DOWN)
         pre = list(bytes(u.mem_read(syms["cl_pre"], 32)))
@@ -2259,9 +2265,12 @@ def main(argv):
         tap(0x10 + a0)
         check(rd(0x80000000, 1) == actv and state()["cur"] == q4,
               f"TRACK {a0 + 1} (no member): nothing -- the active track and the view stay")
+        st_y = (state()["cur"], rd(syms["cl_pmoved"], 1), rd(syms["cl_ysup"], 1), list(bytes(u.mem_read(syms["cl_pre"], 32))))
         tap(YES)
         check(rec(act, other) == rec(q3, other) and rec(act, actv) == rec(q4, actv),
-              f"[YES]: T{other + 1} slot {q3 + 1}, T{actv + 1} slot {q4 + 1} -- each its own arrows")
+              f"[YES]: T{other + 1} slot {q3 + 1}, T{actv + 1} slot {q4 + 1} -- each its own arrows "
+              f"({rec(act, other) == rec(q3, other)}, {rec(act, actv) == rec(q4, actv)}; before: cur / pmoved / ysup / "
+              f"records {st_y})")
         key(CUE, 1)                        # every member its original: [CUE] + the trig of your pattern (CL29:
         tap(rd(0x800065BE, 1))             # [PAGE] restored every member; it does nothing now)
         key(CUE, 0)
