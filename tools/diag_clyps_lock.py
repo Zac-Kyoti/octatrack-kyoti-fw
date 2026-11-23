@@ -94,6 +94,9 @@ def main(argv):
     CL41 = "rq_jbk" in syms
     CL42 = "cl_s_currp" in syms      # the view never follows a landing (the user, 2026-11-21); the header
     CL43 = "cl_trlui" in syms        # the user's CL43 answers (the silent-path audit)
+    CL44 = "cl_bkpick" in syms       # the arrows show unless a box / the highlight covers them (the user, 2026-11-22)
+    CL44b = "cl_hov" in syms         # ... revised (the user on CLB10): shown after an arrow, also on a box; an execution
+                                     # landing on them hides them until its mark leaves; one flash rule; headers
     out = pathlib.Path(a.out)
     if not out.is_absolute():
         out = ROOT / out
@@ -320,7 +323,7 @@ def main(argv):
         bit = lambda die: (base[die // 8] >> (die % 8)) & 1
         led = {(1, 1): "yellow", (1, 0): "red", (0, 1): "green", (0, 0): "off"}[(bit(ledtbl[cur]), bit(ledtbl[cur] + 1))]
         return (f"arrows on {rd(syms['cl_sbank'], 1) + 1}:{cur + 1} pmoved {rd(syms['cl_pmoved'], 1)} "
-                f"ysup {rd(syms['cl_ysup'], 1)} tucked {tk} -> {'SHOWN' if rd(syms['cl_pmoved'], 1) and not tk else 'not shown'}; "
+                f"ysup {rd(syms['cl_ysup'], 1) if 'cl_ysup' in syms else '-'} tucked {tk} -> {'SHOWN' if rd(syms['cl_pmoved'], 1) and not tk else 'not shown'}; "
                 f"their slot's LED {led}")
 
     # CL39 (the user, 2026-11-20): a stock pattern cue's second highlight. Per UI tick (0x40056c28 -> cl_uitick ->
@@ -424,6 +427,35 @@ def main(argv):
         u.hook_add(er.eb.UC_HOOK_CODE, lambda uc, ad, sz, ud: arw.update(max=max(arw["max"], arw["n"]),
                                                                           bad=arw["bad"] + (arw["n"] > 1)),
                    begin=syms["cd_boxed"], end=syms["cd_boxed"])
+    pure = dict(n=0, bad=0, ex=[])      # CL44: every draw -- arrows drawn exactly when they exist, are in the bank viewed,
+    if "cl_bkpick" in syms:             # the chord is not held, and no box covers their slot: the highlight (the pattern
+        def on_boxed(uc, ad, sz, ud):   # you are on), the select box (d7 = cl_srccode in cl_draw), the track's cue
+            vb_, sb_, cur_ = rd(syms["cl_bank"], 1), rd(syms["cl_sbank"], 1), rd(syms["cl_cur"], 1)   # (cl_cq) or stock's
+            code_ = (sb_ << 8) | cur_                                                                   # (PEND, running)
+            cov = {(rd(0x800065BD, 1) << 8) | rd(ACT, 1), u.reg_read(er.eb.UC_M68K_REG_D7) & 0x0F0F}
+            cq_ = rd(syms["cl_cq"], 4)
+            if cq_ != 0xFFFFFFFF:
+                cov.add(cq_ & 0x0F0F)
+            pb_, pp_ = rd(0x800065BF, 1), rd(0x800065C0, 1)
+            if rd(RUNNING, 4) and pb_ < 16 and pp_ < 16:
+                cov.add((pb_ << 8) | pp_)
+            if "cl_hc" in syms:         # CL44b: hidden only while cl_ysup and its mark (cl_hc: the highlight or the
+                hc_ = rd(syms["cl_hc"], 2) & 0x0F0F     # select box) is still there, in the mark's bank (cl_tuck ran
+                hid_ = (rd(syms["cl_ysup"], 1) and sb_ == hc_ >> 8                 # in this draw: a mark gone has
+                        and hc_ in {(rd(0x800065BD, 1) << 8) | rd(ACT, 1),         # cleared cl_ysup already)
+                                    u.reg_read(er.eb.UC_M68K_REG_D7) & 0x0F0F})
+                want_ = int(bool(rd(syms["cl_pmoved"], 1)) and sb_ == vb_ and not rd(syms["cl_hdrst"], 1) & 2
+                            and not hid_)
+            else:
+                want_ = int(bool(rd(syms["cl_pmoved"], 1)) and sb_ == vb_ and not rd(syms["cl_hdrst"], 1) & 2
+                            and code_ not in cov)
+            pure["n"] += 1
+            if want_ != arw["n"]:
+                pure["bad"] += 1
+                if len(pure["ex"]) < 6:
+                    pure["ex"].append((st["tick"], f"{chr(65 + sb_)}{cur_ + 1:02d}", sorted(hex(c) for c in cov),
+                                       want_, arw["n"]))
+        u.hook_add(er.eb.UC_HOOK_CODE, on_boxed, begin=syms["cd_boxed"], end=syms["cd_boxed"])
 
     def grid():                         # the trig LEDs as painted now: R / G / Y / . per slot
         main_call(0x4007E998, 0)
@@ -474,7 +506,8 @@ def main(argv):
             else:
                 qcheck(not d, f"{label}: another bank shown -- the on and off phases draw the same screen ({len(d)} px differ)")
             qst.update(code=code, on=on[-1]["scr"], off=off[-1]["scr"], rect=R, act=rd(ACT, 1),
-                       arw=bool(rd(syms["cl_pmoved"], 1)) and not rd(syms["cl_ysup"], 1)       # CL42: the arrows
+                       arw=bool(rd(syms["cl_pmoved"], 1))                                       # CL42: the arrows
+                       and not (rd(syms["cl_ysup"], 1) if "cl_ysup" in syms else main_call(syms["cl_tuck"]) & 0xFF)
                        and ((rd(syms["cl_sbank"], 1) << 8) | rd(syms["cl_cur"], 1)) == code)   # shown on the cue
         # the screen is stable within a phase (no flicker): every on-phase screen equal, every off-phase one too
         non, noff = len({qwin(x["scr"]) for x in on}), len({qwin(x["scr"]) for x in off})
@@ -486,7 +519,7 @@ def main(argv):
                f"{label}: no cue left (cl_pcq 0xffff, cl_pbq -1 on all {len(seq)} UI ticks)")
         nw = len({qwin(x["scr"]) for x in seq})
         qcheck(nw == 1, f"{label}: the window is steady over {len(seq)} UI ticks (no blink): {nw} screen(s)")
-        if ref is not None and qst.get("arw") and "cl_phide" in syms and qst.get("code") == code:
+        if ref is not None and qst.get("arw") and ("cl_phide" in syms or CL44) and qst.get("code") == code:
             print(f"      {label}: the cell vs the cue's {ref} phase not compared -- the arrows sat on the cued slot and "
                   f"hide at its landing (CL42; the op list checks a-)", flush=True)
         elif ref is not None and qst.get("rect") and qst.get("code") == code and code >> 8 == rd(syms["cl_bank"], 1):
@@ -690,6 +723,16 @@ def main(argv):
             if op == "qc":                    # the toast, then stock's cue), ql = wait for the landing, qc = cancel
                 key(0x2E, 1); key(act0, 1); key(act0, 0); key(0x2E, 0)      # ([PTN] + the playing pattern's trig)
                 qcheck(rd(0x800065C0, 1) == act0, f"#{i} qc: stock's cue is the playing pattern again")
+                if CL44b:                     # CL44b (the user): the cancel flashes the pattern you are on; then settled
+                    fl_, fc_ = rd(syms["cl_flk"], 1), rd(syms["cl_fcode"], 2)
+                    qcheck(fl_ > 0 and fc_ == (rd(0x800065BD, 1) << 8) | act0,
+                           f"#{i} qc: the execute flash on the pattern you are on ({fl_} ticks on {fc_:#06x})")
+                    g = 0
+                    while rd(syms["cl_flk"], 1) and g < 100:
+                        rt.run(ms=17)
+                        main_call(0x40056C28)
+                        tail()
+                        g += 1
                 qsettled(f"#{i} qc", qst.get("code", -1), "off", "back as it was before the cue: no bar")
                 continue
             if op == "ql":
@@ -846,6 +889,14 @@ def main(argv):
             t_ = rd(0x80000000, 1)            # what plays -- the job runs, nothing lands, no toast (cl_cueload's same
             g0, nl0, nt0 = rd(syms["rq_gen"], 1), len(lands), len(toasts)   # test; cl_rqarm1 "nothing to land")
             key(0x2E, 1); key(0x10 + t_, 1); key(0x10 + t_, 0); key(0x2E, 0)
+            fl_, fc_, pc_ = rd(syms["cl_flk"], 1), rd(syms["cl_fcode"], 2), (rd(0x800065BD, 1) << 8) | rd(ACT, 1)
+            if CL44:                          # CL44 (the user): the execute flash on the pattern you are on, nothing differing
+                qcheck(fl_ > 0 and fc_ == pc_ and rd(syms["cl_ftgt"], 1) == 0,
+                       f"#{i} Ru: the execute flash on the pattern's slot {pc_:#06x} ({fl_} ticks on {fc_:#06x})")
+            if CL44b:                         # CL44b: "Tn LOAD: PROJ TRK SEQ" while it flashes
+                h_ = list(hdr)
+                qcheck(h_[:3] == [f"T{t_ + 1} " if t_ < 8 else f"M{t_ - 7} ", "LOAD:", "PROJ TRK SEQ"],
+                       f"#{i} Ru: the header {h_}")
             g = 0
             while (rd(syms["rq_busy"], 1) or rd(syms["rq_jgen"], 1) != rd(syms["rq_gen"], 1) or g < 20) and g < 120:
                 settle(34)
@@ -881,6 +932,14 @@ def main(argv):
             if hold_:                         # held 600 ms (SET_KEY takes press / release only; stock's [PTN]
                 settle(600)                   # hold event only sets the tap flag 0x460d1ab2, 0x4005a0cc)
             key(0x10 + t_, 1); key(0x10 + t_, 0); key(mk_, 0)
+            if CL44:                          # CL44 (the user): the execute flash on the pattern you are on
+                fl_, fc_ = rd(syms["cl_flk"], 1), rd(syms["cl_fcode"], 2)
+                qcheck(fl_ > 0 and fc_ == (pb_ << 8) | pp_,
+                       f"#{i} {opx}: the execute flash on the pattern's slot ({fl_} ticks on {fc_:#06x})")
+            if CL44b:                         # CL44b: "Tn LOAD: PROJ TRK SEQ / FULL" while it flashes
+                h_ = list(hdr)
+                qcheck(h_[:3] == [f"T{t_ + 1} " if t_ < 8 else f"M{t_ - 7} ", "LOAD:",
+                                  "PROJ TRK FULL" if full_ else "PROJ TRK SEQ"], f"#{i} {opx}: the header {h_}")
             g = 0
             while (len(lands) == nl0 or rd(syms["rq_busy"], 1)) and g < 240:
                 settle(34)
@@ -903,6 +962,68 @@ def main(argv):
             qcheck(rd(syms["cl_open"], 1) == 1 and rd(syms["cl_bank"], 1) == vb_ and rd(syms["cl_boxreq"], 1) == 0,
                    f"#{i} {opx}: the view stays on {chr(65 + vb_)} (now {chr(65 + rd(syms['cl_bank'], 1))}); {view()}")
             continue
+        if op in ("TS", "TR", "PF"):          # CL44b (the user): one flash rule -- TS / TR = TRACK held + [YES] / [NO]
+            t_ = rd(0x80000000, 1)            # (temp save / reload, the active track); PF = [PTN] + the playing pattern's
+            pc_ = (rd(0x800065BD, 1) << 8) | rd(ACT, 1)   # trig (a cancel / CURR PTN+PRT)
+            nt0 = len(toasts)
+            if op == "PF":
+                key(0x2E, 1); key(rd(ACT, 1), 1); key(rd(ACT, 1), 0)
+            else:
+                key(0x10 + (t_ & 7), 1); key(0x31 if op == "TS" else 0x32, 1); key(0x31 if op == "TS" else 0x32, 0)
+            fl_, fc_, h_ = rd(syms["cl_flk"], 1), rd(syms["cl_fcode"], 2), list(hdr)
+            key(0x2E if op == "PF" else 0x10 + (t_ & 7), 0)
+            settle(600)
+            qcheck(fl_ > 0 and fc_ == pc_, f"#{i} {op}: the execute flash on the pattern you are on {pc_:#06x} "
+                   f"({fl_} ticks on {fc_:#06x}); {len(toasts) - nt0} toast(s)")
+            if op == "TR":
+                qcheck(h_[:3] == [f"T{t_ + 1} " if t_ < 8 else f"M{t_ - 7} ", "LOAD:", "TEMP TRK"], f"#{i} TR: the header {h_}")
+            continue
+        if op[:2] in ("BK", "BL", "BN") and op[2:3].isdigit():
+            # CL44 (the user, 2026-11-22): stock's [BANK] layer inside Clyps. BKb.k = [BANK] held + trig b (the bank) +
+            # trig k (the pattern); BLb.k = the same from a [BANK] tap (the latched SELECT BANK); BNb = [BANK] + trig b,
+            # [BANK] up, then [NO]: no pattern picked -- nothing changes. The view pages to b at the PATTERN pick, the
+            # cue's box blinks there in view (qblink), the picked slot flashes (the pattern you are on: no flash).
+            b_, _, k_ = op[2:].partition(".")
+            b_ = int(b_)
+            vb0, pend0, nr_ = rd(syms["cl_bank"], 1), (rd(0x800065BF, 1), rd(0x800065C0, 1)), len(reqs)
+            key(0x2F, 1)
+            if op[:2] == "BL":
+                key(0x2F, 0)
+                settle(100)
+            key(b_, 1); key(b_, 0)
+            settle(100)
+            vb1 = rd(syms["cl_bank"], 1)
+            qcheck(vb1 == vb0 and rd(syms["cl_open"], 1) == 1, f"#{i} {op}: bank trig {chr(65 + b_)} alone: the view stays "
+                   f"on {chr(65 + vb0)} (now {chr(65 + vb1)}), Clyps open")
+            if op[:2] == "BN":
+                key(0x2F, 0)
+                settle(100)
+                key(0x32, 1); key(0x32, 0)
+                settle(200)
+                pend1 = (rd(0x800065BF, 1), rd(0x800065C0, 1))
+                qcheck(rd(syms["cl_bank"], 1) == vb0 and pend1 == pend0 and rd(syms["cl_open"], 1) == 1 and len(reqs) == nr_,
+                       f"#{i} {op}: [BANK] up, [NO]: nothing changed -- view {chr(65 + rd(syms['cl_bank'], 1))}, "
+                       f"PEND {pend0} -> {pend1}, Clyps open {rd(syms['cl_open'], 1)}, {len(reqs) - nr_} load(s)")
+                continue
+            k_ = int(k_)
+            code = (b_ << 8) | k_
+            pc_ = (rd(0x800065BD, 1) << 8) | rd(ACT, 1)
+            key(k_, 1); key(k_, 0)
+            fl_, fc_ = rd(syms["cl_flk"], 1), rd(syms["cl_fcode"], 2)
+            if op[:2] == "BK":
+                key(0x2F, 0)
+            pend1 = (rd(0x800065BF, 1), rd(0x800065C0, 1))
+            qcheck(rd(syms["cl_bank"], 1) == b_ and pend1 == (b_, k_) and rd(syms["cl_open"], 1) == 1 and len(reqs) == nr_,
+                   f"#{i} {op}: the pattern pick {chr(65 + b_)}{k_ + 1:02d}: the view on {chr(65 + rd(syms['cl_bank'], 1))}, "
+                   f"stock's cue {pend1}, Clyps open, {len(reqs) - nr_} Clyps load(s)")
+            h_ = list(hdr)
+            qcheck((fl_ > 0 and fc_ == code) if (code != pc_ or CL44b) else fl_ == 0,
+                   f"#{i} {op}: the execute flash on {code:#06x} ({fl_} ticks on {fc_:#06x}; the pattern you are on {pc_:#06x})")
+            if CL44b:
+                qcheck(h_[:2] == ["PTN LOAD:", "CURR PTN+PRT"], f"#{i} {op}: the header {h_}")
+            if code != pc_:
+                qblink(code, f"#{i} {op}")
+            continue
         if op in ("a+", "a-") or (op[0] == "a" and op[1:-1].isdigit() and op[-1] in "+-"):
             # CL42 (the user's arrow rule): a+ / a- = the active track's arrows shown / hidden -- the state
             # (cl_pmoved and not hidden) AND the window as drawn now (cd_arrows calls in one cl_draw); aN+ / aN- =
@@ -915,6 +1036,12 @@ def main(argv):
                 sh_ = bool(rd(syms["cl_pmoved"], 1)) and not tk_ and rd(syms["cl_sbank"], 1) == rd(syms["cl_bank"], 1)
                 qcheck(sh_ == want_ and (arw["n"] == 1) == want_,
                        f"#{i} {op}: the arrows {'shown' if want_ else 'hidden'} (state {sh_}, drawn {arw['n']}); {view()}")
+                if CL44b and want_:           # CL44b (the user): "and the led grid" -- their trig yellow, the highlight too
+                    main_call(0x4007E998, 0)
+                    b_ = bytes(u.mem_read(0x460BA98C, 17))
+                    d_ = ledtbl[rd(syms["cl_cur"], 1)]
+                    yl_ = ((b_[d_ // 8] >> (d_ % 8)) & 1, (b_[(d_ + 1) // 8] >> ((d_ + 1) % 8)) & 1)
+                    qcheck(yl_ == (1, 1), f"#{i} {op}: their trig LED yellow ({yl_})")
             else:
                 t_ = int(op[1:-1]) - 1
                 rec_ = rd(syms["cl_pre"] + 2 * t_, 2)
@@ -963,6 +1090,8 @@ def main(argv):
             continue
         if op == "Yf":                        # CL43 (D1 / D3): [YES] with the arrows hidden under the box / highlight --
             fc_ = main_call(syms["cl_srccode"]) & 0x0F0F   # that slot again: the execute flash even when nothing differs
+            if CL44 and not CL44b:            # CL44: hidden = covered, and no load moves them: the arrows' own slot
+                fc_ = (rd(syms["cl_sbank"], 1) << 8) | rd(syms["cl_cur"], 1)
             key(0x31, 1); key(0x31, 0)
             fl_, fc2 = rd(syms["cl_flk"], 1), rd(syms["cl_fcode"], 2)
             settle(600)
@@ -1123,6 +1252,9 @@ def main(argv):
     if "cd_boxed" in syms:
         print(f"CL40: arrow sets per window draw, at most {arw['max']}; draws with two or more: {arw['bad']}", flush=True)
         qcheck(arw["bad"] == 0, "CL40: at most one set of arrows in the window, every draw")
+    if "cl_bkpick" in syms:
+        qcheck(pure["bad"] == 0 and pure["n"] > 0, f"CL44{'b' if CL44b else ''}: the arrows drawn exactly as the rule says, every draw "
+               f"({pure['n']} draws, {pure['bad']} off: {pure['ex']})")
     if "cl_dreq" in syms:
         qcheck(tkst["draws"] == 0, "CL39b: no cl_draw from the UI tick (the redraws go to the sys task's tail)")
     if fails:

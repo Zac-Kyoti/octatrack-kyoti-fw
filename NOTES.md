@@ -40589,3 +40589,71 @@ unchanged (V1.8BC CAVE 636, ENC 96, SPRING 82, PERS1 128, PERS2 64).
   nothing else differs too); §5.5 (a card reload always shows its message, also when the track or pattern was
   already as saved); §6 ([YES] with nothing aimed on screen does nothing); §8 ([PTN] + trig is always a pattern
   pick, also right after the chord opened Clyps); arrows do nothing while [PTN]+[BANK] is held.
+
+## 2026-11-22 cont. (`release-1119`, CLYPS) — CL44 / CL44b: the arrows' rule revised twice, one execute-flash rule, execution headers, stock's [BANK] + bank + pattern pages the view (test images CLB10, CLB11; WIP, NOT promoted)
+
+- **CL44 (c6c7587, CLB10), the user:** (1) the arrows always visible unless under the highlight or an outline box,
+  showing again when it leaves; (2) [PTN]+TRACK flashes the slot, also on the pattern you are on; (3) a stock
+  [BANK] + bank trig + pattern trig inside Clyps pages the view to that bank. Built as a pure rule (covered = the
+  highlight / select box / a cue's box on their slot; CL42's hidden state removed; arrows present from the open,
+  hidden on the box / highlight), the card-track flash (`ktr_req`, `cl_trl` keeps it through the TRACK key's
+  release -- the first CLB10 build lost it there, the smoke caught it) and `cl_bkpick` (a new splice, `jsr
+  0x400a1030` -> `jsr cl_bkpick` at 0x4007b37c, the [BANK] layer's pattern pick: the view pages at the PATTERN pick,
+  not at the bank's trig; the flash; a chain add is not a pick). **The user flashed KY18BCCLBA: all passed** except
+  the arrows' visibility (wanted: hidden until an arrow press, shown on boxes after it) and two missing flashes.
+- **CL44b (4c13d12, CLB11), the user on CLB10:** "The arrows should remain hidden until user arrow-moves them. Once
+  that has happened, the arrows should be visible when on a highlighted or selection box (and the led grid), until
+  which time the arrows are hidden again via execution of one of the actions that hides them"; "PTN + Trig, on the
+  slot that's currently playing (CURR PTN+PRT) should also give the confirmation flash. This should be a uniform rule
+  across Clyps"; execution headers. Built: CL43's hidden state back (`cl_ysup`, records 0x4000, `cl_ychk`, `cl_phide`)
+  plus `cl_hc`, the mark that hid them -- `cl_tuck` shows them again (for good) once neither the highlight nor the
+  select box is at `cl_hc`, and in another bank than `cl_hc`'s; hidden ones are never moved (no tuck promotion);
+  never moved: none shown, the unseen cursor on the box / highlight in view (`cl_boxhome`) follows landings; shown
+  arrows light their trig yellow on your own pattern too (CL34's option b gone); [YES] never-moved loads the box only
+  with its bank shown (`ex2_none`, CL43 D2). One flash rule: `cl_ptnpick` and `cl_bkpick` flash the pattern you are on
+  too, temp save / reload (done) flash; audit table in scope §1.44. Headers while the flash runs (`cl_hov` /
+  `cl_hovt`): [BANK] pick "PTN LOAD: CURR PTN+PRT", TRACK+[NO] "Tn LOAD: TEMP TRK" (several held: MULTI LOAD:),
+  [PTN]+TRACK "Tn LOAD: PROJ TRK SEQ", [BANK]+TRACK "Tn LOAD: PROJ TRK FULL"; MIDI "Mn"; header-font widths 30 / 45
+  / 49 px, the widest box ends at x 85 (BNK's starts at 88): all fit. Scope §1.44 has the arrow-path table.
+- **Net code lines (patch_clyps.s, comments and labels out):** CL44 vs CL43 (2b1c108) +89 / -180 (net -91: the pure
+  rule removed `cl_ychk` / `cl_phide`); CL44b vs CL44 +250 / -49; **total CL43 -> CL44b +185 / -75, net +110**:
+  arrows ~+6 (`cl_tuck` +12 with `cl_atbox` gone, `cl_boxhome` +1, `ex2_act` -5, `ex2_none` +3, `cl_ychk` -9,
+  `cl_phide` +7, psave / pload / `cl_hc` +3, `cl_paint` -6), card-track flash ~+17 (`ktr_any` guard 10, the flash
+  6, `cl_trl` 1), `cl_bkpick` +23 (+1 detour row in build_clyps.py), the uniform flash ~+2 (`cl_ptnpick` -6, temp
+  +8), headers ~+62 (`cl_draw` +27, the temp / card setters ~+24, equates 4, strings 3, data 2, flash clears 2).
+  clyps_reload.s unchanged.
+- **Gates (emulator, OT DEMO / JAM2, route A; out/rc3clyps/gates7):** `diag_clyps_lock.py` now checks the arrows on
+  EVERY window draw of every run against the rule (CL44: drawn exactly when uncovered; CL44b: drawn exactly when made
+  by an arrow press, in the bank viewed, the chord up, and not (`cl_ysup`, in `cl_hc`'s bank, the highlight or the
+  select box -- `cl_draw`'s d7 -- still there)); `a+` also wants their trig yellow (CL44b); new ops `BK`/`BL`/`BN`
+  (stock's [BANK] layer in Clyps), `TS`/`TR` (temp save / reload: flash, header), `PF` ([PTN] + your own trig: flash),
+  `Ru` / `R` flash + header checks, `qc` expects the cancel's flash (CL44b). **CLB10 (CL44) partial run** (stopped when
+  CL44b came): 38 jobs done, all PASS except rzc10 / rzb10 / rzc10r / rzb10r, the injected failed read's own R
+  (expected, identical to CLB9's). **CLB11 (CL44b), all three images:** e1-e8 (rewritten), e9 (a pattern lands on
+  them, then leaves), e9q (a cue cancelled), eA (never moved stays hidden; onto the highlight, LED yellow; a pattern
+  lands on them; an arrow), eB (the select box leaves), f (card track flash + header), h (TS / TR / PF / Ru / RB), z (Yf
+  / Y0 paged), the CL40-CL43 sets (x, y, u, rt, rp, rx, c, m, n, b, s) -- all PASS, every run's per-draw rule check
+  and one-set check included; c11a/b/d/s/q failed only `qc`'s "steady window" (the new cancel flash) on the gate
+  before its fix, re-run PASS (c11ar-c11qr); g11 c/b/s: every bank-pick check PASS, `BL0.0`'s blink sampling failed on
+  timing (the cue landed inside the sample), re-run timed (`BL0.0@m1`, g11cr / g11br / g11sr 34 each) PASS; g11m
+  (--bankb) 37 PASS; e9q11c / s 20 PASS; rzc11 / rzb11 / rzc11r / rzb11r: only the expected R after the injected
+  failure (and the retry's "new generation" gate check), line for line as CLB9. Window vs CL38 (w11): W1-W6 PASS, W7 8 px = CL38's never-moved arrows tucked by a
+  load and reappearing when the box moved -- hidden now by the user's "hidden until user arrow-moves them" (as CLB9).
+  diag_clyps_ui on V1.8C: ABCDY, J, FQ, L, XOW, VZI, T, 8, 9, H, MU (JAM2), NPK, EGRS PASS (B / L / V / FQ follow the
+  rule); ABCDY V1.8BC / CLYPS PASS; diag_clyps_quant DJ off / on PASS.
+- **Images (KYOTI_ALLOW_WIP=1, out/rc3clyps/wt7; copies in out/rc3clyps/CLB10, CLB11; NOT promoted):** KY18BCCLB10
+  ('KY18BCCLBA', c6c7587) syx 280c99a1... (bin daf11ca3..., mainos 0c63bfe4...) -- FLASHED by the user; KY18C CLBA syx
+  2114c66b...; CLYPS CLBA syx b4573197.... KY18BCCLB11 ('KY18BCCLBB', 4c13d12) syx 0c905a86... (bin 90dd23c4...,
+  mainos b76754e0...), NOT flashed yet; KY18C CLBB syx 0356433c... (mainos e82ac4c8...); CLYPS CLBB syx bd2c4cde...
+  (mainos 7ad181f0...). Script out/rc3clyps/build_clb10.sh (V=CLBx N=clbNN).
+- **Manual (docs/clyps/MANUAL.md, not edited) -- cumulative since CL39, now:** the CL41-CL43 items as listed there,
+  with §6 Aiming rewritten again: the arrows show only after you move them; once moved they stay visible on the
+  highlight, the box or a blinking cue box (their trig solid yellow, your own pattern's too); a load or pattern
+  landing on their slot in the bank you view hides them, and they come back by themselves when that box or the
+  highlight moves off the slot (or with an arrow); paging away shows them, paging back hides them while the mark is
+  still there; never-moved arrows stay hidden and the first arrow starts at the box; [YES] with nothing moved loads
+  the box only when its bank is shown (the aiming.svg "tuck and reappear" figure is right again for moved arrows).
+  §4 header: the execution headers (PTN LOAD: CURR PTN+PRT after a [BANK] pick; Tn LOAD: TEMP TRK / PROJ TRK SEQ /
+  PROJ TRK FULL during the flash; Mn on the MIDI side). §5: every execution flashes its slot -- [PTN] + your own
+  pattern's trig, card track reloads, temp save / reload included. §8: [BANK] + bank + pattern inside Clyps pages the
+  view to that bank when you pick the pattern (the bank's trig alone changes nothing).

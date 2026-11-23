@@ -1859,6 +1859,100 @@ the investigation (NOTES "CL24 timing investigation", harness `tools/diag_clyps_
   the flash, RT's toast), `Yf`, `Y0` (no flash either), `I5K` (chord-opened Clyps, [BANK] up, [PTN] + trig K: stock's
   cue, no Clyps load), `B2`, `Ru` (the toast, CL43). Results in NOTES.
 
+### 1.44 The arrows' rule revised twice; one execute-flash rule; execution headers; stock's bank pick pages the view (the user, 2026-11-22; test images CLB10, CLB11)
+
+- **CL44 (CLB10, the user verbatim):** (1) "If arrows are invisible under an outline box, and that outline box goes
+  away, the arrows should become visible again. Basically, the rule is that the arrows should always be visible unless
+  under a highlight or outline box." (2) "PTN + Track should still 'execute flash' the corresponding slot, even when
+  on the same (self) pattern." (3) "In Clyps, if the Bank is changed via the stock gestures (bank, trig, trig for
+  pattern), from the bank that's in Clyps view, Clyps view needs to update to show that newly selected bank."
+  Built as a pure rule (c6c7587: covered = the highlight / select box / a cue's box on their slot, no hidden state;
+  arrows always present from the open, hidden on the box / highlight) -- flashed by the user: all passed but the
+  arrows' visibility and two more flashes, so CL44b below replaces CL44's arrow rule. (2) and (3) are kept as built.
+- **CL44b (CLB11, the user on CLB10, verbatim):** "The arrows should remain hidden until user arrow-moves them. Once
+  that has happened, the arrows should be visible when on a highlighted or selection box (and the led grid), until
+  which time the arrows are hidden again via execution of one of the actions that hides them." With CL44's (1): a
+  hidden set shows again once the mark that hid it leaves their slot. And: "PTN + Trig, on the slot that's currently
+  playing (CURR PTN+PRT) should also give the confirmation flash. This should be a uniform rule across Clyps." Plus
+  the execution headers (below).
+- **The arrows (CL44b, `cl_tuck`):** CL42 / CL43's state comes back -- `cl_pmoved` (an arrow press made them), `cl_ysup`
+  (hidden), the records' 0x4000 bit, `cl_ychk` (a track's load landing on their slot, bank viewed) and `cl_phide` (a
+  pattern landing on it) -- with one addition, **`cl_hc` = the mark that hid them** (bank << 8 | slot; in a record:
+  the record's bank, rewritten to the mark's when it is hidden). `cl_tuck`: hidden only while `cl_ysup`, the mark still
+  there (the highlight or the active track's select box at `cl_hc`) and the arrows in `cl_hc`'s bank; when the mark
+  has left, `cl_ysup` is cleared there and then (shown for good). An arrow press clears it (`cl_pshow`). Hidden ones are
+  never moved (CL42 tucked them under a new box: `yc_t`'s promotion is gone). Never moved (`cl_pmoved` 0): none shown,
+  whatever the boxes do; the unseen cursor waits on the select box in the bank viewed, else on the highlight in view
+  (`cl_boxhome`, CL44's placement; `cl_enter` pages to the playing bank first) and follows landings (`yc_t`,
+  `ex2_cur`), so the first arrow starts at the box (CL22 / CL28). Shown arrows light their trig yellow on the pattern
+  you are on too ("and the led grid": CL34's option b, red there, is gone).
+- **[YES]:** arrows made by an arrow press -> their slot, shown or hidden (hidden ones are always under their mark in
+  the bank shown: `cl_atbox` removed; CL43 D1 / D3); never moved -> the select box's slot only when its bank is
+  shown, else nothing (`ex2_none` + a bank test: CL43 D2, which `cl_atbox` used to give the tucked arrows).
+- **Choice (no record):** none shown until an arrow press (the user's CL44b); the unseen cursor on the box / highlight
+  as above. (CL44 had given such a track arrows at once, hidden on the box / highlight.)
+- **One execute-flash rule (CL44b), every path audited:**
+
+| Execution | Its flash (`cl_flcode` / `cl_flstart` / `cl_florig` / `cl_flhdr`) | Before |
+|---|---|---|
+| Trig / [YES] / [FUNC] slot load, [CUE] group load (same data too) | the loaded slot (`ex2`) | flashed (CL43 D1 / D3) |
+| ORIG (the trig of your pattern; [FUNC]: ALL) | the highlight, header ORIG TRK SEQ / ALL (`cl_florig`) | flashed |
+| ORIG PTN+PRT ([PTN]+[BANK]+[YES]) | its slot (`kp_pat`) | flashed; refused (V1.8BC one-per-core): none |
+| [PTN]+[BANK]+trig (card pattern reload) | its slot, at the chord (`kt`) | flashed |
+| [PTN]+TRACK / [BANK]+TRACK (card track reload) | the pattern you are on (`ktr_req`) | CL44 |
+| [PTN]+trig, a [PTN] tap's SELECT PATTERN + trig, [PTN] held + trig after the chord (I5) | the picked slot, **the pattern you are on too** (`cl_ptnpick`) | CL44b: was none on your own pattern |
+| [BANK] + bank trig + pattern trig | the picked slot, **your own pattern too** (`cl_bkpick`) | CL44 / CL44b |
+| TRACK+[YES] (temp save, done) / TRACK+[NO] (temp reload, done) | the pattern you are on (`cl_tsyn`) | CL44b: was none |
+| Not executions (no flash): an arrow, paging, a track change, [YES] / a group with nothing aimed (`ex2_n`, `cl_targets` 0), "SAVE FIRST!", a refused FULL / temp reload (one-per-core), DIRECT JUMP on / off, renaming | -- | -- |
+
+  A failed card read (never-saved bank) has already flashed at the press, as the card pattern reload did at its chord.
+- **Execution headers (CL44b, `cl_hov` / `cl_hovt`, while the flash runs, as ORIG TRK SEQ's):** [BANK] + bank + pattern
+  "PTN LOAD: CURR PTN+PRT" (the [PTN]-alone header, CL42); TRACK+[NO] "Tn LOAD: TEMP TRK" (two or more tracks held:
+  "MULTI LOAD: TEMP TRK"); [PTN]+TRACK "Tn LOAD: PROJ TRK SEQ"; [BANK]+TRACK "Tn LOAD: PROJ TRK FULL". Tn = the reloaded
+  track; the MIDI side "Mn" (the header's existing naming, `cd_ta`). Widths (header font 0x400c246a): TEMP TRK 30 px,
+  PROJ TRK SEQ 45, PROJ TRK FULL 49 -- after "Tn LOAD:" (label at x 35) the widest box ends at x 85 (ORIG TRK FULL's
+  too); "BNK A"'s box starts at 88: everything fits, nothing truncated. Every flash start clears `cl_hov` (`cl_fls`),
+  `cl_flstop` too; the setters write it after starting the flash.
+- **Card track reload flash (CL44, `ktr_req`):** at the press, whether or not anything differs (the toast as CL43);
+  `cl_trl` keeps it through that TRACK key's hold and release (the first CLB10 build lost it at the release).
+- **Stock's [BANK] + bank + pattern in Clyps (CL44, `cl_bkpick`):** a new splice, `jsr 0x400a1030` -> `jsr cl_bkpick` at
+  0x4007b37c (the [BANK] layer's pattern pick; held, or from the latched SELECT BANK): stock's cue, then the view pages
+  to that bank as a paging (`cl_pfollow`), the flash and the header, so the cue's box blinks and lands in view.
+  **Choice: at the pattern pick** (the second trig) -- a bank trig then [NO] / release changes nothing. A chain add
+  (another trig held, 0x4009c634) is not a pick. A user gesture: the view still never follows a landing (CL42 D).
+- **The arrows per path (CL44b; replaces §1.42's table):**
+
+| Path | The arrows | Where |
+|---|---|---|
+| Open / reopen | the track's record (shown / hidden with its mark), following the view; none: none shown, the unseen cursor on the box / highlight | `cl_enter` (`cl_vplay` first; `cl_pload` / `cl_boxhome`); `cl_close` saves the screen's |
+| An arrow (UP / DOWN / LEFT / RIGHT) | shown on the new slot -- on the highlight, the select box or a cue's box too, the LED solid yellow | `cl_pshow` clears `cl_ysup` |
+| Paging ([BANK] + arrows) | follow the view, same slot number; hidden ones show in another bank than their mark's, hide again back there while it stays | `cl_page` -> `cl_pfollow`; `cl_tuck` |
+| Stock [BANK] + bank + pattern pick, in Clyps | the view pages at the pattern pick; they follow (as paging) | `cl_bkpick` |
+| Track change (TRACK, [MIDI], a group's view) | that track's record, following the view; none: none shown | `cl_refresh` |
+| [BANK] held, [PTN] alone held | unchanged | -- |
+| The [PTN]+[BANK] chord held | not drawn while held; arrow keys do nothing (CL43) | `cl_draw` (hdrst bit 1), `cl_k_ud` / `cl_k_lr` |
+| A load cued on their slot (running) | stay shown over its blinking box (they notch it, CL40) | -- |
+| A SEQ / FULL / [CUE] group load lands on their slot (bank viewed) | hidden, `cl_hc` = that box | `cl_postmask` -> `cl_ychk` |
+| ORIG / temp reload / card track reload / ORIG PTN+PRT landing on their slot (the highlight) | hidden, `cl_hc` = the highlight | `cl_ychk` |
+| A pattern lands on their slot (stock cue, [PTN] + trig, card pattern, DIRECT JUMP, MIDI / arranger, a [BANK] pick), bank viewed, open or closed | hidden (records too), `cl_hc` = the highlight | UI tail -> `cl_phide` |
+| A landing elsewhere / in a bank not viewed | shown ones stay; hidden ones stay where they are | -- |
+| The hiding mark leaves their slot (a load elsewhere, ORIG, a reload, a pattern change, the cue landing elsewhere) | shown again, for good | `cl_tuck` |
+| Never moved, any of the above | none shown; the unseen cursor follows a landing's box | `yc_t`, `ex2_cur` |
+| STOP / PLAY | unchanged | -- |
+| Project load | none (records, `cl_pmoved`, `cl_ysup` cleared) | `cl_projload` |
+| [YES] | arrow-made: their slot (with its flash); never moved: the box in the bank shown, else nothing | `ex2_act` / `ex2_none` |
+
+- **Gates (emulator, OT DEMO, route A; out/rc3clyps/gates7):** `diag_clyps_lock.py` checks the arrows on EVERY window draw
+  of every run (CL44: drawn exactly when nothing covers them; CL44b: drawn exactly when made by an arrow press, in the
+  bank viewed, the chord not held, and not (`cl_ysup`, in `cl_hc`'s bank, the highlight or the select box -- `cl_draw`'s
+  d7 -- still at `cl_hc`)), besides the per-draw one-set count; `a+` also wants their trig LED yellow (CL44b); e1-e8
+  rewritten, new e9 (a pattern cue lands on them, then leaves), e9q (a cue cancelled), eA (never moved stays hidden;
+  onto the highlight; a pattern lands on them; an arrow), eB (the select box leaves), f (`Ru` / `R`: the flash and the
+  header), g (`BN` bank trig + [NO]: nothing; `BK` held / `BL` latched: the view at the pattern pick, the flash, the
+  header, the cue's blink, the landing in view; --bankb), h (`TS` / `TR` temp save / reload: the flash, TR's header;
+  `PF` [PTN] + your own trig: the flash). diag_clyps_ui: B / L / V / FQ follow the rule. Results in NOTES (2026-11-22,
+  CL44 / CL44b).
+
 ### 1.27 Combinations that must never ship (the user, 2026-11-07)
 
 - Clyps + RELOAD_FROM_PROJECT never; Clyps + DIRECT_JUMP_KYOTI only as KYOTI's integrated pair (SUPERSEDE).
