@@ -8285,22 +8285,12 @@ cd_nlf:
     move.l  %d0,cl_cqd
     jsr     cl_cueslot                  | CL34: the active track's cued slot (-1: none)
     move.l  %d0,cl_cq
-    tst.b   cl_cph
-    beq.b   cd_npb
-    move.l  %d0,%d2
-    bsr.w   cd_cbox
-    beq.b   cd_npq
-    move.l  %d2,cl_cqd
-cd_npq:
-    jsr     cl_pcue
-    move.l  %d0,%d2
-    bsr.w   cd_cbox
-    beq.b   cd_npb
-    move.l  %d2,cl_pbq
-cd_npb:
-    move.b  cl_hdrst,%d0
+    move.b  cl_hdrst,%d0                | CL45: the cue frames are drawn after the select box (cd_cues)
     btst    #1,%d0
-    bne.w   cd_boxed
+    beq.b   cd_npb
+    bsr.w   cd_cues
+    bra.w   cd_boxed
+cd_npb:
 |   the select box
     moveq   #0,%d0
     move.b  PLAY_BANK,%d0
@@ -8330,6 +8320,7 @@ cd_sel:
     moveq   #0,%d3                      | set
     bsr.w   cd_frame
 cd_nosel:
+    bsr.w   cd_cues                     | CL45: the cue frames last, before the arrows (which notch them)
 |   the pre-select arrows: the cursor, the one set of arrows in the window (CL40, the user: never a second set)
     tst.b   cl_pmoved
     beq.w   cd_boxed
@@ -8344,6 +8335,48 @@ cd_nosel:
     andi.l  #15,%d2
     bsr.w   cd_arrows
     bra.w   cd_boxed
+| cd_cues (cl_draw, d7 = the select box; in the on phase): CL45 (the user, 2026-11-23) the cue frames are drawn LAST,
+| above every box and bar, inverted: what nothing lit lights, what a neighbour lit (the select box's or another frame's
+| shared edge row, the highlight bar's edge, the bar itself under a cue on the highlight, CL40) goes dark -- so the
+| whole outline blinks, and in the off phase that row shows the neighbour's own edge. A cue on the select box's own
+| slot draws no frame: the select box itself blinks (CL39c; an inverted frame over it would cancel it). Uses d0-d6/a0-a1/a3.
+cd_cues:
+    tst.b   cl_cph
+    beq.b   cq2_out
+    move.l  cl_cq,%d2
+    bsr.b   cq2_sk
+    beq.b   cq2_p
+    bsr.w   cd_cbox
+    beq.b   cq2_p
+    move.l  %d2,cl_cqd
+cq2_p:
+    jsr     cl_pcue
+    move.l  %d0,%d2
+    bsr.b   cq2_sk
+    beq.b   cq2_out
+    bsr.w   cd_cbox
+    beq.b   cq2_out
+    move.l  %d2,cl_pbq
+cq2_out:
+    rts
+cq2_sk:                                 | d2 = a cue -> Z set: the select box (drawn) stands for it
+    cmp.l   %d7,%d2
+    bne.b   cqz_out
+    move.b  cl_hdrst,%d0
+    btst    #1,%d0
+    bne.b   cqz_no                      | the chord held: no select box
+    moveq   #0,%d0
+    move.b  PLAY_BANK,%d0
+    lsl.l   #8,%d0
+    move.b  ACT_PAT,%d0
+    cmp.l   %d7,%d0
+    beq.b   cqz_no                      | the playing slot: no select box
+    moveq   #0,%d0
+    rts
+cqz_no:
+    moveq   #1,%d0
+cqz_out:
+    rts
 | cd_cbox (d2 = a cued slot, bank << 8 | slot, or -1; the on phase) -> d0 = 1 (flags set): its 1 px frame drawn -- in
 | its bank, not while the load confirmation flashes that cell (the user: the fast flash first, then the slow blink);
 | on the highlight (the pattern you are on: an original / saved / card source) XORed. Keeps d2; uses d0-d1/d3-d6/a0-a1/a3.
@@ -8365,13 +8398,7 @@ cx_go:
     move.w  2(%a3),%d5
     moveq   #0,%d6
     move.w  4(%a3),%d6
-    moveq   #0,%d0
-    move.b  PLAY_BANK,%d0
-    lsl.l   #8,%d0
-    move.b  ACT_PAT,%d0
-    cmp.l   (%sp),%d0
-    seq     %d3
-    andi.l  #1,%d3                      | d3 = 1 on the highlight: inverted
+    moveq   #1,%d3                      | CL45: inverted everywhere (cd_cues; CL40: on the highlight)
     bsr.w   cd_frame
     move.l  (%sp)+,%d2
     moveq   #1,%d0
