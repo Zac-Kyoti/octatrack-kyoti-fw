@@ -48,6 +48,13 @@ grades it against DIRECT JUMP's position model.
        playing bank's pattern K untouched; P presses [BANK] first and checks the chord's grid and the view before the
        [YES], the view on the playing bank after it; KN = TRACK N: the view stays, the track's arrows in it; R =
        [PTN] + the active TRACK (a card SEQ reload of the playing pattern's track): it lands, the view stays.
+  CL46 (the author, 2026-11-23: no cue frames; a cued slot's TEXT blinks, its number and "x" steady): every draw records
+       the slots whose text it left out (cd_thide); QT = after the flash, ~80 UI ticks: the expected cues (the active
+       track's cl_cue mapped as cl_cueslot, stock's PEND while running, in the bank shown) are exactly the texts left
+       out in the off phase, none in the on phase; on vs off differ only inside those cells' text areas (never the
+       number, the "x", a border: no frame); the off phase's text area blank (solid on the highlight); one screen per
+       phase. G<tracks> = [CUE] held + those TRACK keys (the last one active), released. q / r / t / QB / qsettled check
+       the same way on a CL46 image.
 """
 import argparse, json, os, pathlib, sys
 
@@ -99,6 +106,7 @@ def main(argv):
                                      # landing on them hides them until its mark leaves; one flash rule; headers
     CL45 = "cl_hovtick" in syms      # an execution on their slot hides them though nothing lands; a header lasts a
                                      # toast's time; TEMP TRKS (the user, 2026-11-23)
+    CL46 = "cd_thide" in syms        # no cue frames: a cued slot's text blinks (the author, 2026-11-23)
     out = pathlib.Path(a.out)
     if not out.is_absolute():
         out = ROOT / out
@@ -358,7 +366,8 @@ def main(argv):
             rt.run(ms=ms)
             main_call(0x40056C28)
             tail()
-            seq.append(dict(ph=rd(syms["cl_cph"], 1), pcq=rd(syms["cl_pcq"], 2), pbq=rd(syms["cl_pbq"], 4),
+            seq.append(dict(ph=rd(syms["cl_cph"], 1), pcq=rd(syms["cl_pcq"], 2),
+                            pbq=0xFFFFFFFF if CL46 else rd(syms["cl_pbq"], 4), hid=thid["last"], dph=thid["ph"],
                             act=rd(ACT, 1), bank=rd(syms["cl_bank"], 1), flk=rd(syms["cl_flk"], 1) if CL40 else 0,
                             fc=rd(syms["cl_fcode"], 2), scr=composed()))
         return seq
@@ -403,6 +412,70 @@ def main(argv):
         x0, x1 = qcell(slot)    # 18 + 6r, x as cl_colx; adjacent rows share a pixel row)
         return (x0, 12 + 6 * (slot & 7), x1, 18 + 6 * (slot & 7))
 
+    def qtrect(slot):       # CL46: a cell's text area -- from the label's x (cl_colx's number field + 2 digits + 2) to
+        R = qbox(slot)          # 2 px in from the bar's right end (the arrows' columns), the 5 text rows
+        tx0 = 8 + rd(syms["cl_colx"] + (8 if slot >= 8 else 0), 2) + 10
+        return (tx0, R[1] + 1, R[2] - 2, R[3] - 1)
+
+    def qtreg(slot):
+        r_ = qtrect(slot)
+        return {(x, y) for x in range(r_[0], r_[2] + 1) for y in range(r_[1], r_[3] + 1)}
+
+    def qcues():            # CL46: what should blink, from the state (not cl_draw's): the active track's cue (cl_cue; a
+        t_ = main_call(syms["cl_trk"]) & 0xFF   # source >= 16 << 8 = the pattern's own slot) and stock's (running,
+        pb_, pa_ = rd(0x800065BD, 1), rd(ACT, 1)     # PEND not the playing pattern), bank << 8 | slot
+        out_ = set()
+        c_ = rd(syms["cl_cue"] + 2 * t_, 2)
+        if c_ != 0xFFFF:
+            out_.add((c_ & 0x0F0F) if c_ >> 8 < 16 else (pb_ << 8) | pa_)
+        if rd(RUNNING, 4):
+            q_ = (rd(0x800065BF, 1) << 8) | rd(0x800065C0, 1)
+            if q_ >> 8 < 16 and q_ & 0xFF < 16 and q_ != (pb_ << 8) | pa_:
+                out_.add(q_)
+        return out_
+
+    def qgrid(scr):         # CL46: the window's grid rows only (the header's execution text may end meanwhile)
+        import lcd_view as lv
+        return tuple(tuple(row[8:120]) for row in lv.pixels(scr)[11:])
+
+    def qtext(seq, codes, label):   # CL46: the texts of exactly these cues (bank shown) blink; nothing else changes
+        import lcd_view as lv
+        vb_ = rd(syms["cl_bank"], 1)
+        want = frozenset(c for c in codes if c >> 8 == vb_)
+        hl_ = (rd(0x800065BD, 1) << 8) | rd(ACT, 1)
+        fl_ = [x for x in seq if x["flk"]]
+        up = [x for x in seq if not x["flk"]]
+        on, off = [x for x in up if x["dph"]], [x for x in up if not x["dph"]]
+        qcheck(all(x["fc"] not in x["hid"] for x in fl_),
+               f"{label}: CL46 no text left out on the flashing cell while the flash runs ({len(fl_)} UI ticks)")
+        nm = lambda c: f"{chr(65 + (c >> 8))}{(c & 15) + 1:02d}"
+        qcheck(all(x["hid"] == want for x in off) and all(not x["hid"] for x in on) and (bool(off) or not want),
+               f"{label}: CL46 the texts left out in the off phase = the cues in view {sorted(map(nm, want))} "
+               f"({len(off)} off draws: {sorted({tuple(sorted(map(nm, x['hid']))) for x in off})}); none in the "
+               f"{len(on)} on draws ({sorted({tuple(sorted(map(nm, x['hid']))) for x in on})})")
+        if not want:
+            nw = len({qgrid(x["scr"]) for x in up})
+            qcheck(nw <= 1, f"{label}: CL46 nothing cued in view: the grid steady ({nw} screen(s) over {len(up)} UI ticks)")
+            return on, off
+        if not on or not off:
+            qcheck(False, f"{label}: CL46 both phases sampled ({len(on)} on, {len(off)} off)")
+            return on, off
+        d = qdiff(on[-1]["scr"], off[-1]["scr"])
+        regs = set().union(*(qtreg(c & 15) for c in want))
+        per = {nm(c): len(d & qtreg(c & 15)) for c in want}
+        qcheck(d <= regs and all(per.values()),
+               f"{label}: CL46 on vs off differ only in the cued cells' text areas {per} ({len(d - regs)} px outside: "
+               f"number, \"x\", border, other cells{'' if d <= regs else ' -- ' + str(sorted(d - regs)[:6])})")
+        po_ = lv.pixels(off[-1]["scr"])
+        for c in want:
+            vals = {po_[y][x] for (x, y) in qtreg(c & 15)}
+            qcheck(vals == ({1} if c == hl_ else {0}),
+                   f"{label}: CL46 {nm(c)}'s text area in the off phase {'solid (the highlight)' if c == hl_ else 'blank'} "
+                   f"({sorted(vals)})")
+        non, noff = len({qgrid(x["scr"]) for x in on}), len({qgrid(x["scr"]) for x in off})
+        qcheck(non <= 1 and noff <= 1, f"{label}: CL46 one grid per phase ({non} on, {noff} off)")
+        return on, off
+
     qst = {}
     # CL39b: a cl_draw entered while cl_uitick runs = a draw in the UI task on the unit (prio 3, preempting the sys
     # task's draws: the CL39 garbage). The gate calls the tick from main, so here it only shows up as nesting.
@@ -430,6 +503,16 @@ def main(argv):
         u.hook_add(er.eb.UC_HOOK_CODE, lambda uc, ad, sz, ud: posts.update(n=posts["n"] + 1),
                    begin=syms["dp_post"], end=syms["dp_post"])
 
+    thid = dict(cur=[], last=frozenset(), ph=1, n=0)    # CL46: the slots whose text the draw left out (cd_thide)
+    if CL46:
+        u.hook_add(er.eb.UC_HOOK_CODE, lambda uc, ad, sz, ud: thid.update(cur=[]), begin=syms["cl_draw"],
+                   end=syms["cl_draw"])
+        u.hook_add(er.eb.UC_HOOK_CODE, lambda uc, ad, sz, ud: thid["cur"].append(
+            (rd(syms["cl_bank"], 1) << 8) | (uc.reg_read(er.eb.UC_M68K_REG_D2) & 15)),
+            begin=syms["cd_thide"], end=syms["cd_thide"])
+        u.hook_add(er.eb.UC_HOOK_CODE, lambda uc, ad, sz, ud: thid.update(
+            last=frozenset(thid["cur"]), ph=rd(syms["cl_cph"], 1), n=thid["n"] + 1),
+            begin=syms["cd_boxed"], end=syms["cd_boxed"])
     arw = dict(n=0, max=0, bad=0)       # CL40: arrow sets per window draw (cd_arrows calls between cl_draw and cd_boxed)
     if "cd_arrows" in syms and "cd_boxed" in syms:
         u.hook_add(er.eb.UC_HOOK_CODE, lambda uc, ad, sz, ud: arw.update(n=0), begin=syms["cl_draw"], end=syms["cl_draw"])
@@ -499,6 +582,13 @@ def main(argv):
         qcheck(all(l_[1] == (20 if l_[0] else 10) for l_ in lens[1:-1]) and len(lens) >= 3,
                f"{label}: the arrows' blink, 20 on / 10 off UI ticks ({lens})")
         same = code >> 8 == rd(syms["cl_bank"], 1)
+        if CL46:                    # CL46: its text blinks (with the track's cue, if any), no frame
+            on, off = qtext(seq, qcues() | {code}, label)
+            if on and off:
+                qst.update(code=code, on=on[-1]["scr"], off=off[-1]["scr"], rect=qbox(code & 15), act=rd(ACT, 1),
+                           arw=bool(rd(syms["cl_pmoved"], 1)) and not rd(syms["cl_ysup"], 1)
+                           and ((rd(syms["cl_sbank"], 1) << 8) | rd(syms["cl_cur"], 1)) == code)
+            return
         if CL40 and fl and same:    # the flash: the cell inverted / plain, no frame meanwhile
             qcheck(all(x["pbq"] == 0xFFFFFFFF for x in fl), f"{label}: no cue box while the flash runs")
         qcheck(all(x["pbq"] == (code if same else 0xFFFFFFFF) for x in on) and all(x["pbq"] == 0xFFFFFFFF for x in off),
@@ -526,10 +616,20 @@ def main(argv):
 
     def qsettled(label, code, ref, what):   # after a landing / a cancel: no cue, no bar, no blink; the cue's cell as ref
         seq = qsample(40)
-        qcheck(all(x["pcq"] == 0xFFFF and x["pbq"] == 0xFFFFFFFF for x in seq),
-               f"{label}: no cue left (cl_pcq 0xffff, cl_pbq -1 on all {len(seq)} UI ticks)")
-        nw = len({qwin(x["scr"]) for x in seq})
-        qcheck(nw == 1, f"{label}: the window is steady over {len(seq)} UI ticks (no blink): {nw} screen(s)")
+        qcheck(all(x["pcq"] == 0xFFFF and x["pbq"] == 0xFFFFFFFF and code not in x["hid"] for x in seq),
+               f"{label}: no cue left (cl_pcq 0xffff, cl_pbq -1{', its text never left out' if CL46 else ''} on all "
+               f"{len(seq)} UI ticks)")
+        nw = len({(qgrid if CL46 else qwin)(x["scr"]) for x in seq})
+        qcheck(nw == 1, f"{label}: the {'grid' if CL46 else 'window'} is steady over {len(seq)} UI ticks (no blink): "
+               f"{nw} screen(s)")
+        if CL46 and ref is not None and qst.get("on") and qst.get("code") == code and code >> 8 == rd(syms["cl_bank"], 1):
+            r_ = qtrect(code & 15)          # CL46: the text area as in the on phase -- inverted after a landing
+            c1, c0 = qcrop(seq[-1]["scr"], r_), qcrop(qst["on"], r_)
+            if ref == "on":
+                c0 = [tuple(1 - v for v in r) for r in c0]
+            qcheck(c1 == c0, f"{label}: CL46 slot {(code & 15) + 1}'s text = the on phase's"
+                   f"{' inverted (the highlight)' if ref == 'on' else ''} ({what})")
+            return seq
         if ref is not None and qst.get("arw") and ("cl_phide" in syms or CL44) and qst.get("code") == code:
             print(f"      {label}: the cell vs the cue's {ref} phase not compared -- the arrows sat on the cued slot and "
                   f"hide at its landing (CL42; the op list checks a-)", flush=True)
@@ -648,6 +748,9 @@ def main(argv):
             fl = [x for x in seq if x["flk"]]
             qcheck(bool(fl) and seq[0]["flk"] and all(x["fc"] == code for x in fl) and len(fl) < 32 and tc == code,
                    f"#{i} {op}: cued {tc:#06x}; the confirmation flash on its slot first ({len(fl)} UI ticks)")
+            if CL46:                      # CL46: its text blinks, nothing else
+                qtext(seq, qcues() | {code}, f"#{i} {op}")
+                continue
             on = [x for x in seq if not x["flk"] and x["ph"]]
             off = [x for x in seq if not x["flk"] and not x["ph"]]
             if on and off:
@@ -1023,11 +1126,40 @@ def main(argv):
             settle(100)
             print(f"#{i} {op}: toasts {[x[1] for x in stoasts[ns0:]]}; header {list(hdr)}", flush=True)
             continue
+        if op[:2] == "QT" and (len(op) == 2 or op[2:].isdigit()):
+            # CL46: the cued texts blink -- QT: at least one cue in view; QTn: exactly n (QT0: nothing blinks)
+            g = 0
+            while rd(syms["cl_flk"], 1) and g < 100:
+                settle(34)
+                g += 1
+            seq_ = qsample(80 if op != "QT0" else 40)
+            cs_ = qcues()
+            vw_ = {c for c in cs_ if c >> 8 == rd(syms["cl_bank"], 1)}
+            n_ = int(op[2:]) if len(op) > 2 else None
+            qcheck(len(vw_) == n_ if n_ is not None else bool(vw_),
+                   f"#{i} {op}: cues in view {sorted(hex(c) for c in vw_)} (all {sorted(hex(c) for c in cs_)}; T"
+                   f"{(main_call(syms['cl_trk']) & 0xFF) + 1} active)")
+            qtext(seq_, cs_, f"#{i} {op}")
+            continue
+        if op[0] == "G" and op[1:].isdigit():  # CL46: a [CUE] group -- [CUE] held + TRACK keys (the last one active)
+            key(0x2A, 1)
+            for c_ in op[1:]:
+                key(0x10 + int(c_) - 1, 1); key(0x10 + int(c_) - 1, 0)
+            key(0x2A, 0)
+            settle(200)
+            print(f"#{i} {op}: group {rd(syms['cl_grp'], 2) if 'cl_grp' in syms else '?'}, active T"
+                  f"{rd(0x80000000, 1) + 1}", flush=True)
+            continue
         if op == "QB":                        # CL45: the track's cue frame next to the select box (the row above /
             seq_ = qsample(80)                # below shares an edge row) -- CL45's inverted, drawn-last frame was
             cq_ = rd(syms["cl_cq"], 4)        # reverted on the user's word (CLB12): the CL44b drawing, the shared row lit in
                                               # both phases (the box's edge), the rest of the frame blinking
             bx_ = main_call(syms["cl_srccode"]) & 0x0F0F
+            if CL46:                          # CL46 (the author): no frame -- the cue's text blinks beside the box
+                qcheck(cq_ != 0xFFFFFFFF and abs((cq_ & 15) - (bx_ & 15)) == 1 and (cq_ & 15) // 8 == (bx_ & 15) // 8,
+                       f"#{i} QB: the cue {cq_:#06x} in the row beside the select box {bx_:#06x}")
+                qtext(seq_, qcues(), f"#{i} QB")
+                continue
             up_ = [x for x in seq_ if not x["flk"]]
             on_, off_ = [x for x in up_ if x["ph"]], [x for x in up_ if not x["ph"]]
             if cq_ == 0xFFFFFFFF or not on_ or not off_:

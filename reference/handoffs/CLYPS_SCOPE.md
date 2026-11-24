@@ -1953,6 +1953,114 @@ the investigation (NOTES "CL24 timing investigation", harness `tools/diag_clyps_
   `PF` [PTN] + your own trig: the flash). diag_clyps_ui: B / L / V / FQ follow the rule. Results in NOTES (2026-11-22,
   CL44 / CL44b).
 
+### 1.45 Same-data executions hide the arrows; headers last as the toast; TEMP TRKS; PRJ PTN / ORIG PTN / CURR PTN (the user on KY18BCCLBB, 2026-11-23; test images CLB12, CLB13)
+
+- **The user (CLB11, all other tests passed), verbatim:** (1) "If user has made the arrows visible, and aimed them at
+  the highlighted or selected boxes, a load onto/from those boxes again, should make the arrows hidden (and yellow led
+  disappear). The idea is that even though nothing actually happens data-wise as far as a change, the visual behavior
+  is identical to as if they'd loaded onto/from those slots for the first time." (2) Several TRACK keys: header
+  "MULTI LOAD: TEMP TRKS", toasts "TEMP TRKS RELOADED" / "TEMP TRKS SAVED". (3) "For all operations where the header
+  temporarily changes to different text at execution of the function, make the temporarily changed header text last
+  exactly as long as the toast shows." Then, via the coordinator: headers with no toast last a toast's time; any
+  action that changes the header cuts it short, the new one gets its own full time; `[PTN]+[BANK]`+trig reads
+  "PTN LOAD: PRJ PTN"; "ORIG PTN+PRT" -> "ORIG PTN", "CURR PTN+PRT" -> "CURR PTN"; a cue box directly above / below
+  the select box must blink its whole outline.
+- **(1) Built (ef8515e):** `cl_cueload`'s same-data path (`lo_same`: the source already plays -- `cl_provset`, the
+  track's cue cancelled) now runs `cl_ychk` for that track, as a landing's `cl_postmask` does: shown arrows on the
+  slot (bank viewed) hide, `cl_hc` = that slot, the LED loses its yellow (`cl_tuck`); never-moved arrows: the unseen
+  cursor follows. Every Clyps execution reaches it: trig / [YES] / [FUNC] / a [CUE] group (`ex2`), ORIG (`ex2`,
+  SRC_ORIG), temp reload (`cl_tsone`), card track reload (`cl_rqarm1`), ORIG PTN and the card reload of the pattern
+  you are on (`cl_togarm`, every track). Stock's pattern picks of the pattern you are on (`[PTN]` + its trig: a cancel,
+  `cl_ptnpick`; `[BANK]` + its bank + its trig, `cl_bkpick`) call `cl_xpat` -> `cl_phide`, as a pattern landing does.
+  **Choice: at once** (nothing is cued when nothing differs); a load that differs is cued and hides at its landing as
+  before, so a mixed execution hides the same-data tracks at once and the others at their landing. The arrows come
+  back when the mark leaves (`cl_tuck`) or with an arrow press, unchanged.
+- **(2):** `ty_ours` counts the held tracks: several -> `cl_s_ttsvs` "TEMP TRKS SAVED" (87 px, toast font 0x400ba862,
+  a line holds 113), `cl_s_ttrls` "TEMP TRKS RELOADED" (105 px); the header label `cl_s_ttrks` "TEMP TRKS" (34 px,
+  header font 0x400c246a: after "MULTI LOAD:" at x 47 its box ends at x 82; BNK's starts at 88). "SAVE FIRST!" and the
+  one-track texts unchanged.
+- **(3) The header's life (`cl_hset` / `cl_hsetb` / `cl_hovtick`, `cl_hov` kinds HOV_CURRP 1, TEMP 2, PSEQ 3, PFULL 4,
+  ORIG 5, PPTN 6):** no longer tied to the flash (`cl_flstop` leaves it; `cl_draw` no longer needs `cl_flk`).
+  - Bound to a toast (`cl_hsetb`, right after our toast is posted: the temp reload's TOAST; the card's `cl_toast2` in
+    `rd_show`, which re-arms the request's header `rq_hk` -- "Tn LOAD: PROJ TRK SEQ / FULL", "PTN LOAD: PRJ PTN" --
+    so a card header shows from the press and again for exactly its toast's life): the UI tick (`cl_uitick` ->
+    `cl_hovtick`, before stock's own decrement) ends it when stock's toast window `0x460d1e70` is gone, its countdown
+    `0x460d1e6c` reads 0, or the countdown rose above the last value seen less one (a newer toast replaced it); at
+    most one UI tick after the toast. Then a redraw is asked of the sys task (`cl_dreq`): the UI tick never draws.
+  - No toast ([BANK] + bank + pattern "PTN LOAD: CURR PTN", ORIG's "ORIG TRK SEQ / FULL", a card header before its
+    toast): TOAST_DUR (0x30 = 48) UI ticks, stock's standard toast time (0x4005a382 passes 48).
+  - Cut short: a new header (`cl_hset`) or any new execution flash (`cl_fls` clears `cl_hov`) replaces it at once with
+    its own full time; a key pressed after it was set that shapes the header -- [PTN], [BANK], [FUNC], [CUE]
+    (`cl_hkeys`; `cl_hovh` holds the gesture's own keys, released ones drop out, `cl_draw` compares) -- ends it;
+    `cl_enter` / `cl_close` clear it. STOP / PLAY leave it (the toast stays up). Arrows, paging and track changes
+    leave it too (CL44b ended it with the flash they stop; it now lasts as the toast does).
+- **PRJ PTN / renames:** `kt` (chord + trig) sets HOV_PPTN after its flash (`cd_hv` draws "PTN LOAD:" + `cl_s_pptn`
+  "PRJ PTN", 26 px, box to x 66); `cl_s_origp` "ORIG PTN" (30 px, box to x 70), `cl_s_currp` "CURR PTN" (30 px).
+- **Cue frames last -- built, flashed, REVERTED (98a1f60 -> 12e1b3a):** a 1-bit screen: the cue's frame and a select
+  box in the row above / below share one pixel row, both "lit", so in any draw order that edge cannot blink while the
+  box stays. CLB12 drew the cue frames after the select box and the bars, inverted (`cd_cues`; a neighbour's lit edge
+  went dark in the on phase). The user on KY18BCCLBC: "not quite right. Go back to how it was before" -> CLB13 has
+  the CL44b drawing again (patch_clyps.s = ef8515e; its mainos equals that build's): the shared row stays lit (the
+  box's edge), the other three edges blink, the CL40 XOR on the highlight unchanged. Gate QB now checks exactly that.
+- **Not changed:** the flash rule (§1.44), the arrow-path table (§1.44) except the same-data rows above.
+- **Images:** CLB12 (KY18BCCLBC, 98a1f60: with the inverted cue frames) flashed by the user; CLB13 (KY18BCCLBD,
+  12e1b3a) = CL45 without them.
+- **Gates (diag_clyps_lock.py, out/rc3clyps/gates8; results in NOTES 2026-11-23):** ops `TSm` / `TRm` (two TRACK keys:
+  toasts, header, widths), `TX<k>`, `TT` (any other toast), `Hw<k>`, `HD` (header ticks = toast ticks, +1), `HDn`
+  (TOAST_DUR without a toast), `HD0` (gone within a tick), `HP` ([PTN] cuts it), `H0` (none after close / reopen),
+  `QB` (cue frame beside the select box: on vs off differ in exactly its frame less the shared row, which stays lit),
+  `a-` also wants the LED not yellow, `r` checks "ORIG PTN" while the chord is held and "PRJ PTN" after the trig;
+  jobs eC (box: trig and [YES] again), eD (highlight: ORIG trig, [YES], PF, BK own pattern, TS / TR), eE (Ru, PT, RT,
+  then a pattern change brings them back), hA-hE (headers), qB (cue above / below the box, the CL44b drawing).
+  On CLB13 only hAc13 (14 PASS) and the diag_clyps_ui V1.8C / ABCDY sets finished before the session was cut off;
+  the rest ran on CLB14 (§1.46), where QB checks the text blink instead of a frame.
+
+### 1.46 A pending cue blinks its slot's text, not a frame (the author, 2026-11-23; test images CLB14)
+
+- **The author (via the coordinator, 2026-11-23):** remove the blinking cue box (CL40's `cd_cbox`) for track cues and
+  for stock pattern cues, and the select box blinking for a cue on its own slot: a cue slot between the highlight
+  and the select box showed no visible change (the shared border rows, §1.45). Instead the cued slot's TEXT blinks
+  (its name / summary / `---`), in the old phase (`cl_cph`, 20 on / 10 off); the slot number and the "x" stay; plain,
+  under the select box or inside the highlight (inverted there). The flow stays: the execute flash first, then the
+  text blink while pending; it stops on landing (the box / highlight shows as usual) and on a cancel. Which: the
+  ACTIVE track's pending cue (SEQ, FULL, groups, card reloads) and stock's pattern cues ([PTN] + trig, the [BANK]
+  layer pick, the chord + trig card pattern reload), in the bank viewed; several at once on different slots. Other
+  tracks: "if a user changes the view to a different active track and there is a cued slot there, I'd want to see
+  that slot doing the cued flash." Accepted without a visual: a cue in a bank not viewed (it blinks when you page
+  there), during a peek, while the [PTN]+[BANK] chord is held. Arrows: CL44b + CL45 unchanged; they never move or
+  blink for a cue, and stay shown over a cued slot while its text blinks.
+- **Built (0f5a511, patch_clyps.s only):**
+  - `cl_draw`, before the cell loop: `cl_cq` = `cl_cueslot` (the active track's cue, -1 none; an original / saved /
+    card source = the pattern's own slot, as before) and `cl_pq` = `cl_pcue` (stock's cue, running, not the playing
+    pattern). In the loop, `cd_sum` skips the text (`cd_thide` -> `cd_trect`) when `cl_cph` is 0 and the cell (bank
+    shown << 8 | slot) is either cue -- unless the execute flash runs on that cell (`cl_flk`, `cl_fcode`, `cl_ftgt` not
+    the header's 1): the flash first. The number and the "x" are drawn before it, the highlight's bar XORs after it
+    (a hidden text = the bar solid there), the select box and the arrows are drawn as always.
+  - Removed: `cd_cbox` and its two calls, `cl_cqd`, `cl_pbq` (became `cl_pq`), the select box's blink (CL39c / CL40:
+    not drawn in the off phase when its slot was cued), the arrows' notch on a cue frame (`cd_arrows` notches the
+    select box only).
+  - `cl_cblink` (UI tick, asks the sys task to draw via `cl_dreq`; the invariant holds): nothing cued is now the ON
+    phase (`cl_cph` 1: every text shown; a cue ending in the off phase redraws, which the frame never needed), and a
+    track cue other than the one last drawn (`cl_cueslot` != `cl_cq`: a new cue, a landing, a cancel, a track change)
+    asks for a redraw too. Stock's cue changes already did (`cl_pcq`).
+- **Per track:** the cue was already per track (`cl_cue[16]`, §1.9 / CL32); only the drawing reads the active track's.
+  A track change (TRACK, [MIDI], a group's view) redraws (`cl_refresh`) with the new track's cue, in the running phase
+  (at most one blink half later shown).
+- **Net code lines (patch_clyps.s, comments and labels out), 12e1b3a -> 0f5a511:** +27 / -57, net -30 -- the frames
+  removed -57 (`cd_cbox` with the arrows' notch on a cue frame 33, its block in `cl_draw` 16, the select box's blink
+  7, `cl_cqd` 1); the text blink +22 (`cd_sum` 18, the two cues before the cell loop 4; `cl_pbq` became `cl_pq`);
+  `cl_cblink` +5. Other sources unchanged (build_clyps.py, build_kyoti.py, clyps_reload.s).
+- **Gates (`diag_clyps_lock.py`, CL46 when the image has `cd_thide`):** every draw records the slots whose text it left
+  out; new op `QT` / `QTn` (after the flash, 80 UI ticks: the texts left out in the off phase = exactly the expected
+  cues -- the active track's `cl_cue` and stock's PEND, read from the state, in the bank shown -- none in the on phase;
+  on vs off differ only in those cells' text areas, never the number / "x" / a border; the off phase's text area blank,
+  solid on the highlight; one grid per phase; QT0: nothing left out, the grid steady), `G<tracks>` ([CUE] + TRACK keys);
+  q / r / t / QB / qsettled check the same way on a CL46 image (cancel: the text area = the on phase's; landing: its
+  inverse, the highlight). Jobs tA-tH (out/rc3clyps/gates9, all three images): plain + landing, under the select box +
+  cancel, inside the highlight (ORIG cued) + landing, between the highlight and the select box (QB), a pattern and a
+  track cue at once + cancels, track change (T1's cue kept and shown again, T2's own), a group (every member's own
+  cue on its view), a bank not viewed (no blink, then blink on paging back). Results: NOTES 2026-11-23 (CL46).
+
 ### 1.27 Combinations that must never ship (the user, 2026-11-07)
 
 - Clyps + RELOAD_FROM_PROJECT never; Clyps + DIRECT_JUMP_KYOTI only as KYOTI's integrated pair (SUPERSEDE).
