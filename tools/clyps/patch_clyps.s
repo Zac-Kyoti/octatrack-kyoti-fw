@@ -1531,17 +1531,29 @@ cl_hsetb:
     move.b  %d0,cl_hovb
     rts
 cl_hset:
-    move.b  %d0,cl_hov
+    move.l  %d0,-(%sp)
     move.b  %d1,cl_hovt
     moveq   #TOAST_DUR,%d0
     move.b  %d0,cl_hovk
     clr.b   cl_hovb
     bsr.b   cl_hkeys
     move.b  %d0,cl_hovh                 | the keys held now (the gesture's own)
-    rts
-| cl_hkeys -> d0 = the keys that shape the header: cl_hstate's bits, [FUNC] 8, [CUE] 16. Uses d0.
+    move.l  (%sp)+,%d0
+    move.b  %d0,cl_hov                  | CL47: last -- a draw in between (the sys task) sees the old header or the
+    rts                                 | whole new one, never the new kind with the old keys (it ended it)
+| cl_hkeys -> d0 = the keys that shape the header: [BANK] 1, [PTN] 2, [FUNC] 8, [CUE] 16. Uses d0. CL47: the keys
+| themselves, not cl_hstate's bits -- letting go of one key of the [PTN]+[BANK] chord (state 2 -> 1 / 4) read as a
+| new key and ended "PTN LOAD: PRJ PTN" at the chord's release instead of with its toast.
 cl_hkeys:
-    jsr     cl_hstate
+    moveq   #0,%d0
+    tst.l   BANK_HELD
+    beq.b   hk_p
+    moveq   #1,%d0
+hk_p:
+    tst.l   PTN_HELD
+    beq.b   hk_f
+    addq.l  #2,%d0
+hk_f:
     tst.b   cl_fn
     beq.b   hk_c
     ori.l   #8,%d0
@@ -2103,7 +2115,7 @@ cl_playt:
     lsl.l   #8,%d2
     move.b  1(%a0,%d1.l),%d2
     cmp.l   %d0,%d2
-    bne.b   cy_out
+    bne.b   cy_rec
     lea     cl_src,%a0
     moveq   #0,%d0
     move.b  (%a0,%d1.l),%d0
@@ -2111,6 +2123,73 @@ cl_playt:
     move.b  1(%a0,%d1.l),%d0
 cy_out:
     move.l  (%sp)+,%d2
+    rts
+cy_rec:                                 | CL47 (the user, 2026-11-24): the last load homed elsewhere -- this pattern's
+    move.l  %d0,%d2                     | own record (cl_bxt), else the pattern itself
+    lsr.l   #4,%d2
+    move.l  %d0,-(%sp)
+    andi.l  #15,%d0
+    add.l   %d0,%d2                     | d2 = P, bank << 4 | pattern
+    move.l  %d2,%d0
+    lsl.l   #5,%d0
+    add.l   %d1,%d0
+    lsr.l   #1,%d0                      | P * 16 + track
+    lea     cl_bxt,%a0
+    move.b  (%a0,%d0.l),%d1
+    move.l  (%sp)+,%d0
+    andi.l  #0xff,%d1
+    beq.b   cy_out                      | none: the pattern itself
+    eor.l   %d2,%d1                     | the source, bank << 4 | slot
+    move.l  %d1,%d0
+    lsr.l   #4,%d0
+    lsl.l   #8,%d0
+    andi.l  #15,%d1
+    or.l    %d1,%d0
+    bra.b   cy_out
+
+| cl_bxrec (d0 = track, d1 = a load's code: bank << 8 | slot; SRC_* << 8 or the pattern's own slot = none): CL47 (the
+| user, 2026-11-24) the select box per track AND pattern -- the slot last loaded into that track while that pattern
+| played, kept when the pattern changes: cl_bxt[P * 16 + track] = (bank << 4 | slot) ^ P, P = bank << 4 | pattern
+| (0 = none: the pattern's own slot). Written for the playing pattern beside cl_home / cl_src (cl_provset, cl_apply,
+| cl_hoff); a card reload of a pattern clears its row; a project load clears it all (boot: .dram's zeros). Uses d0-d1/a0.
+cl_bxrec:
+    move.l  %d2,-(%sp)
+    move.l  %d0,-(%sp)                  | the track
+    moveq   #0,%d2
+    move.b  PLAY_BANK,%d2
+    lsl.l   #4,%d2
+    moveq   #0,%d0
+    move.b  ACT_PAT,%d0
+    add.l   %d0,%d2                     | d2 = P
+    move.l  %d1,%d0
+    lsr.l   #8,%d0
+    cmpi.l  #16,%d0
+    bcc.b   bx_off                      | SRC_ORIG / SAVED / CARD: none
+    lsl.l   #4,%d0
+    andi.l  #15,%d1
+    or.l    %d0,%d1
+    eor.l   %d2,%d1                     | the pattern's own slot: 0
+    bra.b   bx_st
+bx_off:
+    moveq   #0,%d1
+bx_st:
+    lsl.l   #4,%d2
+    add.l   (%sp)+,%d2
+    lea     cl_bxt,%a0
+    move.b  %d1,(%a0,%d2.l)
+    move.l  (%sp)+,%d2
+    rts
+| cl_hoff (d0 = track): its provenance off -- cl_home and the playing pattern's record (CL47). Uses d0-d1/a0.
+cl_hoff:
+    move.l  %d0,-(%sp)
+    moveq   #-1,%d1
+    bsr.b   cl_bxrec
+    move.l  (%sp)+,%d0
+    add.l   %d0,%d0
+    lea     cl_home,%a0
+    moveq   #-1,%d1
+    move.b  %d1,(%a0,%d0.l)
+    move.b  %d1,1(%a0,%d0.l)
     rts
 
 | cl_nlocks (a0 = a track record, d0 = its track, MIDI 8..15) -> d0 = its locks, counted by STEP as the trigs
@@ -2595,6 +2674,9 @@ ss_out:
 | cl_provset (d3 = track, d2 = code): the provenance of a load that needed no data -- a slot (or SAVED): the
 | track plays it on the playing pattern; its own slot / SRC_ORIG: none. Uses d0-d1/a0.
 cl_provset:
+    move.l  %d3,%d0                     | CL47: this pattern's record too
+    move.l  %d2,%d1
+    jsr     cl_bxrec
     move.l  %d3,%d1
     add.l   %d1,%d1
     moveq   #0,%d0
@@ -3457,6 +3539,12 @@ pl_h:
     move.l  %d1,(%a0)+
     subq.l  #1,%d0
     bne.b   pl_h
+    lea     cl_bxt,%a0                  | CL47: ... and every pattern's select-box record
+    move.l  #1024,%d0
+pl_bx:
+    clr.l   (%a0)+
+    subq.l  #1,%d0
+    bne.b   pl_bx
     clr.b   cl_flash
     moveq   #0,%d0
     move.b  cl_nproj,%d0
@@ -3694,10 +3782,7 @@ ap_wlen:
 ap_back:
     jsr     cl_back                     | put back: with every track original again, the pattern's
     move.l  %d6,%d0                     | length / scale / mode too; provenance off
-    add.l   %d0,%d0
-    lea     cl_home,%a0
-    moveq   #-1,%d1
-    move.b  %d1,(%a0,%d0.l)
+    jsr     cl_hoff
     moveq   #1,%d0
     bra.w   ap_out
 ap_dst:
@@ -3715,6 +3800,11 @@ ap_conv:
     jsr     cl_convert                  | a2 = slab, d3 = len-byte offset (kept)
 ap_prov:
 |   provenance: this track now plays (sbank, spat) on the playing pattern
+    move.l  %d2,%d1                     | CL47: this pattern's record too
+    lsl.l   #8,%d1
+    or.l    %d7,%d1
+    move.l  %d6,%d0
+    jsr     cl_bxrec
     move.l  %d6,%d0
     add.l   %d0,%d0
     lea     cl_src,%a0
@@ -3753,19 +3843,12 @@ ac_pt:
     move.b  %d0,cl_wslab
 ac_off:
     move.l  %d6,%d0                     | a card reload is no Clyps load: provenance off
-    add.l   %d0,%d0
-    lea     cl_home,%a0
-    moveq   #-1,%d1
-    move.b  %d1,(%a0,%d0.l)
-    move.b  %d1,1(%a0,%d0.l)
+    jsr     cl_hoff
     moveq   #1,%d0
     bra.w   ap_out
 ap_own:
     move.l  %d6,%d0                     | back to its own: provenance off
-    add.l   %d0,%d0
-    lea     cl_home,%a0
-    moveq   #-1,%d1
-    move.b  %d1,(%a0,%d0.l)
+    jsr     cl_hoff
 ap_none:
     moveq   #0,%d0
 ap_out:
@@ -7234,6 +7317,8 @@ ut_ndq:
 ut_ng:
     tst.b   cl_ctoast                   | a card reload landed: its toast (the user, 2026-11-08)
     beq.b   ut_nct
+    tst.l   PTN_HELD                    | CL47: once [PTN] is up -- DIRECT JUMP's [PTN] release closes any toast
+    bne.b   ut_nct                      | (dj_ptnrel), and its header comes back bound to it (rd_show)
     clr.b   cl_ctoast
     jsr     cl_rqtoast
 ut_nct:
@@ -7458,6 +7543,12 @@ bl_src2:
     jsr     cl_srccode
     cmp.l   %d2,%d0
     beq.w   bl_page                     | cued again (a FULL re-load): flashing yellow only
+    moveq   #0,%d1                      | CL47 (the user, 2026-11-24): no select box -- the sequence is the pattern's
+    move.b  PLAY_BANK,%d1               | own (the highlight alone): its trig solid red, never the red / yellow flash
+    lsl.l   #8,%d1
+    move.b  ACT_PAT,%d1
+    cmp.l   %d1,%d0
+    beq.w   bl_page
     tst.b   cl_pmoved
     beq.b   bl_src3
     move.l  %d0,-(%sp)
@@ -8310,9 +8401,7 @@ cd_next:
     lea     16(%sp),%sp
 cd_nlf:
 |   CL46 (the user, 2026-11-23): no cue frames (CL40's cd_cbox) -- a cued slot's text blinks instead (cd_sum)
-    move.b  cl_hdrst,%d0
-    btst    #1,%d0
-    bne.w   cd_boxed
+|   CL47 (the user, 2026-11-24): the [PTN]+[BANK] chord held no longer hides the select box and the arrows
 |   the select box
     moveq   #0,%d0
     move.b  PLAY_BANK,%d0
@@ -8674,7 +8763,8 @@ pc_out:
 | (the user, 2026-11-04):
 |   yellow, flashing   the active track's cued sequence (cl_blink: off half of every period)
 |   red / yellow blink the active track's sequence: where what it plays was loaded from (cl_srccode;
-|                      cl_blink lights its green die 3 ticks a period, as stock's p-locked trig)
+|                      cl_blink lights its green die 3 ticks a period, as stock's p-locked trig) -- the select
+|                      box's slot only: the pattern's own (the highlight alone) is solid red (CL47)
 |   yellow             the pre-select box while its arrows are shown (cl_pmoved), on any slot
 |   red                the pattern you are on
 |   green 15 / 7       a slot with sample/note trigs / other data only; off = empty
@@ -9419,6 +9509,8 @@ cl_hc:      .short 0                    | CL44b: the mark (bank << 8 | slot) tha
 cl_hvb:     .byte 0                     | CL42: cl_ychk's bank viewed (a landing elsewhere hides no arrows)
 cl_magic:   .long CL_MAGIC              | the DRAM part is in place (the boot loader put it there)
 cl_svalid:  .space 16                   | per track: a saved sequence is held
+            .align 2
+cl_bxt:     .space 4096                 | CL47: per (bank, pattern, track) the select box's slot (cl_bxrec)
 cl_namesok: .byte 0                     | the names are cleared (at the first project load) and usable
             .align 2
 cl_nedit:   .long 0                     | the name being edited (its index)

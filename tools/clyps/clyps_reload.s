@@ -533,17 +533,25 @@ rj_ok:
 |   what the card brought is no Clyps load any more (the user, 2026-11-05): the reloaded tracks' provenance
 |   off -- a track: its own; a pattern: every track homed on it -- so their box / LEDs go to the pattern's
 |   own slot (cl_boxreq: cl_boxhome at the UI tail)
-    lea     cl_home,%a0
     cmpi.l  #RQ_PTN,%d7
     beq.b   rj_hp
     moveq   #0,%d0
     move.b  rq_t,%d0
-    add.l   %d0,%d0
-    moveq   #-1,%d1
-    move.b  %d1,(%a0,%d0.l)
-    move.b  %d1,1(%a0,%d0.l)
+    jsr     cl_hoff                     | CL47: with the playing pattern's select-box record
     bra.b   rj_hd
 rj_hp:
+    moveq   #0,%d0                      | CL47: that pattern's select-box records, every track
+    move.b  rq_jbk,%d0
+    lsl.l   #4,%d0
+    add.l   %d5,%d0
+    lsl.l   #4,%d0
+    lea     cl_bxt,%a0
+    adda.l  %d0,%a0
+    clr.l   (%a0)+
+    clr.l   (%a0)+
+    clr.l   (%a0)+
+    clr.l   (%a0)
+    lea     cl_home,%a0
     moveq   #16,%d1
 rj_hpl:
     move.b  (%a0),%d0
@@ -888,7 +896,13 @@ rd_lost:
     bra.b   rd_show
 rd_msg:
     tst.b   rq_msg
-    beq.b   rt_out
+    beq.w   rt_out
+    tst.l   PTN_HELD                    | CL47: not while [PTN] is held -- DIRECT JUMP's [PTN] release closes any
+    beq.b   rd_now                      | toast up (dj_ptnrel): the UI tail shows it once [PTN] is up (cl_ctoast)
+    moveq   #1,%d0
+    move.b  %d0,cl_ctoast
+    rts
+rd_now:
     lea     rq_line1,%a0
     move.l  %a0,rq_lines
     move.l  rq_l2p,%a0

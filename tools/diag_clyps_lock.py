@@ -107,6 +107,8 @@ def main(argv):
     CL45 = "cl_hovtick" in syms      # an execution on their slot hides them though nothing lands; a header lasts a
                                      # toast's time; TEMP TRKS (the user, 2026-11-23)
     CL46 = "cd_thide" in syms        # no cue frames: a cued slot's text blinks (the author, 2026-11-23)
+    CL47 = "cl_bxt" in syms          # the chord hides nothing; the highlight alone lights solid red; a select box per
+                                     # track and pattern (the user, 2026-11-24)
     out = pathlib.Path(a.out)
     if not out.is_absolute():
         out = ROOT / out
@@ -369,7 +371,8 @@ def main(argv):
             seq.append(dict(ph=rd(syms["cl_cph"], 1), pcq=rd(syms["cl_pcq"], 2),
                             pbq=0xFFFFFFFF if CL46 else rd(syms["cl_pbq"], 4), hid=thid["last"], dph=thid["ph"],
                             act=rd(ACT, 1), bank=rd(syms["cl_bank"], 1), flk=rd(syms["cl_flk"], 1) if CL40 else 0,
-                            fc=rd(syms["cl_fcode"], 2), scr=composed()))
+                            fc=rd(syms["cl_fcode"], 2), scr=composed(), cq=qcues() if CL46 else frozenset(),
+                            tst=rd(0x460D1E70, 4) != 0))
         return seq
 
     def qruns(seq):         # (phase, UI ticks) runs while the cue is up
@@ -439,40 +442,49 @@ def main(argv):
         return tuple(tuple(row[8:120]) for row in lv.pixels(scr)[11:])
 
     def qtext(seq, codes, label):   # CL46: the texts of exactly these cues (bank shown) blink; nothing else changes
-        import lcd_view as lv
-        vb_ = rd(syms["cl_bank"], 1)
-        want = frozenset(c for c in codes if c >> 8 == vb_)
+        import lcd_view as lv           # (CL47 gate: each draw against the cues of ITS UI tick -- a cue landing or
+        vb_ = rd(syms["cl_bank"], 1)    # made inside the window is no failure; the pixel checks use the ticks whose
+        up0 = [x for x in seq if not x["flk"]]  # cues are the first sampled ones)
+        wv = lambda x: frozenset(c for c in x["cq"] if c >> 8 == vb_)
+        want = wv(up0[0]) if up0 else frozenset(c for c in codes if c >> 8 == vb_)
         hl_ = (rd(0x800065BD, 1) << 8) | rd(ACT, 1)
         fl_ = [x for x in seq if x["flk"]]
-        up = [x for x in seq if not x["flk"]]
+        up = [x for x in up0 if wv(x) == want]
         on, off = [x for x in up if x["dph"]], [x for x in up if not x["dph"]]
+        # (CL47 gate: a card toast now shows after [PTN]'s release, over the grid -- the pixel checks compare draws
+        # with the same toast state: toast-free when both phases were sampled so, else under the toast)
+        tz_ = False if any(not x["tst"] for x in on) and any(not x["tst"] for x in off) else True
+        on_p, off_p = [x for x in on if x["tst"] == tz_] or on, [x for x in off if x["tst"] == tz_] or off
         qcheck(all(x["fc"] not in x["hid"] for x in fl_),
                f"{label}: CL46 no text left out on the flashing cell while the flash runs ({len(fl_)} UI ticks)")
         nm = lambda c: f"{chr(65 + (c >> 8))}{(c & 15) + 1:02d}"
-        qcheck(all(x["hid"] == want for x in off) and all(not x["hid"] for x in on) and (bool(off) or not want),
+        off0 = [x for x in up0 if not x["dph"]]
+        qcheck(all(x["hid"] == wv(x) for x in off0) and all(not x["hid"] for x in up0 if x["dph"])
+               and (bool(off) or not want),
                f"{label}: CL46 the texts left out in the off phase = the cues in view {sorted(map(nm, want))} "
                f"({len(off)} off draws: {sorted({tuple(sorted(map(nm, x['hid']))) for x in off})}); none in the "
                f"{len(on)} on draws ({sorted({tuple(sorted(map(nm, x['hid']))) for x in on})})")
         if not want:
-            nw = len({qgrid(x["scr"]) for x in up})
+            nw = max(len({qgrid(x["scr"]) for x in up if x["tst"] == t_}) for t_ in (False, True))
             qcheck(nw <= 1, f"{label}: CL46 nothing cued in view: the grid steady ({nw} screen(s) over {len(up)} UI ticks)")
             return on, off
         if not on or not off:
             qcheck(False, f"{label}: CL46 both phases sampled ({len(on)} on, {len(off)} off)")
             return on, off
-        d = qdiff(on[-1]["scr"], off[-1]["scr"])
+        d = qdiff(on_p[-1]["scr"], off_p[-1]["scr"])
         regs = set().union(*(qtreg(c & 15) for c in want))
         per = {nm(c): len(d & qtreg(c & 15)) for c in want}
         qcheck(d <= regs and all(per.values()),
                f"{label}: CL46 on vs off differ only in the cued cells' text areas {per} ({len(d - regs)} px outside: "
                f"number, \"x\", border, other cells{'' if d <= regs else ' -- ' + str(sorted(d - regs)[:6])})")
-        po_ = lv.pixels(off[-1]["scr"])
+        po_ = lv.pixels(off_p[-1]["scr"])
         for c in want:
             vals = {po_[y][x] for (x, y) in qtreg(c & 15)}
             qcheck(vals == ({1} if c == hl_ else {0}),
                    f"{label}: CL46 {nm(c)}'s text area in the off phase {'solid (the highlight)' if c == hl_ else 'blank'} "
                    f"({sorted(vals)})")
-        non, noff = len({qgrid(x["scr"]) for x in on}), len({qgrid(x["scr"]) for x in off})
+        non = max(len({qgrid(x["scr"]) for x in on if x["tst"] == t_}) for t_ in (False, True))
+        noff = max(len({qgrid(x["scr"]) for x in off if x["tst"] == t_}) for t_ in (False, True))
         qcheck(non <= 1 and noff <= 1, f"{label}: CL46 one grid per phase ({non} on, {noff} off)")
         return on, off
 
@@ -538,8 +550,8 @@ def main(argv):
                 hid_ = (rd(syms["cl_ysup"], 1) and sb_ == hc_ >> 8                 # in this draw: a mark gone has
                         and hc_ in {(rd(0x800065BD, 1) << 8) | rd(ACT, 1),         # cleared cl_ysup already)
                                     u.reg_read(er.eb.UC_M68K_REG_D7) & 0x0F0F})
-                want_ = int(bool(rd(syms["cl_pmoved"], 1)) and sb_ == vb_ and not rd(syms["cl_hdrst"], 1) & 2
-                            and not hid_)
+                want_ = int(bool(rd(syms["cl_pmoved"], 1)) and sb_ == vb_
+                            and (CL47 or not rd(syms["cl_hdrst"], 1) & 2) and not hid_)
             else:
                 want_ = int(bool(rd(syms["cl_pmoved"], 1)) and sb_ == vb_ and not rd(syms["cl_hdrst"], 1) & 2
                             and code_ not in cov)
@@ -619,7 +631,7 @@ def main(argv):
         qcheck(all(x["pcq"] == 0xFFFF and x["pbq"] == 0xFFFFFFFF and code not in x["hid"] for x in seq),
                f"{label}: no cue left (cl_pcq 0xffff, cl_pbq -1{', its text never left out' if CL46 else ''} on all "
                f"{len(seq)} UI ticks)")
-        nw = len({(qgrid if CL46 else qwin)(x["scr"]) for x in seq})
+        nw = max(len({(qgrid if CL46 else qwin)(x["scr"]) for x in seq if x["tst"] == t_}) for t_ in (False, True))
         qcheck(nw == 1, f"{label}: the {'grid' if CL46 else 'window'} is steady over {len(seq)} UI ticks (no blink): "
                f"{nw} screen(s)")
         if CL46 and ref is not None and qst.get("on") and qst.get("code") == code and code >> 8 == rd(syms["cl_bank"], 1):
@@ -1133,7 +1145,8 @@ def main(argv):
                 settle(34)
                 g += 1
             seq_ = qsample(80 if op != "QT0" else 40)
-            cs_ = qcues()
+            up_ = [x for x in seq_ if not x["flk"]]
+            cs_ = up_[0]["cq"] if up_ else qcues()      # (CL47 gate: as first sampled -- a landing may follow)
             vw_ = {c for c in cs_ if c >> 8 == rd(syms["cl_bank"], 1)}
             n_ = int(op[2:]) if len(op) > 2 else None
             qcheck(len(vw_) == n_ if n_ is not None else bool(vw_),
@@ -1404,14 +1417,55 @@ def main(argv):
             continue
         if op == "B2":                        # CL43 (B2): arrows while the chord is held do nothing
             c0_, b0_, m0_ = rd(syms["cl_cur"], 1), rd(syms["cl_bank"], 1), rd(syms["cl_pmoved"], 1)
+            main_call(syms["cl_draw"])
+            w0_, n0_ = qgrid(composed()), arw["n"]
             key(0x2E, 1); key(0x2F, 1)
+            main_call(syms["cl_draw"])
+            w1_, n1_, h1_ = qgrid(composed()), arw["n"], list(hdr)
             for k2 in (0x20, 0x33, 0x21, 0x34, 0x20):
                 key(k2, 1); key(k2, 0)
+            if CL47:                          # CL47 (the user, 2026-11-24): the chord hides nothing -- the arrows and
+                main_call(syms["cl_draw"])    # the select box drawn exactly as before it (only the header changes)
+                w2_ = qgrid(composed())
+                qcheck(w1_ == w0_ and w2_ == w0_ and n1_ == n0_ and h1_[:2] == ["PTN LOAD:", "ORIG PTN"],
+                       f"#{i} B2: the chord held ({h1_}): the grid as before it, arrows and select box included "
+                       f"({sum(a_ != b_ for r0, r1 in zip(w0_, w1_) for a_, b_ in zip(r0, r1))} px differ; after the "
+                       f"arrows {sum(a_ != b_ for r0, r2 in zip(w0_, w2_) for a_, b_ in zip(r0, r2))}); arrow sets "
+                       f"{n0_} -> {n1_}")
             key(0x2F, 0); key(0x2E, 0)
             settle(200)
             qcheck((rd(syms["cl_cur"], 1), rd(syms["cl_bank"], 1), rd(syms["cl_pmoved"], 1)) == (c0_, b0_, m0_),
                    f"#{i} B2: arrows with the chord held: cur {c0_ + 1} -> {rd(syms['cl_cur'], 1) + 1}, view "
                    f"{chr(65 + b0_)} -> {chr(65 + rd(syms['cl_bank'], 1))}, shown {m0_} -> {rd(syms['cl_pmoved'], 1)}")
+            continue
+        if op[:2] == "SB":                    # CL47 (the user, 2026-11-24): the active track's select box on this pattern
+            k_ = op[2:]                       # (SBk: slot k of the playing bank, 0-based; SB-: none, the highlight alone)
+            pc_ = (rd(0x800065BD, 1) << 8) | rd(ACT, 1)
+            want_ = pc_ if k_ == "-" else (rd(0x800065BD, 1) << 8) | int(k_)
+            sc_ = main_call(syms["cl_srccode"]) & 0x0F0F
+            main_call(syms["cl_draw"])
+            qcheck(sc_ == want_, f"#{i} SB{k_}: T{(main_call(syms['cl_trk']) & 0xFF) + 1} on "
+                   f"{chr(65 + (pc_ >> 8))}{(pc_ & 15) + 1:02d}: its select box {sc_:#06x} (want {want_:#06x}"
+                   f"{', none: the highlight alone' if k_ == '-' else ''})")
+            continue
+        if op == "LB":                        # CL47 (the user, 2026-11-24): the select box's trig flashes red / yellow
+            flz_ = []                         # (cl_blink: its green die 3 LED ticks); the highlight alone never does
+            hk_ = u.hook_add(er.eb.UC_HOOK_CODE, lambda uc, ad, sz, ud: flz_.append(
+                rd(uc.reg_read(er.eb.UC_M68K_REG_A7) + 4, 4)), begin=0x40013784, end=0x40013784)
+            main_call(syms["cl_blink"])
+            u.hook_del(hk_)
+            pc_ = (rd(0x800065BD, 1) << 8) | rd(ACT, 1)
+            sc_ = main_call(syms["cl_srccode"]) & 0x0F0F
+            g_ = grid()
+            vb_ = rd(syms["cl_bank"], 1)
+            ar_ = rd(syms["cl_pmoved"], 1) and not main_call(syms["cl_tuck"]) and \
+                (rd(syms["cl_sbank"], 1) << 8 | rd(syms["cl_cur"], 1)) == sc_
+            cue_ = rd(syms["cl_cue"] + 2 * (main_call(syms["cl_trk"]) & 0xFF), 2)
+            box_ = sc_ != pc_ and sc_ >> 8 == vb_ and not ar_ and cue_ != sc_
+            gd_ = ledtbl[sc_ & 15] + 1
+            ok_ = (gd_ in flz_) == box_ and (box_ or sc_ != pc_ or vb_ != pc_ >> 8 or ar_ or g_[pc_ & 15] == "R")
+            qcheck(ok_, f"#{i} LB: {'a select box' if sc_ != pc_ else 'the highlight alone'} ({sc_:#06x}, playing "
+                   f"{pc_:#06x}, arrows on it {bool(ar_)}): its green die flashed {gd_ in flz_} (want {box_}); grid {g_}")
             continue
         if op == "Y":                         # a bare [YES]: whatever the screen shows
             nl0 = len(reqs)
