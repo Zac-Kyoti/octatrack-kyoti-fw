@@ -1023,9 +1023,10 @@ def main(argv):
             settle(100)
             print(f"#{i} {op}: toasts {[x[1] for x in stoasts[ns0:]]}; header {list(hdr)}", flush=True)
             continue
-        if op == "QB":                        # CL45 (the user): the track's cue frame next to the select box (the row
-            seq_ = qsample(80)                # above / below shares an edge row): drawn last, inverted -- the whole
-            cq_ = rd(syms["cl_cq"], 4)        # outline changes between the phases, the off phase shows the box's edge
+        if op == "QB":                        # CL45: the track's cue frame next to the select box (the row above /
+            seq_ = qsample(80)                # below shares an edge row) -- CL45's inverted, drawn-last frame was
+            cq_ = rd(syms["cl_cq"], 4)        # reverted on the user's word (CLB12): the CL44b drawing, the shared row lit in
+                                              # both phases (the box's edge), the rest of the frame blinking
             bx_ = main_call(syms["cl_srccode"]) & 0x0F0F
             up_ = [x for x in seq_ if not x["flk"]]
             on_, off_ = [x for x in up_ if x["ph"]], [x for x in up_ if not x["ph"]]
@@ -1039,11 +1040,11 @@ def main(argv):
             import lcd_view as lv
             po_, pn_ = lv.pixels(off_[-1]["scr"]), lv.pixels(on_[-1]["scr"])
             shared_ = {(x, y) for (x, y) in border if y in (B[1], B[3]) and B[0] <= x <= B[2]}
-            qcheck(abs((cq_ & 15) - (bx_ & 15)) == 1 and (cq_ & 15) // 8 == (bx_ & 15) // 8 and d_ == border and shared_
-                   and all(po_[y][x] for x, y in shared_) and not any(pn_[y][x] for x, y in shared_),
-                   f"#{i} QB: the cue {cq_:#06x} beside the select box {bx_:#06x}: on vs off differ in {len(d_)} px, its "
-                   f"whole frame {len(border)} px ({len(d_ - border)} outside, {len(border - d_)} unchanged); the shared "
-                   f"row {len(shared_)} px lit in the off phase (the box's edge), dark in the on phase")
+            qcheck(abs((cq_ & 15) - (bx_ & 15)) == 1 and (cq_ & 15) // 8 == (bx_ & 15) // 8 and d_ == border - shared_
+                   and shared_ and all(po_[y][x] for x, y in shared_) and all(pn_[y][x] for x, y in shared_),
+                   f"#{i} QB: the cue {cq_:#06x} beside the select box {bx_:#06x}: on vs off differ in {len(d_)} px = its "
+                   f"frame {len(border)} px less the shared row {len(shared_)} ({len(d_ - border)} outside); the shared row "
+                   f"lit in both phases (CL44b's drawing)")
             continue
         if op == "TT":                        # CL45: any other toast (stock's block toast, posted as a stock screen would)
             main_call(0x4005A2B8, syms["cl_s_savef2"], 0x30)
