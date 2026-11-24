@@ -97,6 +97,8 @@ def main(argv):
     CL44 = "cl_bkpick" in syms       # the arrows show unless a box / the highlight covers them (the user, 2026-11-22)
     CL44b = "cl_hov" in syms         # ... revised (the user on CLB10): shown after an arrow, also on a box; an execution
                                      # landing on them hides them until its mark leaves; one flash rule; headers
+    CL45 = "cl_hovtick" in syms      # an execution on their slot hides them though nothing lands; a header lasts a
+                                     # toast's time; TEMP TRKS (the user, 2026-11-23)
     out = pathlib.Path(a.out)
     if not out.is_absolute():
         out = ROOT / out
@@ -252,6 +254,15 @@ def main(argv):
     if "cl_toast2" in syms:
         u.hook_add(er.eb.UC_HOOK_CODE, lambda uc, ad, sz, ud: toasts.append(st["tick"]),
                    begin=syms["cl_toast2"], end=syms["cl_toast2"])
+    stoasts = []         # CL45: every stock block toast (0x4005a2b8: text, duration), its tick and text
+    u.hook_add(er.eb.UC_HOOK_CODE, lambda uc, ad, sz, ud: stoasts.append(
+        (st["tick"], bytes(uc.mem_read(rd(uc.reg_read(er.eb.UC_M68K_REG_A7) + 4, 4), 32)).split(b"\0")[0].decode("latin-1"))),
+        begin=0x4005A2B8, end=0x4005A2B8)
+    CURRP = "CURR PTN" if CL45 else "CURR PTN+PRT"   # CL45 (the user): renamed
+    EXH = {"TEMP TRK", "TEMP TRKS", "PROJ TRK SEQ", "PROJ TRK FULL", CURRP, "PRJ PTN"}   # CL44b / CL45 execution labels
+
+    def fw(font_w, text):               # CL45: a text's width in a font (stock's widths + 1 px between glyphs)
+        return sum(rd(font_w + ord(c_), 1) for c_ in text) + len(text) - 1
     applies = []         # CL25b: every engine-facing apply, its tick (what changes the SOUND, and when)
     for name, ad in (("TRK_APPLY", 0x40001F18), ("PART_APPLY", 0x40009094), ("LIGHT_APPLY", 0x40009E00),
                      ("PICKUP_SET", 0x40097290), ("cl_fullone", syms.get("cl_fullone")), ("cl_slice", syms.get("cl_slice"))):
@@ -782,7 +793,17 @@ def main(argv):
                 qcheck(g_ == want_ and rd(syms["cl_bank"], 1) == vb_,
                        f"#{i} {opx}: the chord held: the view stays on {chr(65 + vb_)} (playing {chr(65 + pb_)}), its grid = "
                        f"bank {chr(65 + vb_)}'s pattern view {want_} ({g_})")
-                key(k_, 1); key(k_, 0); key(0x2F, 0); key(0x2E, 0)
+                hc_ = list(hdr)
+                key(k_, 1); key(k_, 0)
+                hx_ = list(hdr)
+                key(0x2F, 0); key(0x2E, 0)
+                if CL45:                      # CL45 (the user): the chord's header "PTN LOAD: ORIG PTN" (was ORIG PTN+PRT);
+                    lw_ = 3 + fw(0x400C246A, "PTN LOAD:") + 4   # the reload's "PTN LOAD: PRJ PTN"
+                    qcheck(hc_[:2] == ["PTN LOAD:", "ORIG PTN"] and hx_[:2] == ["PTN LOAD:", "PRJ PTN"]
+                           and rd(syms["cl_hov"], 1) == 6,
+                           f"#{i} {opx}: the chord's header {hc_} ({fw(0x400C246A, 'ORIG PTN')} px, box to x "
+                           f"{lw_ + fw(0x400C246A, 'ORIG PTN') + 1}); after the trig {hx_} ({fw(0x400C246A, 'PRJ PTN')} px, "
+                           f"box to x {lw_ + fw(0x400C246A, 'PRJ PTN') + 1})")
             else:
                 key(0x2E, 1); key(0x2F, 1); key(k_, 1); key(k_, 0); key(0x2F, 0); key(0x2E, 0)
             g = 0
@@ -962,21 +983,100 @@ def main(argv):
             qcheck(rd(syms["cl_open"], 1) == 1 and rd(syms["cl_bank"], 1) == vb_ and rd(syms["cl_boxreq"], 1) == 0,
                    f"#{i} {opx}: the view stays on {chr(65 + vb_)} (now {chr(65 + rd(syms['cl_bank'], 1))}); {view()}")
             continue
-        if op in ("TS", "TR", "PF"):          # CL44b (the user): one flash rule -- TS / TR = TRACK held + [YES] / [NO]
-            t_ = rd(0x80000000, 1)            # (temp save / reload, the active track); PF = [PTN] + the playing pattern's
-            pc_ = (rd(0x800065BD, 1) << 8) | rd(ACT, 1)   # trig (a cancel / CURR PTN+PRT)
-            nt0 = len(toasts)
+        if op in ("TS", "TR", "PF", "TSm", "TRm"):   # CL44b (the user): one flash rule -- TS / TR = TRACK held + [YES] /
+            t_ = rd(0x80000000, 1)            # [NO] (temp save / reload, the active track); PF = [PTN] + the playing
+            pc_ = (rd(0x800065BD, 1) << 8) | rd(ACT, 1)   # pattern's trig (a cancel / CURR PTN+PRT); CL45: TSm / TRm =
+            nt0, ns0 = len(toasts), len(stoasts)            # the active track's key and its neighbour's held
+            tk_ = [0x10 + (t_ & 7)] + ([0x10 + ((t_ & 7) ^ 1)] if op[-1] == "m" else [])
             if op == "PF":
                 key(0x2E, 1); key(rd(ACT, 1), 1); key(rd(ACT, 1), 0)
             else:
-                key(0x10 + (t_ & 7), 1); key(0x31 if op == "TS" else 0x32, 1); key(0x31 if op == "TS" else 0x32, 0)
+                for k2 in tk_:
+                    key(k2, 1)
+                key(0x31 if op[:2] == "TS" else 0x32, 1); key(0x31 if op[:2] == "TS" else 0x32, 0)
             fl_, fc_, h_ = rd(syms["cl_flk"], 1), rd(syms["cl_fcode"], 2), list(hdr)
-            key(0x2E if op == "PF" else 0x10 + (t_ & 7), 0)
+            for k2 in ([0x2E] if op == "PF" else tk_):
+                key(k2, 0)
             settle(600)
             qcheck(fl_ > 0 and fc_ == pc_, f"#{i} {op}: the execute flash on the pattern you are on {pc_:#06x} "
                    f"({fl_} ticks on {fc_:#06x}); {len(toasts) - nt0} toast(s)")
             if op == "TR":
                 qcheck(h_[:3] == [f"T{t_ + 1} " if t_ < 8 else f"M{t_ - 7} ", "LOAD:", "TEMP TRK"], f"#{i} TR: the header {h_}")
+            if CL45 and op != "PF":           # CL45 (the user): several tracks held -- "MULTI LOAD: TEMP TRKS", the toasts
+                m_ = op[-1] == "m"            # "TEMP TRKS RELOADED" / "TEMP TRKS SAVED"; one track as before
+                wt_ = ("TEMP TRKS " if m_ else "TEMP TRK ") + ("SAVED" if op[:2] == "TS" else "RELOADED")
+                got_ = [x[1] for x in stoasts[ns0:]]
+                tw_ = fw(0x400C205C, wt_)
+                qcheck(got_ == [wt_] and tw_ <= 113, f"#{i} {op}: the toast {got_} (want {wt_!r}, {tw_} px in the toast "
+                       f"font 0x400ba862, a line holds 113)")
+                if op == "TRm":
+                    lw_ = fw(0x400C246A, "TEMP TRKS")
+                    x_ = 3 + fw(0x400C246A, "MULTI LOAD:") + 4
+                    qcheck(h_[:2] == ["MULTI LOAD:", "TEMP TRKS"] and x_ + lw_ + 1 < 88,
+                           f"#{i} TRm: the header {h_}; TEMP TRKS {lw_} px (header font 0x400c246a), its box x {x_ - 1}.."
+                           f"{x_ + lw_ + 1} (BNK's box starts at 88)")
+            continue
+        if op[:2] == "TX" and op[2:].isdigit():   # CL45: TRACK K held + [NO] (a temp reload of track K; none saved: SAVE
+            k2 = 0x10 + int(op[2:]) - 1       # FIRST!), no checks
+            ns0 = len(stoasts)
+            key(k2, 1); key(0x32, 1); key(0x32, 0); key(k2, 0)
+            settle(100)
+            print(f"#{i} {op}: toasts {[x[1] for x in stoasts[ns0:]]}; header {list(hdr)}", flush=True)
+            continue
+        if op == "TT":                        # CL45: any other toast (stock's block toast, posted as a stock screen would)
+            main_call(0x4005A2B8, syms["cl_s_savef2"], 0x30)
+            tail()
+            continue
+        if op[:2] == "Hw" and op[2:].isdigit():   # CL45: K UI ticks
+            settle(34 * int(op[2:]))
+            continue
+        if op[:2] == "HD":                    # CL45 (the user): the execution header lasts as long as the toast shows (HD),
+            mode_ = op[2:]                    # or stock's toast time without one (HDn: TOAST_DUR UI ticks), or ends at
+            k0_, b0_, h0_ = rd(syms["cl_hovk"], 1), rd(syms["cl_hovb"], 1), list(hdr)   # once (HD0: a toast replaced it)
+            seq_ = []
+            for g in range(200):
+                rt.run(ms=34)
+                main_call(0x40056C28)
+                tail()
+                seq_.append((int(rd(0x460D1E70, 4) != 0), rd(syms["cl_hov"], 1), list(hdr)))
+                if g > 2 and not seq_[-1][0] and not seq_[-1][1]:
+                    break
+            for _ in range(3):
+                rt.run(ms=34); main_call(0x40056C28); tail()
+            ta_ = sum(1 for x in seq_ if x[0])
+            hv_ = sum(1 for x in seq_ if x[1])
+            pre_ = all(x[1] for x in seq_[:hv_]) and all(x[0] for x in seq_[:ta_])
+            shown_ = [bool(EXH & set(x[2])) for x in seq_ if x[1]]
+            fin_ = list(hdr)
+            print(f"      #{i} {op}: at start hov {rd(syms['cl_hov'], 1)} k {k0_} bound {b0_} header {h0_}; "
+                  f"{len(seq_)} UI ticks: toast up {ta_}, header {hv_}; after: {fin_}", flush=True)
+            if mode_ == "":
+                ok_ = b0_ == 1 and hv_ in (ta_, ta_ + 1) and ta_ >= 2 and pre_
+            elif mode_ in ("n", "o"):           # (o: ORIG TRK SEQ, HOV_ORIG -- its text is the usual one on the highlight)
+                ok_ = b0_ == 0 and hv_ in (k0_ - 1, k0_) and k0_ >= 30 and pre_
+                shown_ = shown_ if mode_ == "n" else []
+            else:
+                ok_ = hv_ <= 1
+            qcheck(ok_ and not (EXH & set(fin_)) and all(shown_),
+                   f"#{i} {op}: the execution header {'while the toast is up' if mode_ == '' else 'for a toast time' if mode_ == 'n' else 'gone at once'}: "
+                   f"{hv_} UI ticks, the toast {ta_} (bound {b0_}, {k0_} ticks left at the start); then {fin_}")
+            continue
+        if op == "HP":                        # CL45: a key that changes the header ([PTN] alone) ends the execution's header
+            hv0_ = rd(syms["cl_hov"], 1)
+            key(0x2E, 1)
+            settle(100)
+            h1 = list(hdr)
+            hv1_ = rd(syms["cl_hov"], 1)
+            key(0x2E, 0)
+            settle(100)
+            qcheck(hv0_ != 0 and hv1_ == 0 and h1[:2] == ["PTN LOAD:", CURRP] and not (EXH - {CURRP}) & set(hdr),
+                   f"#{i} HP: [PTN] pressed during an execution header (cl_hov {hv0_} -> {hv1_}): {h1}; released: {list(hdr)}")
+            continue
+        if op == "H0":                        # CL45: no execution header left (closing Clyps, a reopen)
+            if rd(syms["cl_open"], 1):
+                main_call(syms["cl_draw"])
+            qcheck(rd(syms["cl_hov"], 1) == 0 and not (EXH & set(hdr) if rd(syms["cl_open"], 1) else set()),
+                   f"#{i} H0: no execution header (cl_hov {rd(syms['cl_hov'], 1)}, open {rd(syms['cl_open'], 1)}, {list(hdr)})")
             continue
         if op[:2] in ("BK", "BL", "BN") and op[2:3].isdigit():
             # CL44 (the user, 2026-11-22): stock's [BANK] layer inside Clyps. BKb.k = [BANK] held + trig b (the bank) +
@@ -1013,14 +1113,15 @@ def main(argv):
             if op[:2] == "BK":
                 key(0x2F, 0)
             pend1 = (rd(0x800065BF, 1), rd(0x800065C0, 1))
-            qcheck(rd(syms["cl_bank"], 1) == b_ and pend1 == (b_, k_) and rd(syms["cl_open"], 1) == 1 and len(reqs) == nr_,
+            qcheck(rd(syms["cl_bank"], 1) == b_ and (pend1 == (b_, k_) or code == pc_) and rd(syms["cl_open"], 1) == 1
+                   and len(reqs) == nr_,
                    f"#{i} {op}: the pattern pick {chr(65 + b_)}{k_ + 1:02d}: the view on {chr(65 + rd(syms['cl_bank'], 1))}, "
                    f"stock's cue {pend1}, Clyps open, {len(reqs) - nr_} Clyps load(s)")
             h_ = list(hdr)
             qcheck((fl_ > 0 and fc_ == code) if (code != pc_ or CL44b) else fl_ == 0,
                    f"#{i} {op}: the execute flash on {code:#06x} ({fl_} ticks on {fc_:#06x}; the pattern you are on {pc_:#06x})")
             if CL44b:
-                qcheck(h_[:2] == ["PTN LOAD:", "CURR PTN+PRT"], f"#{i} {op}: the header {h_}")
+                qcheck(h_[:2] == ["PTN LOAD:", CURRP], f"#{i} {op}: the header {h_}")
             if code != pc_:
                 qblink(code, f"#{i} {op}")
             continue
@@ -1042,6 +1143,13 @@ def main(argv):
                     d_ = ledtbl[rd(syms["cl_cur"], 1)]
                     yl_ = ((b_[d_ // 8] >> (d_ % 8)) & 1, (b_[(d_ + 1) // 8] >> ((d_ + 1) % 8)) & 1)
                     qcheck(yl_ == (1, 1), f"#{i} {op}: their trig LED yellow ({yl_})")
+                if CL45 and not want_ and rd(syms["cl_pmoved"], 1) and rd(syms["cl_cq"], 4) == 0xFFFFFFFF \
+                        and rd(0x800065BF, 1) >= 16:  # CL45 (the user): hidden, their trig no longer yellow (no cue)
+                    main_call(0x4007E998, 0)
+                    b_ = bytes(u.mem_read(0x460BA98C, 17))
+                    d_ = ledtbl[rd(syms["cl_cur"], 1)]
+                    yl_ = ((b_[d_ // 8] >> (d_ % 8)) & 1, (b_[(d_ + 1) // 8] >> ((d_ + 1) % 8)) & 1)
+                    qcheck(yl_ != (1, 1), f"#{i} {op}: their trig LED not yellow ({yl_})")
             else:
                 t_ = int(op[1:-1]) - 1
                 rec_ = rd(syms["cl_pre"] + 2 * t_, 2)
@@ -1056,7 +1164,7 @@ def main(argv):
             key(0x2E, 0)
             settle(100)
             h2 = list(hdr)
-            qcheck(h1[:2] == ["PTN LOAD:", "CURR PTN+PRT"] and h2 == h0 and rd(syms["cl_hdrst"], 1) == 0,
+            qcheck(h1[:2] == ["PTN LOAD:", CURRP] and h2 == h0 and rd(syms["cl_hdrst"], 1) == 0,
                    f"#{i} H: [PTN] held: header {h1}; released: {h2} (before {h0})")
             continue
         if op == "Z":                         # CL42: the next card job fails at its open (a never-saved bank, -12)

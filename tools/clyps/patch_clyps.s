@@ -149,6 +149,11 @@
     .equ HOV_TEMP,    2                 | "Tn LOAD: TEMP TRK",
     .equ HOV_PSEQ,    3                 | "Tn LOAD: PROJ TRK SEQ" (RQ_TRKSEQ + 2),
     .equ HOV_PFULL,   4                 | "Tn LOAD: PROJ TRK FULL" (RQ_TRKFULL + 2)
+    .equ HOV_ORIG,    5                 | CL45: an ORIG track load's "ORIG TRK SEQ / FULL" (was the flash's cl_ftgt 2)
+                                        | CL45 (the user, 2026-11-23): each lasts as stock's toast does -- its own toast
+                                        | while that is up (cl_hsetb), else TOAST_DUR UI ticks (cl_hovtick)
+    .equ HOV_PPTN,    6                 | CL45 (the user): [PTN]+[BANK]+trig, "PTN LOAD: PRJ PTN" (26 px)
+    .equ TOAST_H,     0x460d1e70        | stock's toast window (0: none up)
     .equ FL_TICKS,    30                | the load confirmation: 30 UI ticks of 1/60 s = 0.5 s (the user,
     .equ FL_HALF,     5                 | 2026-10-30), its phase toggling every 5 ticks: 3 inverted /
                                         | normal cycles (6 Hz)
@@ -452,6 +457,7 @@ ce_nsu:
     clr.b   cl_cuh
     jsr     cl_gupd
     jsr     cl_flstop
+    clr.b   cl_hov                      | CL45: a fresh view, the usual header
     pea     cl_layer
     jsr     LAYER_PUSH
     pea     cl_led
@@ -481,6 +487,7 @@ cc_npk:
     clr.w   cl_grp                      | the group ends with Clyps: the tab and the LED colours
     jsr     cl_gupd                     | go back to the active track
     jsr     cl_flstop
+    clr.b   cl_hov                      | CL45: no execution header left behind (cl_hovtick)
     tst.l   cl_win
     beq.b   cc_nowin
     pea     cl_win
@@ -669,6 +676,8 @@ cl_k_trig:
     move.l  4(%sp),%d0                  | CL40: the pattern's slot flashes, as every load's
     lea     12(%sp),%sp
     jsr     cl_flcode
+    moveq   #HOV_PPTN,%d0               | CL45 (the user, 2026-11-23): "PTN LOAD: PRJ PTN" until its toast, then while
+    jsr     cl_hset                     | that is up (rd_show)
     tst.b   cl_chordout                 | the chord opened Clyps: close it (begun inside: stay)
     beq.w   cl_refresh
     clr.b   cl_chordout
@@ -1269,10 +1278,9 @@ ktr_t:
     move.b  ACT_PAT,%d0
     jsr     cl_flcode
     move.l  (%sp),%d0                   | CL44b: the header reads "Tn LOAD: PROJ TRK SEQ" / "... FULL" meanwhile
-    addq.l  #2,%d0                      | (RQ_TRKSEQ 1 / RQ_TRKFULL 2 -> HOV_PSEQ 3 / HOV_PFULL 4)
-    move.b  %d0,cl_hov
-    move.l  8(%sp),%d0
-    move.b  %d0,cl_hovt                 | the reloaded track
+    addq.l  #2,%d0                      | (RQ_TRKSEQ 1 / RQ_TRKFULL 2 -> HOV_PSEQ 3 / HOV_PFULL 4); CL45: until its
+    move.l  8(%sp),%d1                  | toast, then while that is up (rd_show)
+    jsr     cl_hset
     lea     12(%sp),%sp
     moveq   #1,%d0
     move.b  %d0,cl_trl
@@ -1481,9 +1489,11 @@ cl_flhdr:                               | the header's label flashes (ORIG / ORI
     move.b  %d0,cl_ftgt
     bra.b   cl_fls
 cl_florig:                              | CL34: an ORIG track load -- its slot (the highlight) flashes, the
-    moveq   #2,%d0                      | header reads ORIG for the flash's length without flashing
+    moveq   #2,%d0                      | header reads ORIG without flashing (CL45: a toast's time, HOV_ORIG)
     move.b  %d0,cl_ftgt
-    bra.b   cl_fls
+    bsr.b   cl_fls
+    moveq   #HOV_ORIG,%d0
+    bra.w   cl_hset
 cl_flcode:                              | CL40: d0 = a slot (bank << 8 | slot) flashes -- a whole pattern picked
     move.w  %d0,cl_fcode                | ([PTN] + trig, [PTN]+[BANK]+trig / [YES]), as a load's slot does
     bra.b   fs_slot
@@ -1504,16 +1514,76 @@ cl_fls:
     move.b  %d0,cl_fph
 fs_out:
     rts
-cl_flstop:
+cl_flstop:                              | CL45: the execution header outlives the flash (cl_hovtick ends it)
     clr.b   cl_flk
     clr.b   cl_fph
+    rts
+| cl_hset (d0 = HOV_*, d1 = its track; 0xff several) / cl_hsetb (the same, bound to the toast just posted): CL45 (the
+| user, 2026-11-23) the execution header lasts exactly as long as its toast shows -- bound, it ends when stock's
+| toast window goes, runs out or a newer toast replaces it; without a toast, TOAST_DUR UI ticks (stock's standard
+| toast time). A new one replaces the old at once with its own full time; a key pressed meanwhile that changes the
+| header ([PTN], [BANK], [FUNC], [CUE]: cl_hkeys, cl_draw) ends it. Uses d0-d1/a0.
+cl_hsetb:
+    bsr.b   cl_hset
+    move.l  TOAST_T,%d0
+    move.l  %d0,cl_hovc
+    moveq   #1,%d0
+    move.b  %d0,cl_hovb
+    rts
+cl_hset:
+    move.b  %d0,cl_hov
+    move.b  %d1,cl_hovt
+    moveq   #TOAST_DUR,%d0
+    move.b  %d0,cl_hovk
+    clr.b   cl_hovb
+    bsr.b   cl_hkeys
+    move.b  %d0,cl_hovh                 | the keys held now (the gesture's own)
+    rts
+| cl_hkeys -> d0 = the keys that shape the header: cl_hstate's bits, [FUNC] 8, [CUE] 16. Uses d0.
+cl_hkeys:
+    jsr     cl_hstate
+    tst.b   cl_fn
+    beq.b   hk_c
+    ori.l   #8,%d0
+hk_c:
+    tst.b   cl_cuh
+    beq.b   hk_out
+    ori.l   #16,%d0
+hk_out:
+    rts
+| cl_hovtick (the UI tick, cl_uitick, while cl_hov): the header's time; at its end a redraw is asked of the sys
+| task (cl_dreq). Uses d0-d1/a0-a1.
+cl_hovtick:
+    tst.b   cl_hovb
+    beq.b   hv_cnt
+    move.l  TOAST_T,%d0                 | bound (read before stock's own decrement in this tick):
+    beq.b   hv_end                      | run out (or a timeless toast replaced it)
+    tst.l   TOAST_H
+    beq.b   hv_end                      | closed
+    cmp.l   cl_hovc,%d0
+    bhi.b   hv_end                      | a newer toast replaced it
+    subq.l  #1,%d0
+    move.l  %d0,cl_hovc
+    rts
+hv_cnt:
+    moveq   #0,%d0
+    move.b  cl_hovk,%d0
+    subq.l  #1,%d0
+    move.b  %d0,cl_hovk
+    bgt.b   hv_out
+hv_end:
     clr.b   cl_hov
+    clr.b   cl_hovb
+    tst.b   cl_open
+    beq.b   hv_out
+    jmp     cl_dreq
+hv_out:
     rts
 | cl_flashtick: one UI tick (cl_uitick, UI task, every 1/60 s while cl_flk != 0)
 cl_flashtick:
     tst.b   cl_open
     bne.b   ft_go
-    bra.b   cl_flstop
+    bra.w   cl_flstop
 ft_go:
     moveq   #0,%d0
     move.b  cl_flk,%d0
@@ -1741,14 +1811,32 @@ cl_ptnpick:                             | 0x40056b60, stock's [PTN] + trig (d2 =
     movem.l %d0-%d1/%a0-%a1,(%sp)
     lsl.l   #8,%d0
     or.l    %d2,%d0
+    move.l  %d0,-(%sp)
     jsr     cl_flcode                   | CL44b (the user, 2026-11-22): the pattern you are on too (a cancel / CURR
                                         | PTN+PRT) -- one rule: every execution flashes its slot
+    move.l  (%sp)+,%d0
+    bsr.b   cl_xpat                     | CL45: and the arrows on it hide, as a landing there
     moveq   #1,%d0
     move.b  %d0,cl_drq
 pk3_r:
     movem.l (%sp),%d0-%d1/%a0-%a1
     lea     16(%sp),%sp
 pk3_out:
+    rts
+
+| cl_xpat (d0 = bank << 8 | slot): CL45 (the user, 2026-11-23) a pick of the pattern you are on lands nothing, yet
+| looks as a landing there: the arrows on it hide (cl_phide), as when a pattern lands. Uses d0-d1/a0.
+cl_xpat:
+    moveq   #0,%d1
+    move.b  PLAY_BANK,%d1
+    lsl.l   #8,%d1
+    move.b  ACT_PAT,%d1
+    andi.l  #0x0f0f,%d0
+    cmp.l   %d1,%d0
+    bne.b   xp_out
+    andi.l  #15,%d0
+    jmp     cl_phide
+xp_out:
     rts
 
 | cl_bkpick (CL44, the user 2026-11-22): stock's [BANK] layer, its pattern pick (0x4007b37c, the second trig after
@@ -1776,9 +1864,12 @@ cl_bkpick:
     move.b  %d0,cl_bank
     jsr     cl_pfollow
     move.l  (%sp)+,%d0
+    move.l  %d0,-(%sp)
     jsr     cl_flcode
-    moveq   #HOV_CURRP,%d0
-    move.b  %d0,cl_hov
+    moveq   #HOV_CURRP,%d0              | CL45: no toast -- a toast's time
+    jsr     cl_hset
+    move.l  (%sp)+,%d0
+    bsr.w   cl_xpat                     | CL45: your own pattern again -- the arrows on it hide
     bra.w   cl_refresh
 bk4_out:
     rts
@@ -2256,6 +2347,9 @@ cl_cueload:
     bne.b   lo_go
 lo_same:
     jsr     cl_provset
+    moveq   #1,%d0                      | CL45 (the user, 2026-11-23): an execution onto / from the slot under the
+    lsl.l   %d3,%d0                     | arrows hides them though nothing lands -- as a landing would (cl_ychk:
+    jsr     cl_ychk                     | cl_hc, the LED), at once (nothing is cued)
     bra.w   lo_cancel
 lo_go:
     tst.l   RUNNING
@@ -3184,39 +3278,47 @@ ty_n:
     lsl.l   #8,%d0
     move.b  ACT_PAT,%d0
     jsr     cl_flcode
-    tst.l   %d4
-    beq.b   ty_nfl
-    moveq   #HOV_TEMP,%d0               | a reload: "Tn LOAD: TEMP TRK" meanwhile (several: "MULTI LOAD: TEMP TRK")
-    move.b  %d0,cl_hov
-    moveq   #-1,%d0
-    move.b  %d0,cl_hovt
+ty_nfl:
+    moveq   #-1,%d2                     | d2 = the track held (MIDI 8..15); -1: several (CL45)
     move.l  %d3,%d1
     subq.l  #1,%d1
     and.l   %d3,%d1
-    bne.b   ty_nfl                      | several held
-    moveq   #-1,%d0                     | one: its number (MIDI 8..15)
+    bne.b   ty_m                        | several held
     move.l  %d3,%d1
 ty_lo:
-    addq.l  #1,%d0
+    addq.l  #1,%d2
     lsr.l   #1,%d1
     bcc.b   ty_lo
     tst.l   MIDI_MODE
-    beq.b   ty_hs
-    addq.l  #8,%d0
-ty_hs:
-    move.b  %d0,cl_hovt
-ty_nfl:
-    pea     TOAST_DUR                   | one toast, whatever the tracks (the user, 2026-11-02)
-    pea     cl_s_ttsv                   | "TEMP TRK SAVED" (81 px)
+    beq.b   ty_m
+    addq.l  #8,%d2
+ty_m:
+    pea     TOAST_DUR                   | one toast, whatever the tracks (the user, 2026-11-02); CL45 (the user,
+    pea     cl_s_ttsv                   | 2026-11-23): "TRKS" with several held -- "TEMP TRK SAVED" (81 px) /
+    tst.l   %d2                         | "TEMP TRKS SAVED" (87)
+    bpl.b   ty_1s
+    move.l  #cl_s_ttsvs,(%sp)
+ty_1s:
     tst.l   %d4
     beq.b   ty_toast
-    move.l  #cl_s_ttrl,(%sp)            | "TEMP TRK RELOADED" (99 px)
+    move.l  #cl_s_ttrl,(%sp)            | "TEMP TRK RELOADED" (99 px) / "TEMP TRKS RELOADED" (105)
+    tst.l   %d2
+    bpl.b   ty_1r
+    move.l  #cl_s_ttrls,(%sp)
+ty_1r:
     tst.l   %d5
     bne.b   ty_toast
     move.l  #cl_s_savef2,(%sp)          | nothing saved for any held track: "SAVE FIRST!"
 ty_toast:
     jsr     TOAST
     addq.l  #8,%sp
+    tst.l   %d4
+    beq.b   ty_view
+    tst.l   %d5
+    beq.b   ty_view
+    moveq   #HOV_TEMP,%d0               | a reload done: "Tn LOAD: TEMP TRK" (several: "MULTI LOAD: TEMP TRKS")
+    move.l  %d2,%d1                     | while its toast is up (CL45)
+    jsr     cl_hsetb
 ty_view:
     tst.b   cl_open                     | inside Clyps: the view follows (SAVED TRK, the grid)
     beq.b   ty_done
@@ -7416,6 +7518,10 @@ cl_uitick:
     bge.b   uk_npk
     jsr     cl_dpost
 uk_npk:
+    tst.b   cl_hov                      | CL45: the execution header's time (a toast's)
+    beq.b   uk_nh
+    jsr     cl_hovtick
+uk_nh:
     tst.b   cl_flk
     beq.b   uk_out
     jsr     cl_flashtick
@@ -7733,21 +7839,41 @@ cl_draw:
     move.l  %d0,%d7                     | d7 = header state (free until the cells)
     jsr     cl_trk
     move.l  %d0,%d6                     | d6 >= 8: the MIDI side
-    tst.b   cl_flk                      | CL44b (the user, 2026-11-22): an execution's header while its flash runs
-    beq.b   cd_nov                      | (cl_hov; as ORIG TRK SEQ's, CL34)
+    tst.b   cl_hov                      | CL44b (the user, 2026-11-22): an execution's header (cl_hov); CL45: for a
+    beq.w   cd_nov                      | toast's time (cl_hovtick), unless a key pressed since changes the header
+    jsr     cl_hkeys
+    moveq   #0,%d1
+    move.b  cl_hovh,%d1
+    and.l   %d0,%d1                     | the gesture's keys still held
+    move.b  %d1,cl_hovh
+    eor.l   %d1,%d0
+    beq.b   cd_hv                       | no new one
+    clr.b   cl_hov
+    bra.w   cd_nov
+cd_hv:
     moveq   #0,%d0
     move.b  cl_hov,%d0
-    beq.b   cd_nov
+    cmpi.l  #HOV_ORIG,%d0
+    beq.w   cd_nov                      | ORIG TRK SEQ / FULL: the usual label, forced (cd_r1)
+    lea     cl_s_pptn,%a2
+    cmpi.l  #HOV_PPTN,%d0
+    beq.b   cd_ov1
     lea     cl_s_currp,%a2
     subq.l  #1,%d0
     bne.b   cd_ov2
-    moveq   #4,%d0                      | HOV_CURRP: "PTN LOAD: CURR PTN+PRT", the [PTN]-alone header (CL42)
-    or.l    %d0,%d7
+cd_ov1:
+    moveq   #4,%d0                      | HOV_CURRP: "PTN LOAD: CURR PTN+PRT", the [PTN]-alone header (CL42);
+    or.l    %d0,%d7                     | HOV_PPTN: "PTN LOAD: PRJ PTN"
     bra.w   cd_rl
 cd_ov2:
     lea     cl_s_ttrk,%a2               | HOV_TEMP "TEMP TRK" (30 px), HOV_PSEQ "PROJ TRK SEQ" (45),
     subq.l  #1,%d0                      | HOV_PFULL "PROJ TRK FULL" (49: its box ends at x 85, as ORIG TRK FULL's)
-    beq.b   cd_ov3
+    bne.b   cd_ov4
+    tst.b   cl_hovt                     | CL45 (the user): several tracks, "MULTI LOAD: TEMP TRKS" (34 px: its box
+    bpl.b   cd_ov3                      | ends at x 82)
+    lea     cl_s_ttrks,%a2
+    bra.b   cd_ov3
+cd_ov4:
     lea     cl_s_pseq,%a2
     subq.l  #1,%d0
     beq.b   cd_ov3
@@ -7773,10 +7899,10 @@ cd_nov:
 cd_r1:
     jsr     cl_onorig
     move.l  %d0,%d4                     | d4 = the box is on the original (your own pattern's slot)
-    tst.b   cl_ftgt                     | CL32: an ORIG load's flash reads ORIG wherever the arrows are
-    beq.b   cd_r1o
-    tst.b   cl_flk
-    beq.b   cd_r1o
+    moveq   #0,%d0                      | CL32: an ORIG load's flash reads ORIG wherever the arrows are; CL45: for
+    move.b  cl_hov,%d0                  | a toast's time (HOV_ORIG)
+    cmpi.l  #HOV_ORIG,%d0
+    bne.b   cd_r1o
     moveq   #1,%d4
 cd_r1o:
     jsr     cl_ismulti
@@ -9314,6 +9440,11 @@ cl_nproj:   .byte 0                     | project loads seen (the emulator gate 
 cl_trl:     .byte 0                     | CL44: the TRACK key held was a card reload (its flash outlives the key)
 cl_hov:     .byte 0                     | CL44b: the header while the execute flash runs (HOV_*; 0: as usual)
 cl_hovt:    .byte 0                     | ... its track (0..15), 0xff: several (MULTI)
+cl_hovk:    .byte 0                     | CL45: ... UI ticks left (no toast)
+cl_hovb:    .byte 0                     | CL45: ... bound to the toast up (cl_hsetb)
+cl_hovh:    .byte 0                     | CL45: ... the keys held when it was set (cl_hkeys)
+            .align 2
+cl_hovc:    .long 0                     | CL45: ... the bound toast's countdown, as last seen less one
             .align 2
 cl_cls:     .space 16
 | the valid marks: inside the loaded image, so every boot's depack zeroes them (the buffers they
@@ -9437,9 +9568,11 @@ cl_s_emp:   .asciz "---"
 cl_s_orig:  .asciz "ORIG"
 cl_s_origs: .asciz "ORIG TRK SEQ"
 cl_s_origf: .asciz "ORIG TRK FULL"
-cl_s_origp: .asciz "ORIG PTN+PRT"         | 46 px: its box ends at x 86, as T6 LOAD:'s longest
-cl_s_currp: .asciz "CURR PTN+PRT"         | 46 px too: [PTN] alone held (CL42, the user)
+cl_s_origp: .asciz "ORIG PTN"             | CL45 (the user): was ORIG PTN+PRT -- 30 px, its box ends at x 70
+cl_s_pptn:  .asciz "PRJ PTN"              | CL45: 26 px, its box ends at x 66
+cl_s_currp: .asciz "CURR PTN"             | [PTN] alone held (CL42, the user); CL45 (the user): was CURR PTN+PRT -- 30 px
 cl_s_ttrk:  .asciz "TEMP TRK"             | CL44b: the execution headers (header font 0x400c246a): 30 px
+cl_s_ttrks: .asciz "TEMP TRKS"            | CL45: several tracks held, 34 px
 cl_s_pseq:  .asciz "PROJ TRK SEQ"         | 45 px
 cl_s_pfull: .asciz "PROJ TRK FULL"        | 49 px: after "Tn LOAD:" its box ends at x 85 (BNK's box: 88)
 cl_s_saved: .asciz "SAVED TRK"           | 34 px: the slot label after a temp reload (the user, 2026-11-02)
@@ -9459,6 +9592,8 @@ cl_tname:   .space 16
 cl_s_savef2:.asciz "SAVE FIRST!"
 cl_s_ttsv:  .asciz "TEMP TRK SAVED"        | toast font 0x400ba862: 81 px
 cl_s_ttrl:  .asciz "TEMP TRK RELOADED"     | 99 px
+cl_s_ttsvs: .asciz "TEMP TRKS SAVED"       | CL45 (the user): several tracks held, 87 px
+cl_s_ttrls: .asciz "TEMP TRKS RELOADED"    | 105 px (a toast line holds 113)
 .ifdef BP_CLASH
             .align 2
 cl_bpsv:    .space 32                   | cl_bpgate: each audio track's source Part (0: it keeps its own)

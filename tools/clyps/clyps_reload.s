@@ -59,6 +59,7 @@ cl_rlreq:
     move.l  24(%sp),%d3                 | pattern
     move.l  28(%sp),%d4                 | t
     move.b  %d4,rq_t
+    clr.b   rq_hk                       | CL45: a track's execution header comes back with its toast (rd_show)
 |   the message: line 1 / line 2 (one line for the pattern)
     lea     rq_s_proj,%a0               | line 2 for every kind (the user, 2026-10-30; "RELOADED FROM
     move.l  %a0,rq_l2p                  | PROJECT" is 123 px: wider than a toast line)
@@ -66,6 +67,8 @@ cl_rlreq:
     move.b  %d0,rq_nl
     cmpi.l  #RQ_PTN,%d2
     bne.b   rr_trk
+    moveq   #HOV_PPTN,%d0               | CL45: "PTN LOAD: PRJ PTN"
+    move.b  %d0,rq_hk
     moveq   #15,%d0
     and.l   %d3,%d0
     addq.l  #1,%d0
@@ -80,6 +83,9 @@ cl_rlreq:
     lea     16(%sp),%sp
     bra.b   rr_post
 rr_trk:
+    move.l  %d2,%d0
+    addq.l  #2,%d0
+    move.b  %d0,rq_hk                   | HOV_PSEQ / HOV_PFULL
     pea     rq_s_seq                    | "TRK SEQ" / "TRK ALL", either side (the user, 2026-11-02: no track
     cmpi.l  #RQ_TRKSEQ,%d2              | numbers); line 2 "RELOADED FROM PROJ"
     beq.b   rr_k
@@ -895,6 +901,16 @@ rd_show:
     pea     rq_lines
     jsr     cl_toast2
     addq.l  #8,%sp
+    moveq   #0,%d0                      | CL45 (the user, 2026-11-23): a track's "Tn LOAD: PROJ TRK SEQ / FULL"
+    move.b  rq_hk,%d0                   | while this toast is up
+    beq.b   rs_nh
+    moveq   #0,%d1
+    move.b  rq_t,%d1
+    jsr     cl_hsetb
+    tst.b   cl_open
+    beq.b   rs_nh
+    jmp     cl_dreq
+rs_nh:
     rts
 rd_done:
     jmp     RL_DONEEPI                  | skip the whole-bank reload
@@ -1253,6 +1269,7 @@ rq_kind:    .byte 0                     | 0 idle, 1 TRK SEQ, 2 TRK FULL, 3 PTN
 rq_jbk:     .byte 0                     | CL41: the bank the running / last read serves (rq_tgt's at its start)
 rq_pat:     .byte 0
 rq_t:       .byte 0
+rq_hk:      .byte 0                     | CL45: the request's execution header (HOV_*; 0 a pattern)
 rq_nl:      .byte 0
 rq_msg:     .byte 0                     | armed before the post
 rq_own:     .byte 0                     | the job succeeded: doneFn's next success is ours
