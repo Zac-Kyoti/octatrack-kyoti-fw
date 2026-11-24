@@ -1804,7 +1804,7 @@ pp_none:
 cl_ptnpick:                             | 0x40056b60, stock's [PTN] + trig (d2 = N): CL40 (the user, 2026-11-21) a pattern
     bsr.b   cl_ptnbank                  | picked in Clyps -- another than the one you are on -- gets the load
     tst.b   cl_ptfwd                    | confirmation flash on its slot (drawn by the tail, cl_drq); its cue then
-    beq.b   pk3_out                     | blinks (cd_cbox)
+    beq.b   pk3_out                     | blinks (CL46: its slot's text)
     tst.b   cl_open
     beq.b   pk3_out
     lea     -16(%sp),%sp
@@ -1875,11 +1875,13 @@ bk4_out:
     rts
 
 | cl_cblink (the UI task's 1/60 s tick, cl_uitick; Clyps open): while the active track has a load cued, its slot
-| blinks (CL40: the box's frame, cd_cbox; until CL39c its arrows) at a fixed 120 BPM whatever the tempo (the user,
+| blinks (CL46: its text; CL40-CL45 the box's frame; until CL39c its arrows) at a fixed 120 BPM whatever the tempo (the user,
 | 2026-11-13: as the grid's red / yellow flash) -- a 0.5 s period of 30 ticks, shown for the first two thirds (20 ticks), hidden for the last (10); each cue starts shown. The
 | screen is redrawn when the phase changes, and once more when the cue ends. CL39 (the user, 2026-11-20): a stock
 | pattern cue (cl_pcue) blinks in the same phase -- its slot's second highlight (cl_draw); the screen is redrawn
-| too whenever that cue starts, changes, lands or goes (cl_pcq). Uses d0-d1/a0-a1.
+| too whenever that cue starts, changes, lands or goes (cl_pcq). CL46: the texts are hidden in the off phase, so
+| nothing cued = the on phase (cl_cph 1), and a track cue other than the one drawn (cl_cq: new, landed, cancelled,
+| another track's) redraws too. Uses d0-d1/a0-a1.
 cl_cblink:
     tst.b   cl_open
     beq.b   cb_out
@@ -1892,6 +1894,11 @@ cl_cblink:
 cb_pk:
     move.l  %d1,-(%sp)
     jsr     cl_cueslot
+    cmp.l   cl_cq,%d0                   | CL46: not the track cue drawn last: redraw
+    beq.b   cb_tq
+    moveq   #1,%d1
+    move.l  %d1,(%sp)
+cb_tq:
     moveq   #0,%d1
     tst.l   %d0
     bpl.b   cb_cue                      | the active track's load is cued
@@ -1913,6 +1920,7 @@ cb_k:
     bra.b   cb_set
 cb_none:
     clr.b   cl_bt                       | the next cue starts shown
+    moveq   #1,%d1                      | CL46: nothing cued -- every text shown (a cue that ends in the off phase redraws)
 cb_set:
     move.l  (%sp)+,%d0                  | the stock cue changed: redraw in any case
     cmp.b   cl_cph,%d1
@@ -8063,6 +8071,10 @@ cd_corner:
     subq.l  #1,%d2
     bne.b   cd_corner
 |   the 16 cells (bars XORed with their text; the select box after them, cd_box)
+    jsr     cl_cueslot                  | CL46: the cues whose slot's text blinks (cd_sum): the active track's
+    move.l  %d0,cl_cq                   | load (-1: none) and stock's pattern cue
+    jsr     cl_pcue
+    move.l  %d0,cl_pq
     jsr     cl_trk
     move.l  %d0,-(%sp)
     jsr     cl_toff
@@ -8201,6 +8213,27 @@ cd_half:                                | data but no sample / note trigs: "A01 
 cd_empty:
     lea     cl_s_emp,%a0
 cd_sum:
+    tst.b   cl_cph                      | CL46 (the user, 2026-11-23): a cued slot's text (name / summary / ---)
+    bne.b   cd_tx                       | blinks: not drawn in the off phase; the number and the "x" stay; the
+    moveq   #0,%d0                      | highlight's bar shows it inverted. Not while the execute flash runs on
+    move.b  cl_bank,%d0                 | that cell (the flash first, then the blink)
+    lsl.l   #8,%d0
+    or.l    %d2,%d0
+    cmp.l   cl_cq,%d0
+    beq.b   cd_tq
+    cmp.l   cl_pq,%d0
+    bne.b   cd_tx
+cd_tq:
+    tst.b   cl_flk
+    beq.b   cd_thide
+    cmp.w   cl_fcode,%d0
+    bne.b   cd_thide
+    moveq   #1,%d1
+    cmp.b   cl_ftgt,%d1
+    bne.b   cd_tx                       | the flash is on this cell (cl_ftgt 1: on the header)
+cd_thide:
+    bra.b   cd_trect
+cd_tx:
     move.l  %a0,-(%sp)
     move.l  %d4,-(%sp)
     move.l  %d3,%d0
@@ -8213,6 +8246,7 @@ cd_sx:
     move.l  %d0,-(%sp)
     bsr.w   cl_text
     lea     12(%sp),%sp
+cd_trect:
 |   the cell's rectangle: x d5..d6, y d4-1 .. d4+5 (one row above and below the text)
     moveq   #0,%d5
     move.w  2(%a3),%d5
@@ -8275,29 +8309,7 @@ cd_next:
     bsr.w   cl_xor
     lea     16(%sp),%sp
 cd_nlf:
-|   CL40 (the user, 2026-11-21): every cue -- the active track's cued load (cl_cueslot: a slot, SEQ or FULL, a group's
-|   active member; an original / saved / card source on the pattern's own slot) and stock's cued pattern change
-|   (cl_pcue; CL39) -- is the select box's 1 px frame on its slot, blinking in the arrows' old phase (cl_cph, 20 on / 10
-|   off), after the load confirmation on that cell (cd_cbox); the arrows never blink. Only in the cue's bank. Arrows on
-|   a cue's frame notch it (cl_cqd, cl_pbq, cd_arrows).
-    moveq   #-1,%d0
-    move.l  %d0,cl_pbq
-    move.l  %d0,cl_cqd
-    jsr     cl_cueslot                  | CL34: the active track's cued slot (-1: none)
-    move.l  %d0,cl_cq
-    tst.b   cl_cph
-    beq.b   cd_npb
-    move.l  %d0,%d2
-    bsr.w   cd_cbox
-    beq.b   cd_npq
-    move.l  %d2,cl_cqd
-cd_npq:
-    jsr     cl_pcue
-    move.l  %d0,%d2
-    bsr.w   cd_cbox
-    beq.b   cd_npb
-    move.l  %d2,cl_pbq
-cd_npb:
+|   CL46 (the user, 2026-11-23): no cue frames (CL40's cd_cbox) -- a cued slot's text blinks instead (cd_sum)
     move.b  cl_hdrst,%d0
     btst    #1,%d0
     bne.w   cd_boxed
@@ -8307,15 +8319,7 @@ cd_npb:
     lsl.l   #8,%d0
     move.b  ACT_PAT,%d0
     cmp.l   %d7,%d0
-    beq.b   cd_nosel                    | the playing slot: none
-    tst.b   cl_cph                      | CL39c (the user): a cued slot is the select box's -- the box itself
-    bne.b   cd_sel                      | blinks (not drawn in the off phase); CL40: the track's cue too
-    cmp.l   cl_cq,%d7
-    beq.b   cd_nosel
-    jsr     cl_pcue
-    cmp.l   %d7,%d0
-    beq.b   cd_nosel
-cd_sel:
+    beq.b   cd_nosel                    | the playing slot: none (CL46: a cue there no longer blinks the box)
     move.l  %d7,%d0
     lsr.l   #8,%d0
     cmp.b   cl_bank,%d0
@@ -8344,41 +8348,6 @@ cd_nosel:
     andi.l  #15,%d2
     bsr.w   cd_arrows
     bra.w   cd_boxed
-| cd_cbox (d2 = a cued slot, bank << 8 | slot, or -1; the on phase) -> d0 = 1 (flags set): its 1 px frame drawn -- in
-| its bank, not while the load confirmation flashes that cell (the user: the fast flash first, then the slow blink);
-| on the highlight (the pattern you are on: an original / saved / card source) XORed. Keeps d2; uses d0-d1/d3-d6/a0-a1/a3.
-cd_cbox:
-    move.l  %d2,%d1
-    bmi.b   cx_no
-    lsr.l   #8,%d1
-    cmp.b   cl_bank,%d1
-    bne.b   cx_no
-    tst.b   cl_flk
-    beq.b   cx_go
-    cmp.w   cl_fcode,%d2
-    beq.b   cx_no
-cx_go:
-    move.l  %d2,-(%sp)
-    andi.l  #15,%d2
-    bsr.w   cl_cell
-    moveq   #0,%d5
-    move.w  2(%a3),%d5
-    moveq   #0,%d6
-    move.w  4(%a3),%d6
-    moveq   #0,%d0
-    move.b  PLAY_BANK,%d0
-    lsl.l   #8,%d0
-    move.b  ACT_PAT,%d0
-    cmp.l   (%sp),%d0
-    seq     %d3
-    andi.l  #1,%d3                      | d3 = 1 on the highlight: inverted
-    bsr.w   cd_frame
-    move.l  (%sp)+,%d2
-    moveq   #1,%d0
-    rts
-cx_no:
-    moveq   #0,%d0
-    rts
 | cd_arrows (d2 = a slot of the shown bank, d7 = the select box): the two arrowheads on it. Uses d0-d1/d3/d5-d6/a0-a1/a3.
 cd_arrows:
     bsr.w   cl_cell
@@ -8404,12 +8373,7 @@ cd_pg:
     lsl.l   #8,%d0
     or.l    %d2,%d0
     cmp.l   %d7,%d0
-    beq.b   ca2_n
-    cmp.l   cl_pbq,%d0                  | CL39b: or on the stock cue's box (drawn now)
-    beq.b   ca2_n
-    cmp.l   cl_cqd,%d0                  | CL40: or on the track cue's
     bne.b   ca2_out
-ca2_n:
     move.l  %d5,%d0
     bsr.w   cd_notch
     move.l  %d6,%d0
@@ -9397,7 +9361,7 @@ cl_ledrec:  .long 0, cl_paint, cl_blink
             .align 2
 
 cl_win:     .long 0
-cl_pbq:     .long -1                    | CL39: the stock cue's second highlight as cl_draw drew it (-1: not drawn)
+cl_pq:      .long -1                    | CL46: stock's cued pattern as cl_draw last saw it (cl_pcue, -1: none): its text blinks
 cl_pcq:     .short 0xffff               | CL39: stock's cued pattern as cl_cblink last saw it (cl_pcue, 0xffff: none)
 cl_dmsg:    .byte 0, 0                  | CL39b: the type-0 sys message (cl_dpost: its tail only)
 cl_drq:     .byte 0                     | CL39b: the UI tick asks the sys task for a redraw (cl_dreq -> cl_uitail)
@@ -9497,7 +9461,6 @@ cl_bt:      .byte 0                     | CL34: cl_cblink's tick within its 30-t
             .align 2
 cl_pre:     .space 32                   | per track: its pre-select arrows (cl_psave / cl_pload; 0 = none)
 cl_cq:      .long -1                    | CL34: the active track's cued slot, as cl_draw last saw it (cl_cueslot)
-cl_cqd:     .long -1                    | CL40: ... its frame drawn there (cd_cbox), -1 not
 cl_hidw:    .long 0                     | CL37: the SETUP window hidden under Clyps' (cl_hideunder)
             .align 2
 cl_ptngo:   .byte 0                     | 0x80 | N: a pattern reload finished, go to pattern N (cl_ptnswitch)
