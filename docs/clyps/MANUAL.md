@@ -318,7 +318,7 @@ sound back inside Clyps, use ORIG FULL, a temp reload, or [BANK] + TRACK.
 
 ## 6. Aiming: the arrows and the box
 
-The rule is **"[YES] loads what you see"**:
+The rule is **"[YES] loads the targeted slot"**:
 
 - **UP/DOWN** step through slots 1–16, wrapping and repeating while held. **LEFT/RIGHT** jump to the same row in
   the other column (1↔9), without wrapping.
