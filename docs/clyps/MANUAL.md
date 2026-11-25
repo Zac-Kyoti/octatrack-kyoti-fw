@@ -65,8 +65,8 @@ Multi. A load replaces that one track's sequence in the active pattern. The patt
 other tracks stay as they were.
 
 **The active track.** Everything happens to the active track (the one picked with the TRACK keys), or to every
-member of a Multi. The Clyps view shows one column of the library: the active track's sequence in each of the
-16 slots.
+member of a Multi. The Clyps view shows one column of the library: the sequences available to the active track; one from each of
+the 16 pattern slots of the currently active bank.
 
 **SEQ or FULL.** A load comes in two sizes:
 - **SEQ** brings the sequence. Your track keeps its own sound.
