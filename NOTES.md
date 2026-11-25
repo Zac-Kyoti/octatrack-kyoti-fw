@@ -39087,3 +39087,17 @@ step 9 (its PLAY phase) while A02 was on step 5, and set its A:B counters from P
   JUMP lands "since PLAY, or since the last normal pattern change"; trig conditions stay in step.
 - Next: octabam #1146 moves to this pin (fifth detour 0x400a4850, unit 3938 B 51478a67…); Modwerk DJK 0.2.0 rebuilt with
   V7.3 for a fresh MKI test image.
+
+## 2026-11-24 (`trkseq`) — Clyps manual updated to CL47 (release-1119 dc02065)
+
+- The author: bring the manual up to the Clyps session's current state. Sources: that session's own
+  out/rc3clyps/cl46_docs/manual_changes.md (CL39-CL46 + CL47 addendum), checked against the dc02065 code by a
+  read-only audit. Applied: ORIG PTN+PRT -> ORIG PTN; [PTN] alone (CURR PTN), [PTN] + trig / [BANK] + bank + pattern
+  act on the shown bank; the view opens on the playing bank and never follows a landing; execution headers;
+  cue = the slot's text blinks (arrows never blink); one flash per action; arrows hidden until the first arrow
+  press, hide when something lands on their slot; per-track-per-pattern boxes; grid LED rules (solid yellow incl.
+  the active pattern, flicker = the box only, solid red when the track plays its own sequence); TEMP TRKS; card
+  reloads of the shown bank, after a failed read, messages even when unchanged.
+- Deliberately vague: WHEN a card reload's message appears (dc02065 waits for [PTN] release; the session's
+  uncommitted change shows it at the press). Renders unchanged (no CL39-47 rule shows in them). Not added: the
+  KYOTI V1.8BC "ONE 303 PER CORE!" refusal (BlackPyramids session; open question to the author).

@@ -21,7 +21,7 @@
 <rect x="48" y="236" width="150" height="22" rx="3" fill="#f6f8fa" stroke="#d0d7de"/>
 <text x="60" y="251" fill="#59636e">7  slot 7</text>
 <text x="300" y="34" font-weight="600" fill="#1f2328">2. [YES]: slot 5 plays</text>
-<text x="300" y="52" fill="#59636e" font-size="12">box on 5, arrows tucked under it</text>
+<text x="300" y="52" fill="#59636e" font-size="12">box on 5, arrows hidden under it</text>
 <rect x="318" y="68" width="150" height="22" rx="3" fill="#cf222e" stroke="#d0d7de"/>
 <text x="330" y="83" fill="#ffffff">1  active pattern</text>
 <rect x="318" y="96" width="150" height="22" rx="3" fill="#f6f8fa" stroke="#d0d7de"/>
