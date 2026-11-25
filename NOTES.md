@@ -40770,3 +40770,32 @@ unchanged (V1.8BC CAVE 636, ENC 96, SPRING 82, PERS1 128, PERS2 64).
 - **Manual:** addendum in out/rc3clyps/cl46_docs/manual_changes.md (docs/clyps/MANUAL.md not edited): the
   per-pattern box, the solid red highlight, the chord keeping the marks, toasts and headers at the press and ending
   with their chord, PROJ PTN, [FUNC] + page flipping SETUP on every press while peeking.
+
+## 2026-11-25 (`release-1119`, CLYPS) — CL47c: the CLB17 gate results (KY18BCCLBH, flashed, all hardware tests passed)
+
+- **Plan (the user, trimmed):** the full set on the flashed V1.8BC image; on KY18C CLBH and CLYPS CLBH a short
+  image-specific subset. Emulator, OT DEMO / JAM2, route A; out/rc3clyps/gates10 (jobs17*.txt, lock17*_run.out, ui/).
+- **V1.8BC:** diag_clyps_ui ABCDY, J, FQ, L, XOW, VZI, T, H, 8, 9, EGRS, NPK, MU (JAM2) PASS; diag_clyps_lock 64 jobs,
+  every check PASS except, all gate-side or expected: tCx / tCx2 (C's probe, a 1/8x track: the ORIG cue is still up
+  9 UI ticks after its flash and lands before the blink's first off phase -- consistent with §1.47 C, not a full off
+  phase to sample); dCb17 (job typo, its last op wanted SB- on A02 where A02 rightly keeps its box -- re-run dC2b17
+  with SB5: PASS; its r0 slab check still counts the Clyps load the card reload correctly undid, 48 bytes of T1's
+  record -- the r op assumes no load before it); hGb17 (HD's final header check counted [PTN]'s own CURR PTN while
+  [PTN] was still held -- fixed, hG2b17 PASS); tFb17 (its last L waits 20 s, the 256-step master lands later: the QT0
+  after it saw T2's cue still pending; the blink checks before it PASS); rzb17 / rzb17r (the injected failed read's
+  own R, as CLB9 / CLB11 / CLB14, plus CL47b's "toast at the press": the emulator's synchronous job fails before the
+  press's tail, so stock's error says why and ours never shows -- on the unit ours shows, then stock's replaces it).
+- **KY18C CLBH:** ABCDY PASS; diag_clyps_quant DJ off / on PASS once the gate counted toasts shown (cl_toast2) and
+  expected them at the press (it had counted cl_rqtoast calls and wanted the toast after the landing: CL47b's
+  change); rtc17 (card track reloads), rxc17 (bank B, paged card reloads), m17j (DJ on, bank B) PASS, plus the first
+  runner's hE / tC / qB / tG PASS.
+- **CLYPS CLBH:** ABCDY PASS; rts17 (card track reloads), s17r (bank B card pattern reload), djs17 (DJ on, qd) PASS,
+  plus hE / tC / qB PASS.
+- **Window compare vs CL38** (`cmp_clyps_windows.py gates2/w_cl38.json gates10/w17.json`, V1.8C): W1-W6 PASS, W7 8 px
+  = CL38's never-moved arrows reappearing when the box moved, hidden by design since CL44b (the same 8 px as CLB11 and
+  CLB14).
+- **diag_clyps_ui C run alone** fails one post count inside the double-tap window, identically on CLB16 and CLB17; C
+  inside ABCDY passes (the order of the sets matters).
+- **Gate changes (uncommitted until now):** diag_clyps_lock.py QTf (the flash waited out at the unit's 17 ms UI tick),
+  HD's final-header check allows CURR PTN while [PTN] is held; diag_clyps_quant.py counts shown toasts and expects them
+  at the press on a CL47b image. No firmware change: KY18BCCLBH stays the image.

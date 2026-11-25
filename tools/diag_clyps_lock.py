@@ -1177,17 +1177,18 @@ def main(argv):
             settle(100)
             print(f"#{i} {op}: toasts {[x[1] for x in stoasts[ns0:]]}; header {list(hdr)}", flush=True)
             continue
-        if op[:2] == "QT" and (len(op) == 2 or op[2:].isdigit()):
-            # CL46: the cued texts blink -- QT: at least one cue in view; QTn: exactly n (QT0: nothing blinks)
+        if op[:2] == "QT" and (len(op) == 2 or op[2:].isdigit() or op == "QTf"):
+            # CL46: the cued texts blink -- QT: at least one cue in view; QTn: exactly n (QT0: nothing blinks); QTf: as
+            # QT, the flash waited out at the unit's UI tick rate (60 Hz: 17 ms; QT's 34 ms makes the flash last 1 s)
             g = 0
             while rd(syms["cl_flk"], 1) and g < 100:
-                settle(34)
+                settle(17, every=17) if op == "QTf" else settle(34)
                 g += 1
             seq_ = qsample(80 if op != "QT0" else 40)
             up_ = [x for x in seq_ if not x["flk"]]
             cs_ = up_[0]["cq"] if up_ else qcues()      # (CL47 gate: as first sampled -- a landing may follow)
             vw_ = {c for c in cs_ if c >> 8 == rd(syms["cl_bank"], 1)}
-            n_ = int(op[2:]) if len(op) > 2 else None
+            n_ = int(op[2:]) if len(op) > 2 and op[2:].isdigit() else None
             qcheck(len(vw_) == n_ if n_ is not None else bool(vw_),
                    f"#{i} {op}: cues in view {sorted(hex(c) for c in vw_)} (all {sorted(hex(c) for c in cs_)}; T"
                    f"{(main_call(syms['cl_trk']) & 0xFF) + 1} active)")
@@ -1269,7 +1270,8 @@ def main(argv):
                 shown_ = shown_ if mode_ == "n" else []
             else:
                 ok_ = hv_ <= 1
-            qcheck(ok_ and not (EXH & set(fin_)) and all(shown_),
+            exf_ = EXH - ({CURRP} if rd(0x46C7DD3E, 4) else set())    # (CL47b gate: [PTN] still held -- its own header)
+            qcheck(ok_ and not (exf_ & set(fin_)) and all(shown_),
                    f"#{i} {op}: the execution header {'while the toast is up' if mode_ == '' else 'for a toast time' if mode_ == 'n' else 'gone at once'}: "
                    f"{hv_} UI ticks, the toast {ta_} (bound {b0_}, {k0_} ticks left at the start); then {fin_}")
             continue
