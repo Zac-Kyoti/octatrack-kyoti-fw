@@ -137,6 +137,14 @@ unit that boots; if it doesn't, use §3b.
 PERSONALIZE is reset by every flash, so features are off until you re-enable them. A
 quick check for each:
 
+- **PROMOTED FINAL 2026-11-25 (the author's word, 2026-11-24, after `KY18BCCLBH` passed every test):** CLYPS (CL47c),
+  BLACKPYRAMIDS_303 (the machine-list silence and the switch-away blip fixed) and KYOTI V1.8 / V1.8C / V1.8BC. The
+  finals' mainos are the tested builds' byte for byte (the OS VERSION is applied at the wrap): KYOTI V1.8BC
+  (`KYOTI1.8BC`) = the flashed `KY18BCCLBH`; KYOTI V1.8C (`KYOTI 1.8C`) and CLYPS (`CLYPS V1.0`) = `KY18C CLBH` /
+  `CLYPS CLBH` (emulator-gated, not flashed as such: the same Clyps code); KYOTI V1.8 (`KYOTI V1.8`) = `KY18 RC2`
+  (not flashed as such; nothing it contains changed since); BLACKPYRAMIDS_303 (`140C_BP303`): its two fixes
+  confirmed inside V1.8BC (RC2, the CLB test images, `KY18BCCLBH`), this image not flashed as such. Pins: NOTES
+  2026-11-25 (`promote-1125`).
 - **PROMOTED FINAL 2026-11-20 (from RC1 / RC2, the author's word):** VARISPEED VRG3, VARISPEED_EMUS (VEMG4 code),
   ERASE_EMPTY_TRIGLESS_LOCKS on MIDI tracks, EMPTY_PATTERN_LED_FIX's `[BANK]` change (BATCH_BUGFIXES), and every
   other feature image that carries the fixes (MUTE_MODES, QUANTIZE_LIVE_REC_TOGGLE, SIDECHAIN_COMPRESSOR,
@@ -146,8 +154,7 @@ quick check for each:
   `140CVEMRC1` (every item; = the VARISPEED_EMUS final's mainos), `KY18BC RC1` / `KY18C RC1` (VARISPEED, the LED matrix,
   `[BANK]` held) and `KY18BC RC2` (ERASE on MIDI and audio tracks), all passed on the author's MKI. Not flashed as
   these images: VARISPEED (`140C_VRRC1` skipped), ERASE, BATCH_BUGFIXES and the six other feature images. **Not
-  promoted, until RC3 is flashed:** BLACKPYRAMIDS_303, CLYPS, KYOTI V1.8 / V1.8C / V1.8BC (their FINALs stay the
-  2026-11-19 builds). Pins: NOTES 2026-11-20 (`promote-1120`).
+  promoted that day:** BLACKPYRAMIDS_303, CLYPS, KYOTI V1.8 / V1.8C / V1.8BC (promoted 2026-11-25, above). Pins: NOTES 2026-11-20 (`promote-1120`).
 - **RELEASE CANDIDATE RC3** (WIP, NOT promoted, NOT flashed; branch `release-1119` `0c465ee`, NOTES 2026-11-20 cont.).
   RC2 + one BLACKPYRAMIDS_303 fix: a track that stops being a BLKPYRAMD (chooser, SRC SETUP, a page paste, the net) no
   longer plays a blip of its FLEX sample (a short fast loop) until its next trig. Only `KY18BC RC3` changes for the

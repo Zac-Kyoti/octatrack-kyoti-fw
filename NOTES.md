@@ -40879,3 +40879,59 @@ unchanged (V1.8BC CAVE 636, ENC 96, SPRING 82, PERS1 128, PERS2 64).
 - **Gate changes (uncommitted until now):** diag_clyps_lock.py QTf (the flash waited out at the unit's 17 ms UI tick),
   HD's final-header check allows CURR PTN while [PTN] is held; diag_clyps_quant.py counts shown toasts and expects them
   at the press on a CL47b image. No firmware change: KY18BCCLBH stays the image.
+
+## 2026-11-25 (`promote-1125`) — CLYPS (CL47c), BLACKPYRAMIDS_303 and KYOTI V1.8 / V1.8C / V1.8BC PROMOTED FINAL
+
+**The author's instruction (2026-11-24, after `KY18BCCLBH` = CLB17 passed every hardware test):** commit and promote these
+versions of Clyps, BlackPyramids and KYOTI to final and push to main. The CLB17 emulator gate set had passed (previous
+entry: no firmware fails).
+
+**Branch.** `promote-1125` from origin/main 9f64bf5 (e750155's 2026-11-20 promotion + the trkseq session's manual commits),
+`release-1119` 9db8bc6 merged in (d0c2737, no conflicts: NOTES union, START_HERE auto-merged; release-1119 never touched
+docs/clyps/MANUAL.md, main's stays). Firmware sources = release-1119 f847ace (`git diff f847ace` on tools/clyps,
+tools/ot303, build_kyoti / build_clyps / build_blackpyramids_303 / feature_image, tools/dram: empty; only kyoti_status.py
+differs, main's 2026-11-20 pins kept). BLACKPYRAMIDS_303's sources = b4750a7's (control.c unchanged since).
+
+**Before pinning.** Every builder promoted 2026-11-20 (and the other FINAL units) run again on the merge WITHOUT
+`KYOTI_ALLOW_WIP`: all 13 seal, every unit and feature image = its pin. The five builds below run with the opt-in, no
+`KYOTI_VERSTR` (each builder's own OS VERSION), sequentially; out/ot303/dsp56300_new copied from release-1119's
+out/rc3clyps/wt10.
+
+| feature | unit / mainos (pinned) | syx | .bin | OS VERSION | equals |
+|---|---|---|---|---|---|
+| KYOTI V1.8BC (`build_kyoti.py --clyps-bp`) | `0a8aad47407fe12a8144ada288156ccec38011ac6603f51397da5cd7e9e7ce95` | `4081b1e9…` | `60dcf00d…` | `KYOTI1.8BC` | CLB17's flashed `KY18BCCLBH` mainos, byte for byte |
+| KYOTI V1.8C (`--clyps`) | `94fe94c29baea5cc8d9ed9e5793991b698c3aa05da7cf58db5b18b8f7b44fc33` | `251bf547…` | `4c20f3f4…` | `KYOTI 1.8C` | CLB17's `KY18C CLBH` mainos |
+| CLYPS (`build_clyps.py` -> `--clyps-standalone`) | `eb3cc85bd2666efe3994a482539e5948d33cabff2017e0bd5334c2d7974afcd3` | `f9eb460e…` | `5ff94d94…` | `CLYPS V1.0` | CLB17's `CLYPS CLBH` mainos |
+| KYOTI V1.8 (default) | `02e30123328b8aeca3959804f68cf91c571ec386f282d981201e79c1de9f8810` | `b8cf5f1b…` | `15e4c3e0…` | `KYOTI V1.8` | RC2's `KY18 RC2` mainos (nothing it carries changed since: no Clyps, no BLKPYRAMD) |
+| BLACKPYRAMIDS_303 unit (`build_blackpyramids_303.py`) | `2a0b990118dc6cffa5ef8a7b8849e0831346d35fcb6b77b8fef5872868aa2b4e` | | | | control.c at b4750a7 (below) |
+| BLACKPYRAMIDS_303 feature image (`feature_image.py`) | `4f2b2ec94cdf98b67e012079a26ade692ceaabf0576e6bda518803737f584989` | `32072660…` | `44484b2f…` | `140C_BP303` | never built before at b4750a7 (RC3's `140C_BPRC3` was 0c465ee) |
+
+The old pins these replace: V1.8BC `0704647c…`, V1.8C `9d1a29c9…`, CLYPS `94e41a22…`, V1.8 `8807feee…`, BP unit
+`1d53ef7f…`, BP image `b4b55638…` (2026-11-19, 07f47d1). The syx / .bin differ from the CLB17 / RC2 copies only in the
+OS VERSION string.
+
+**BP unit vs the runtime inside the flashed V1.8BC.** Both compiled from the same control.c (b4750a7); the runtime ELFs
+(the standalone's out/ot303/cf, V1.8BC's out/KYOTI/bp_runtime) have the same 227 symbols at the same sizes except
+`ot_assign` (0x3ca -> 0x3ec) and `ot_render` (0xfc0 -> 0x1056) plus V1.8BC's `ot_mm_drops`: exactly control.c's
+`#ifdef KYOTI_VARI_TAKE` / `KYOTI_MM_GATE` blocks, which build_blackpyramids_303.py defines only for the combined image
+(VARISPEED's VARI_TAKE / BACK, MUTE_MODES' key mask). text 42,713 / 42,897 B.
+
+**After pinning.** All five re-run without the opt-in: every one "image matches the promoted FINAL build" (the BP unit
+too, inside its feature run). `tools/kyoti_status_sram_test.py` on the six images: PASS, clean under both scans. RAM cost:
+V1.8 12 arena pages, CLYPS 1,710, V1.8C 1,711, V1.8BC 1,723 (CL47's per-pattern boxes: +1 page; BUILD_KYOTI updated).
+Exclusions (`tools/feature_exclusions.py`): CLYPS + RELOAD_FROM_PROJECT and CLYPS + DIRECT_JUMP_KYOTI still refused,
+the integrated pair alone allowed (`SUPERSEDE` in build_kyoti.py); the V1.8C / V1.8BC / CLYPS logs list no RELOAD.
+
+**Gates on the final V1.8BC** (its mainos + bp_runtime ELF, ot_emu_8d0ad6f4, BOTLI): `tools/ot303/verify_one_per_core.py`,
+`verify_page_paste.py`, `verify_part_carry.py`, `verify_tie_xfer.py`, `verify_first_gate.py` (and `STALE=1`): ALL GOOD
+(idle net pass median 54 instructions). The Clyps gates are not re-run: they ran on these very mainos (previous entry,
+out/rc3clyps/gates10 in the release worktree).
+
+**Hardware lines (README).** V1.8BC: this build flashed 2026-11-24 as `KY18BCCLBH`, all tests passed, plus the RC / CLB
+flashes. V1.8C and CLYPS: the same Clyps code, not flashed as such. V1.8: its features confirmed in the RC images
+(RELOAD in its own), not flashed as such. BLACKPYRAMIDS_303: the chooser-silence and switch-blip fixes inside V1.8BC (RC2,
+the CLB images, `KY18BCCLBH`); this standalone image not flashed as such. No README description changed (the BP fixes
+are fixes; Clyps' CL39-CL47c changes are the manual's level).
+
+Docs: README (Hardware lines), BUILD_KYOTI (the RC3 opt-in note gone, RAM pages), FLASHING §4 (promotion note),
+START_HERE §6. Not touched: octabam (#1195 is the BlackPyramids session's), Modwerk, docs/clyps/MANUAL.md.

@@ -58,21 +58,18 @@ FINAL = {
         "mainos_reload_from_project.bin":                    "38f2f7de9c88561bfd9bd2027d7276819aed085eb9873424d02caf16548ef4b6",
         "mainos_direct_jump_kyoti.bin":                      "79b422fdb3bcf62c42395c7fab775d95e81113bd64fb6c65ff0ea44e3475f872",
         "mainos_rec_trig_mute.bin":                          "f8ee2d55ac6d253699b5c4bc2a35a02c587badc3fb43353d17bfc605f47d1c10",
-        "mainos_blackpyramids_303.bin":                      "b4b556381364de3f0eadf76dccaa1a60bc5239465bfa77c29ab973d389f4e569",
+        "mainos_blackpyramids_303.bin":                      "4f2b2ec94cdf98b67e012079a26ade692ceaabf0576e6bda518803737f584989",
         "mainos_varispeed.bin":                              "fe4e7f50fb6386e1ee717b54896f615fd946c74e7b9f1d2a061098c729388566",
         "mainos_varispeed_emus.bin":                         "f3b08c791b888f1683f13a57b14f7f44f3f331d79f383b588a161803bf1a4123",
         "mainos_batch_bugfixes.bin":                         "fa374dd80125aea37d2f2ab858b94af7f618e75b080718dfb4f9f23d9c95c1ca",
     },
-    # 2026-11-20: the KYOTI / CLYPS images and BLACKPYRAMIDS_303 (unit + feature image) keep their 2026-11-19
-    # finals (built at 07f47d1); main's sources for them differ until RC3 is flashed and promoted, so their
-    # builders need KYOTI_ALLOW_WIP=1 until then (the author's call).
     "build_kyoti.py": {
-        "mainos_kyoti_v1.8.bin":                             "8807feee12f40093e0d4db68101b4e607b2f17e75b3d2cd026dd06a053073279",
-        "mainos_kyoti_v1.8c.bin":                            "9d1a29c9625c609979d54834b5b35654c5b40b4c778a2d8025fac52f7666524d",
-        "mainos_clyps.bin":                                  "94e41a221f02dce0f46731845d8c0e729240d99a92aa09038fa91a53e68079c8",
-        "mainos_kyoti_v1.8bc.bin":                           "0704647c307ec944819ed7534b57dad766f7f7ea392a7be4f89f57809ac4b24a",
+        "mainos_kyoti_v1.8.bin":                             "02e30123328b8aeca3959804f68cf91c571ec386f282d981201e79c1de9f8810",
+        "mainos_kyoti_v1.8c.bin":                            "94fe94c29baea5cc8d9ed9e5793991b698c3aa05da7cf58db5b18b8f7b44fc33",
+        "mainos_clyps.bin":                                  "eb3cc85bd2666efe3994a482539e5948d33cabff2017e0bd5334c2d7974afcd3",
+        "mainos_kyoti_v1.8bc.bin":                           "0a8aad47407fe12a8144ada288156ccec38011ac6603f51397da5cd7e9e7ce95",
     },
-    "build_blackpyramids_303.py":          "1d53ef7f413d82dd8e2fe10ee89726a1e181c953d481ffb76ac985515b878693",
+    "build_blackpyramids_303.py":          "2a0b990118dc6cffa5ef8a7b8849e0831346d35fcb6b77b8fef5872868aa2b4e",
     "build_part_change_carryover_fix.py":  "dd2a7e2ba3328364caa560e431195fd248cbb5d83dce1759de1e7e3effc5febd",
     "build_varispeed.py":                  "2e365957f13495c5c6aa8d21e9c75b8954b41104efa7968302140d8ee8b73d54",
     "build_varispeed_emus.py":             "b54e72464dfb5f3ffbefae98e93198c6c1f76ef8237484e44e06967ee22532bc",

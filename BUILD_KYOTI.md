@@ -51,10 +51,6 @@ image of a feature without them. Each writes its image to `out/<FEATURE>/`:
 | BATCH_BUGFIXES (the three fixes alone) | `python3 tools/build_batch_bugfixes.py` | `140C_FIXES` |
 | SIDECHAIN_COMPRESSOR light (the earlier version; WIP, not recommended; no bug fixes) | `KYOTI_ALLOW_WIP=1 python3 tools/build_sidechain_compressor_light.py` | `140C_SCLT` |
 
-> **Until RC3 is promoted (2026-11-20):** on `main`, BLACKPYRAMIDS_303, CLYPS and the three KYOTI images below
-> carry changes not yet promoted, so their builders refuse without `KYOTI_ALLOW_WIP=1`. Their finals build at
-> commit `07f47d1` (`git worktree add ../octatrack-kyoti-fw-finals-1119 07f47d1`).
-
 Each build writes, in `out/<FEATURE>/`:
 
 ```
@@ -89,9 +85,9 @@ They write `out/KYOTI/OCTATRACK_OS1.40C_KYOTI_V1.8.syx` (OS VERSION `KYOTI V1.8`
 `out/CLYPS/`). No builder puts CLYPS beside the standalone DIRECT_JUMP_KYOTI or RELOAD_FROM_PROJECT
 (`tools/feature_exclusions.py`).
 
-> **Sample memory.** RELOAD_FROM_PROJECT and DIRECT JUMP run from DRAM in V1.8: eleven 6 KB pages (66 KB)
-> of the 85.5 MB pool. In V1.8C and the CLYPS image, CLYPS and DIRECT JUMP take 1,709 pages (about 10 MB; V1.8BC
-> with the voice's runtime: 1,721),
+> **Sample memory.** RELOAD_FROM_PROJECT and DIRECT JUMP (with VARISPEED's UI code and EMPTY_PATTERN_LED_FIX)
+> run from DRAM in V1.8: twelve 6 KB pages (72 KB) of the 85.5 MB pool. In V1.8C and the CLYPS image, CLYPS and
+> DIRECT JUMP take 1,711 and 1,710 pages (about 10 MB; V1.8BC with the voice's runtime: 1,723),
 > almost all of it Clyps' originals and working copies. The MEMORY page still reads 85.5 MB. An
 > octabam-built image (octabam's own remixer) reserves a fixed **10 MiB** whenever any module runs from DRAM.
 

@@ -201,8 +201,10 @@ Open303's and what is new, every voicing decision and full attribution:
 
 **Hardware:** the voice confirmed; the one-per-core refusals (machine list, TRACK PASTE, SRC page paste,
 Clyps), SRC page copy and paste and a project round trip confirmed in KYOTI V1.8BC; Part and pattern changes
-(no pop, the last step, ties across, the first note's GATE) confirmed in the octabam form; loading a project
-saved with two on a core not tried on the unit. This image, with the three bug fixes, not flashed as such.\
+(no pop, the last step, ties across, the first note's GATE) confirmed in the octabam form; choosing it in the
+machine list (it sounds at once) and switching a track away from it (no stray sample) confirmed in KYOTI V1.8BC
+test images (November 20–24, 2026, the last flashed with all tests passed); loading a project saved with two on
+a core not tried on the unit. This image, with the three bug fixes, not flashed as such.\
 **Final build:** [`tools/build_blackpyramids_303.py`](tools/build_blackpyramids_303.py) →
 `out/BLACKPYRAMIDS_303/OCTATRACK_OS1.40C_BLACKPYRAMIDS_303`
 
@@ -300,8 +302,8 @@ Clyps keeps its originals and working copies in sample memory, about 10 MB of th
 Everything else, from groups to peeking at a parameter page, is in the
 **[Clyps user manual](docs/clyps/MANUAL.md)**, a living document that will keep changing.
 
-**Hardware:** confirmed in KYOTI V1.8C. This image (Clyps, Direct Jump Kyoti and the three bug
-fixes) not flashed as such.\
+**Hardware:** confirmed in KYOTI V1.8BC, the same Clyps code (flashed November 24, 2026: all tests
+passed). This image (Clyps, Direct Jump Kyoti and the three bug fixes) not flashed as such.\
 **Final build:** [`tools/build_clyps.py`](tools/build_clyps.py) →
 `out/CLYPS/OCTATRACK_OS1.40C_CLYPS`, and in [KYOTI V1.8C](#kyoti-v18c), below.
 
@@ -380,8 +382,9 @@ OS VERSION read `KYOTI V1.8`. It replaces KYOTI V1.7 and earlier, and the withdr
 (see below). A COMPRESSOR saved with V1.5 or earlier keeps its `KEY`; set its `KGN`, `KBAS`,
 `KWID` and `MON` again.
 
-**Hardware:** each feature confirmed; this combined image not flashed as such (RELOAD after a
-DIRECT JUMP jump checked in the emulator only).\
+**Hardware:** each feature confirmed (RELOAD_FROM_PROJECT in its own image, the others in the KYOTI
+V1.8BC / V1.8C release candidates); this combined image not flashed as such (RELOAD after a DIRECT JUMP
+jump checked in the emulator only).\
 **Final build:** [`tools/build_kyoti.py`](tools/build_kyoti.py) →
 `out/KYOTI/OCTATRACK_OS1.40C_KYOTI_V1.8`
 
@@ -391,7 +394,9 @@ KYOTI V1.8 with CLYPS in RELOAD_FROM_PROJECT's place: Clyps, with Direct Jump Ky
 carries its own card reloads. OS VERSION reads `KYOTI 1.8C`. Clyps keeps about 10 MB of
 sample memory.
 
-**Hardware:** confirmed (this combined image).\
+**Hardware:** its Clyps confirmed in KYOTI V1.8BC, the same Clyps code (flashed November 24, 2026: all
+tests passed); its other features in the KYOTI V1.8C / V1.8BC release candidates. This image not flashed as
+such.\
 **Final build:** [`tools/build_kyoti.py`](tools/build_kyoti.py) `--clyps` →
 `out/KYOTI/OCTATRACK_OS1.40C_KYOTI_V1.8C`
 
@@ -404,11 +409,13 @@ BLKPYRAMD on a core are refused whole, with `ONE 303 PER CORE!`. ERASE_EMPTY_TRI
 BLKPYRAMD track's trigless locks alone (there they are ties). Clyps and the voice keep about 10 MB of
 sample memory.
 
-**Hardware:** confirmed (this combined image): the voice on both cores, the FX2 list, SIDE-CHAIN
-keyed from and onto a BLKPYRAMD track, every MUTE MODE on a BLKPYRAMD track, the trigless-lock erase,
-Clyps and DIRECT JUMP with a BLKPYRAMD track, a project round trip, the one-per-core refusals and SRC page
-copy and paste. Its BLACKPYRAMIDS_303's Part and pattern changes are confirmed in the octabam form (the same
-code), not in this image. Loading a project saved with two on a core not tried on the unit.\
+**Hardware:** this image flashed November 24, 2026 (with a test OS VERSION, the same build): all tests
+passed. With its earlier release candidates and test images (November 19–24): the voice on both cores, the
+FX2 list, SIDE-CHAIN keyed from and onto a BLKPYRAMD track, every MUTE MODE on a BLKPYRAMD track, the
+trigless-lock erase on audio and MIDI tracks, Clyps and DIRECT JUMP with a BLKPYRAMD track, a project round
+trip, the one-per-core refusals, SRC page copy and paste, and choosing BLKPYRAMD in the machine list and
+switching away from it. Its BLACKPYRAMIDS_303's Part and pattern changes are confirmed in the octabam form (the
+same code), not in this image. Loading a project saved with two on a core not tried on the unit.\
 **Final build:** [`tools/build_kyoti.py`](tools/build_kyoti.py) `--clyps-bp` →
 `out/KYOTI/OCTATRACK_OS1.40C_KYOTI_V1.8BC`
 

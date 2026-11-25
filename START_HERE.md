@@ -158,16 +158,22 @@ are lowercase-hyphen, because octabam requires a module's name to equal its fold
 
 > Check this against the tree before trusting it; it has gone stale before.
 
+- **2026-11-25: CLYPS (CL47c), BLACKPYRAMIDS_303 and KYOTI V1.8 / V1.8C / V1.8BC PROMOTED FINAL** (the author,
+  2026-11-24, after `KY18BCCLBH` passed every test; branch `promote-1125` = origin/main + `release-1119` 9db8bc6, firmware
+  f847ace). Pins: KYOTI V1.8BC mainos `0a8aad47…` (= the flashed `KY18BCCLBH`), V1.8C `94fe94c2…`, CLYPS `eb3cc85b…`
+  (= `KY18C CLBH` / `CLYPS CLBH`, the same Clyps code, not flashed as such), V1.8 `02e30123…` (= `KY18 RC2`, not flashed
+  as such), BLACKPYRAMIDS_303 unit `2a0b9901…`, feature image `4f2b2ec9…` (`140C_BP303`, not flashed as such; its
+  chooser / blip fixes confirmed inside V1.8BC). Every FINAL builder seals without the opt-in again. Table: NOTES
+  2026-11-25 (`promote-1125`). Next: octabam's `blackpyramids-303` pin (#1195, the BlackPyramids session's) can move to
+  this control.c; Clyps' manual is the trkseq session's (up to date with CL47c, 9f64bf5); the open BLKPYRAMD items below
+  (ties across DIRECT JUMP / Clyps / a two-track Part switch) are unscheduled.
 - **2026-11-20: PROMOTED FINAL from RC1 / RC2 (branch `promote-1120`, the author's word):** VARISPEED VRG3 (unit
   `2e365957…`, image `fe4e7f50…`), VARISPEED_EMUS (unit `b54e7246…`, image `f3b08c79…` = the flashed `140CVEMRC1`),
   ERASE_EMPTY_TRIGLESS_LOCKS on MIDI tracks (unit `3d60c731…`, image `0f9f1f6f…`), EMPTY_PATTERN_LED_FIX's `[BANK]`
   change (unit `074315c2…`, BATCH_BUGFIXES `fa374dd8…`), and the six other feature images with the new fix bytes
   (MUTE_MODES `316f01f7…`, QLR `9b51ad03…`, SC `2d5a4016…`, RELOAD `38f2f7de…`, DJK `79b422fd…`, RTM `f8ee2d55…`; units
-  unchanged). Table: NOTES 2026-11-20 (`promote-1120`). **Excluded until RC3 is flashed (the author):
-  BLACKPYRAMIDS_303 (unit + image), CLYPS, KYOTI V1.8 / V1.8C / V1.8BC** -- their FINAL pins are still the 2026-11-19
-  builds (07f47d1), main's sources for them have changed (BP's chooser / blip fixes, the LED / ERASE / VRG3 bytes), so
-  `build_blackpyramids_303.py`, `build_clyps.py` and `build_kyoti.py` refuse without `KYOTI_ALLOW_WIP=1` until RC3 is
-  promoted; the old finals rebuild at 07f47d1. octabam pin PRs (all on 2cd3109, base 382a478b, every gate green,
+  unchanged). Table: NOTES 2026-11-20 (`promote-1120`). BLACKPYRAMIDS_303, CLYPS and KYOTI V1.8 / V1.8C / V1.8BC
+  were left out that day; they are FINAL since 2026-11-25 (above). octabam pin PRs (all on 2cd3109, base 382a478b, every gate green,
   waiting on Sam): batch-bugfixes sambanks/octabam#1200, erase-empty-trigless-locks #1201, varispeed #1202 (#1201 and
   #1200 edit one THIRD_PARTY row; #1202 shares a row with #1195); no varispeed-emus module (none should exist). VARISPEED's `vh_bptake` / `vh_bpback` (VARI_TAKE /
   VARI_BACK, under `VEM_BP`) are not in octabam's varispeed module yet: octabam's BlackPyramids is to call them once the
