@@ -86,7 +86,7 @@ updated accordingly (a total of 256 sequences are available per track per projec
 Direct Jump Kyoti is built into Clyps. It is off at power-on, so Clyps starts with stock timing (cued);
 [PTN] + [YES] switches between cued and legato at any time.
 
-**It's all editing.** A load changes the active pattern in memory, exactly like editing trigs by hand. Save to keep it.
+**It's all editing.** A load changes the active pattern in memory, exactly like editing trigs by hand. Save your project to permanently save your edits.
 
 ## 3. The controls' grammar
 
