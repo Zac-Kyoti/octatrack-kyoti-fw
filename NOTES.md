@@ -39100,7 +39100,11 @@ step 9 (its PLAY phase) while A02 was on step 5, and set its A:B counters from P
   reloads of the shown bank, after a failed read, messages even when unchanged.
 - Deliberately vague: WHEN a card reload's message appears (dc02065 waits for [PTN] release; the session's
   uncommitted change shows it at the press). Renders unchanged (no CL39-47 rule shows in them). Not added: the
-  KYOTI V1.8BC "ONE 303 PER CORE!" refusal (BlackPyramids session; open question to the author).
+  KYOTI V1.8BC "ONE 303 PER CORE!" refusal (the author: it doesn't belong in the Clyps manual).
+- §7's Multi render redone with four members (the author): CL47 test image release-1119
+  out/rc3clyps/CLB15/mainos_kyoti_v1.8c.bin, OT DEMO, keys "32 10 2e+ 2f+ 2f- 2e- 04 2a+ 11 12 13 10 2a- 33 2d+
+  call:4004BD48 call:4003FED8 call:40A999AE" (stock's two sidebar painters + cl_tabhook, which route A never runs;
+  the hook's address = the jsr target at 0x40052238 in that image).
 ## 2026-11-18 (`emus-guard`) — VARISPEED_EMUS VEM11 (WIP, NOT flashed): the load guard across a Part switch
 
 The author's decision ("full fix, plus pitch-jump fix") on the emulator repro of the Part-switch gap

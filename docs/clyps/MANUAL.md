@@ -351,9 +351,10 @@ A Multi group lets one gesture load several tracks, each with its own clip or al
   to add MIDI tracks). The header reads `MULTI`. Members' TRACK LEDs light, the active member's tab is filled and
   the others are outlined.
 
-  ![The Clyps view with a Multi and [FUNC] held: the header reads MULTI LOAD: TRKS FULL](clyps-group.png)
+  ![The Clyps view with a Multi of T1 to T4 and [FUNC] held: T1's tab filled, T2 to T4 outlined, the header reads MULTI LOAD: TRKS FULL](clyps-group.png)
 
-  *A Multi with [FUNC] held: [YES] would load every member FULL.*
+  *A Multi of T1–T4 with [FUNC] held. T1 is the active member (filled tab), T2–T4 are the other members
+  (outlined tabs); [YES] would load every member FULL.*
 
 - **Aim each member on its own:** press a member's TRACK key to make it active, then move its arrows. Every member
   keeps its own aim. A non-member's TRACK key does nothing while the Multi exists.
