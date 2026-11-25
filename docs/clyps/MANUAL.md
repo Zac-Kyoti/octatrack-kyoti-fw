@@ -80,7 +80,7 @@ updated accordingly (a total of 256 sequences are available per track per projec
 - **Legato** comes with **Direct Jump Kyoti**. The new clip takes over on the track's very next step, exactly
   where it would be had it been playing all along. Nothing waits and nothing restarts, so you can swap clips as
   fast as you can press trigs: a quick, musical, fluid way to make a lot of sequence variation on the fly.
-- **Reloads** to the active pattern (whether an original, a temp save, or the card's version) are always legato,
+- **Reloads** to the active pattern (whether an original, the card's project version, or a temp save) are always legato,
   with or without Direct Jump Kyoti.
 
 Direct Jump Kyoti is built into Clyps. It is off at power-on, so Clyps starts with stock timing (cued);
