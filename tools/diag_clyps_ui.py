@@ -79,6 +79,7 @@ def main(argv):
             p = rd(p, 4)
         return out
 
+    CL44 = "cl_bkpick" in syms and "cl_hov" not in syms   # CL44 (CLB10 only): no load moves the arrows (cl_cur)
     def state():
         return dict(open=rd(syms["cl_open"], 1), sbank=rd(syms["cl_sbank"], 1),
                     bank=rd(syms["cl_bank"], 1), cur=rd(syms["cl_cur"], 1), win=rd(syms["cl_win"], 4),
@@ -248,7 +249,8 @@ def main(argv):
         key(3, 1)
         key(3, 0)
         s = state()
-        check(s["open"] == 1 and s["cur"] == 3 and s["sbank"] == bank, "trig 4: the box on slot 4, Clyps stays")
+        check(s["open"] == 1 and (CL44 or s["cur"] == 3 and s["sbank"] == bank), "trig 4: the box on slot 4, Clyps stays"
+              + (" (CL44: the arrows stay, the box's LED below)" if CL44 else ""))
         check(rec(act) == src, "trig 4 loaded pattern 4's sequence")
         check(led(3) == (1, 0), "slot 4 (the box) is red (cl_blink flashes it on hardware)")
         check(led(act) == (1, 0), "your pattern is still red")
@@ -355,8 +357,24 @@ def main(argv):
                   f"[AMP] held: the Clyps window off screen, the encoders reach the page ({[hex(x) for x in e_peek]}; "
                   f"Clyps': {[hex(x) for x in e_before]}), [LFO] too: the page follows ({pg_amp} -> {pg_lfo})")
             hid_ = linked() == 0 and rd(syms["cl_pkw"], 1) == 1        # CL36: released inside the double-tap window
+            if "dp_post" in syms:   # CL39c: the tick posts once, and only past stock's double-tap window
+                npost = [0]
+                hp_ = u.hook_add(er.eb.UC_HOOK_CODE, lambda uc, ad, sz, ud: npost.__setitem__(0, npost[0] + 1),
+                                 begin=syms["dp_post"], end=syms["dp_post"])
+                u.mem_write(0x460D5DE0, (5).to_bytes(4, "big"))
+                for _ in range(5):
+                    main_call_r(0x40056C28)
+                n_in = npost[0]
+                u.mem_write(0x460D5DE0, (100).to_bytes(4, "big"))
+                for _ in range(5):
+                    main_call_r(0x40056C28)                             # 5 ticks before the sys task runs: one post
+                n_out = npost[0] - n_in
+                u.hook_del(hp_)
+                check(n_in == 0 and n_out == 1, f"... the peek's return: {n_in} posts inside the double-tap window, "
+                      f"{n_out} for 5 UI ticks past it (one, until the tail runs)")
             u.mem_write(0x460D5DE0, (100).to_bytes(4, "big"))
             main_call_r(0x40056C28)                                     # a UI tick past it: the view comes back
+            rt.run(ms=100)      # CL39b: the tick only posts; the sys task's UI tail shows it (cl_pkt there)
             check(hid_ and linked() == 1 and enc0() == e_before and rd(syms["cl_pk"], 1) == 0 and state()["open"] == 1
                   and rd(0x460BABF4, 4) == rd(syms["cl_win"], 4),
                   "... released: Clyps waits out the double-tap window, then its window is back (on top), its encoders locked")
@@ -369,6 +387,7 @@ def main(argv):
             def screen():
                 u.mem_write(0x460D5DE0, (100).to_bytes(4, "big"))   # past stock's double-tap window (route A has no LED tick)
                 main_call_r(0x40056C28)                             # one UI tick: a deferred return shows (cl_pkt)
+                rt.run(ms=100)                                      # CL39b: ... in the sys task's UI tail
                 rt.run(ms=200)
                 tailmsg()
                 # the screen AS COMPOSED (windows included): PLANE is stock's page layer only -- Clyps' window never
@@ -1122,7 +1141,7 @@ def main(argv):
             # the OT goes to the reloaded pattern (the user, 2026-11-06): stopped = at once
             s_ = state()
             print(f"      after: act {rd(0x800065BE, 1)} pend {rd(0x800065C0, 1)} open {s_['open']} box {s_['cur']}", flush=True)
-            check(rd(0x800065BE, 1) == q and s_["open"] == 1 and s_["cur"] == q,
+            check(rd(0x800065BE, 1) == q and s_["open"] == 1 and (CL44 or s_["cur"] == q),
                   f"... stopped: the OT goes to pattern {q + 1} at once; Clyps stays, its box on it")
         if ndl0 is not None:
             ndl = rd(syms["rq_ndir"], 4) - ndl0
@@ -1283,9 +1302,16 @@ def main(argv):
         key(FUNC, 1)
         tap(sq)
         key(FUNC, 0)
-        check(pslice(t, dst) == ssl and state()["cur"] == act and rd(syms["cl_pmoved"], 1),
-              f"[FUNC]+trig again: ALL; the arrows stay on ORIG (the user, 2026-11-07 / 11-12: no load moves them; "
-              f"cur {state()['cur'] + 1})")
+        if "cl_hov" in syms:        # CL44b: hidden ones stay where they were hidden (the highlight there), no tuck
+            check(pslice(t, dst) == ssl and state()["cur"] == act and rd(syms["cl_ysup"], 1),
+                  f"[FUNC]+trig again: ALL; the hidden arrows stay under the highlight (CL44b; cur {state()['cur'] + 1})")
+        elif "cl_phide" in syms:    # CL42 (the user's arrow rule): ORIG landed on the arrows' slot and hid them; hidden
+            check(pslice(t, dst) == ssl and state()["cur"] == sq and rd(syms["cl_ysup"], 1),   # ones are as none:
+                  f"[FUNC]+trig again: ALL; the hidden arrows go under its box (CL42; cur {state()['cur'] + 1})")  # CL22
+        else:
+            check(pslice(t, dst) == ssl and state()["cur"] == act and rd(syms["cl_pmoved"], 1),
+                  f"[FUNC]+trig again: ALL; the arrows stay on ORIG (the user, 2026-11-07 / 11-12: no load moves them; "
+                  f"cur {state()['cur'] + 1})")
         tap(rd(0x800065BE, 1))  # CL29: ORIG = the trig of the pattern you are on ([PAGE] does nothing)
         check(rec(act, 0) == oslot(act, 0) and pslice(t, dst) == ssl, "[PAGE] = ORIG SEQ: the sequence only")
         key(FUNC, 1)
@@ -1728,7 +1754,9 @@ def main(argv):
         q = next(x for x in range(16) if x != act and rec(x, 0) != rec(act, 0))
         r = next(x for x in range(16) if x not in (act, q))
         tap(q)
-        check(state()["cur"] == q and rec(act, 0) == rec(q, 0), f"trig {q + 1}: loaded, the box there")
+        cl44 = CL44                             # CL44 (CLB10 only; CL44b is CL43's here): no load moves the arrows -- they start on
+        check(state()["cur"] == (act if cl44 else q) and rec(act, 0) == rec(q, 0),   # the highlight, hidden there
+              f"trig {q + 1}: loaded, the box there (arrows on {state()['cur'] + 1})")
         while state()["cur"] != r:
             tap(DOWN)
         repaint()
@@ -1755,9 +1783,14 @@ def main(argv):
             tap(DOWN)
         repaint()
         fl = flashes()
-        check(led(q) == (1, 1) and not any(d == led_tbl_[q] + 1 and n == 3 for d, n in fl),
-              f"the pre-select arrows on the sequence's slot ({q + 1}): solid yellow, no red / yellow flash "
-              f"(the user, 2026-11-06; led {led(q)}, flashes {fl})")
+        if cl44:                                # CL44: under the select box -- hidden, its LED the box's red / yellow
+            check(led(q) == (1, 0) and (led_tbl_[q] + 1, 3) in fl,
+                  f"the arrows moved onto the sequence's slot ({q + 1}): under its box, hidden -- its red / yellow "
+                  f"flash (CL44; led {led(q)}, flashes {fl})")
+        else:
+            check(led(q) == (1, 1) and not any(d == led_tbl_[q] + 1 and n == 3 for d, n in fl),
+                  f"the pre-select arrows on the sequence's slot ({q + 1}): solid yellow, no red / yellow flash "
+                  f"(the user, 2026-11-06; led {led(q)}, flashes {fl})")
         tap(0x11)
         check(state()["cur"] == act, f"T2: the box on T2's sequence (its original: your pattern {act + 1}; cur {state()['cur'] + 1})")
         tap(0x10)
@@ -1771,7 +1804,7 @@ def main(argv):
         tap(0x11)
         tap(0x10)
         check(state()["cur"] == q and pm() == 1, f"... T2, back: T1's arrows still on {q + 1} (cur {state()['cur'] + 1})")
-        ys = lambda: rd(syms["cl_ysup"], 1)
+        ys = (lambda: rd(syms["cl_ysup"], 1)) if "cl_ysup" in syms else (lambda: (rt.run(until=lambda x: x.pc == er.MAIN_SPIN), main_call_r(syms["cl_tuck"]))[1] & 0xFF)
         tap(r)
         repaint()
         check(state()["cur"] == q and pm() == 1 and led(q) == (1, 1) and led(r) == (1, 0) and not ys(),
@@ -1791,7 +1824,8 @@ def main(argv):
               f"an arrow: the solid yellow back, on {nx + 1} (led {led(nx)}, ysup {ys()})")
         tap(UP)
         repaint()
-        check(state()["cur"] == q and led(q) == (1, 1), f"... and back onto {q + 1}: solid yellow there (led {led(q)})")
+        check(state()["cur"] == q and led(q) == ((1, 0) if cl44 else (1, 1)),
+              f"... and back onto {q + 1}: {'under the box, hidden (CL44)' if cl44 else 'solid yellow there'} (led {led(q)})")
         key(PTN, 1)
         key(BANK, 1)
         tailmsg()                          # V's keys post no UI tail of their own (posttail off)
@@ -2230,9 +2264,11 @@ def main(argv):
         tap(0x10 + other)
         check(rd(0x80000000, 1) == other and grp() == bits and state()["open"] == 1,
               f"TRACK {other + 1} (a member): the active track, the group stays")
-        while state()["cur"] != q3:
+        tap(DOWN)                          # CL42: always one arrow -- arrows a landing hid stay hidden (and aim no
+        while state()["cur"] != q3:        # [YES]) until an arrow moves them, even when already on the slot
             tap(DOWN)
         tap(0x10 + actv)
+        tap(DOWN)
         while state()["cur"] != q4:
             tap(DOWN)
         pre = list(bytes(u.mem_read(syms["cl_pre"], 32)))
@@ -2242,9 +2278,12 @@ def main(argv):
         tap(0x10 + a0)
         check(rd(0x80000000, 1) == actv and state()["cur"] == q4,
               f"TRACK {a0 + 1} (no member): nothing -- the active track and the view stay")
+        st_y = (state()["cur"], rd(syms["cl_pmoved"], 1), rd(syms["cl_ysup"], 1) if "cl_ysup" in syms else -1, list(bytes(u.mem_read(syms["cl_pre"], 32))))
         tap(YES)
         check(rec(act, other) == rec(q3, other) and rec(act, actv) == rec(q4, actv),
-              f"[YES]: T{other + 1} slot {q3 + 1}, T{actv + 1} slot {q4 + 1} -- each its own arrows")
+              f"[YES]: T{other + 1} slot {q3 + 1}, T{actv + 1} slot {q4 + 1} -- each its own arrows "
+              f"({rec(act, other) == rec(q3, other)}, {rec(act, actv) == rec(q4, actv)}; before: cur / pmoved / ysup / "
+              f"records {st_y})")
         key(CUE, 1)                        # every member its original: [CUE] + the trig of your pattern (CL29:
         tap(rd(0x800065BE, 1))             # [PAGE] restored every member; it does nothing now)
         key(CUE, 0)
@@ -2483,6 +2522,7 @@ def main(argv):
         check(peek_su, f"SETUP before Clyps: the first peek at AMP shows SETUP (handle {su():#x})")
         u.mem_write(0x460D5DE0, (100).to_bytes(4, "big"))
         main_call_r(0x40056C28)
+        rt.run(ms=100)          # CL39b: the tick only posts; the sys task's UI tail returns from the peek
         lay_ = state()["layers"]
         check(lay_ and lay_[-1] == syms["cl_layer"], f"back from the peek: Clyps' key layer on top again ({[hex(x) for x in lay_]})")
         tap(NO)

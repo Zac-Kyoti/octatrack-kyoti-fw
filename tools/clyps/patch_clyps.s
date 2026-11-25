@@ -145,11 +145,23 @@
                                         | at 0, stock's menus (the Parts menu: 1), SELECT windows (10),
                                         | toasts and the name editor (5) all open over Clyps and leave
                                         | it there (the user, 2026-10-29: Parts over Clyps). Was 3.
+    .equ HOV_CURRP,   1                 | CL44b: cl_hov, the header while an execute flash runs: "PTN LOAD: CURR PTN+PRT",
+    .equ HOV_TEMP,    2                 | "Tn LOAD: TEMP TRK",
+    .equ HOV_PSEQ,    3                 | "Tn LOAD: PROJ TRK SEQ" (RQ_TRKSEQ + 2),
+    .equ HOV_PFULL,   4                 | "Tn LOAD: PROJ TRK FULL" (RQ_TRKFULL + 2)
+    .equ HOV_ORIG,    5                 | CL45: an ORIG track load's "ORIG TRK SEQ / FULL" (was the flash's cl_ftgt 2)
+                                        | CL45 (the user, 2026-11-23): each lasts as stock's toast does -- its own toast
+                                        | while that is up (cl_hsetb), else TOAST_DUR UI ticks (cl_hovtick)
+    .equ HOV_TOAST,   7                 | CL47: a toast whose header is the usual one (temp save, SAVE FIRST!)
+    .equ HOV_PPTN,    6                 | CL45 (the user): [PTN]+[BANK]+trig, "PTN LOAD: PROJ PTN" (26 px)
+    .equ TOAST_H,     0x460d1e70        | stock's toast window (0: none up)
     .equ FL_TICKS,    30                | the load confirmation: 30 UI ticks of 1/60 s = 0.5 s (the user,
     .equ FL_HALF,     5                 | 2026-10-30), its phase toggling every 5 ticks: 3 inverted /
                                         | normal cycles (6 Hz)
     .equ TOAST_T,     0x460d1e6c        | stock's toast countdown, read by the UI tick 0x40056c28
-    .equ UITICK_RES,  0x40056c2e        | after `move.l 0x460d1e6c,%d0` (stock's beq follows)
+    .equ SYS_Q,       0x460d17ae        | CL39b: the sys task's queue (keys, the UI tail run there; prio 1)
+    .equ KPOST,       0x40000c3c        | CL39b: kernel post(queue, msg) -- from a task only (CLAUDE.md)
+    .equ UITICK_RES,  0x40056c2e       | after `move.l 0x460d1e6c,%d0` (stock's beq follows)
     .equ CL_BLINK,    30                | the flash period: stock's trig LED tick (0x400340e4, period 30)
     .equ LED_FLASH,   0x40013784        | (die, n): invert the die for n LED ticks -- stock's p-lock
                                         | flash: its trig tick gives a locked trig's green die 3 ticks
@@ -164,6 +176,7 @@
     .equ HELD_TRK,    0x460fab40        | held TRACK keys, bit t (stock's TRACK press / release)
     .equ LAYERS_HEAD, 0x460d165c        | the keymap layer chain: base first, then each pushed layer
     .equ TOAST,       0x4005a2b8        | (text, dur): stock's block toast (legal from a key handler)
+    .equ HK_TRK,      32                | CL47: cl_hkeys' bit for any TRACK key held
     .equ TOAST_DUR,   0x30              | stock's standard duration
     .equ SCLK,        0x4610757c        | the audio engine's time accumulator: ~127 M units / s
                                         | (2880 per sample at 44.1 kHz, measured in the emulator)
@@ -382,8 +395,7 @@ cl_gate:
 cg_no:
     rts
 
-| cl_enter(bankfirst). Clyps opens on the bank of the pattern you are on (its slot highlighted),
-| with the select box on that slot.
+| cl_enter(bankfirst). Clyps opens on the bank of the pattern you are on (its slot highlighted).
 cl_enter:
     tst.l   4(%sp)
     beq.b   ce_noundo
@@ -407,6 +419,8 @@ ce_noundo:
     move.b  %d0,cl_chordout             | opened by the chord: chord + SCALE closes Clyps
     clr.b   cl_ptfwd
     clr.b   cl_bkfwd
+    jsr     cl_vplay                    | CL40 (the user, 2026-11-21): the view opens on the playing pattern's bank
+                                        | (CL44: first -- a track without arrows gets them on a box in that view)
     jsr     cl_trk                      | the active track's own pre-select arrows (cl_pre, the user,
     move.l  %d0,-(%sp)                  | 2026-11-06), else the box on its sequence (2026-11-04)
     jsr     cl_pload
@@ -445,6 +459,7 @@ ce_nsu:
     clr.b   cl_cuh
     jsr     cl_gupd
     jsr     cl_flstop
+    clr.b   cl_hov                      | CL45: a fresh view, the usual header
     pea     cl_layer
     jsr     LAYER_PUSH
     pea     cl_led
@@ -459,6 +474,9 @@ ce_fail:
 cl_close:
     tst.b   cl_open
     beq.w   cc_out
+    moveq   #0,%d0                      | CL42: the screen's arrows into their track's record -- while closed the
+    move.b  cl_lastt,%d0                | records are what landings hide (cl_ychk / cl_phide) and the open loads
+    jsr     cl_psave
     clr.b   cl_open
     clr.b   cl_pkw                      | CL36: no deferred return
     jsr     cl_showunder                | CL37: a SETUP hidden under ours back on screen
@@ -471,6 +489,7 @@ cc_npk:
     clr.w   cl_grp                      | the group ends with Clyps: the tab and the LED colours
     jsr     cl_gupd                     | go back to the active track
     jsr     cl_flstop
+    clr.b   cl_hov                      | CL45: no execution header left behind (cl_hovtick)
     tst.l   cl_win
     beq.b   cc_nowin
     pea     cl_win
@@ -512,6 +531,12 @@ cl_page:
     jsr     cl_pfollow
     bra.w   cl_refresh
 
+| cl_vplay: the view to the playing pattern's bank, the arrows with it (CL40: opening Clyps, the user 2026-11-21 --
+| was the arrows' / the box's bank). Only there: CL42 (the user) the view moves only when you page or open Clyps. Uses d0.
+cl_vplay:
+    move.b  PLAY_BANK,%d0
+    move.b  %d0,cl_bank
+|   fall through
 | cl_pfollow: the view went to another bank -- the arrows go with it, on the same slot number (the user,
 | 2026-11-13). Their state goes along: tucked under the box in their bank, they show in another (the box is
 | not there) and tuck again back home; moved meanwhile (cl_pshow), they show wherever. None: nothing.
@@ -531,6 +556,9 @@ cl_k_ud:
     FWDCHK
     tst.l   8(%sp)
     beq.b   ku_out
+    jsr     cl_hstate                   | CL43 (the user, B2): the [PTN]+[BANK] chord held -- arrows do nothing
+    btst    #1,%d0
+    bne.b   ku_out
     clr.b   cl_flash
     tst.l   BANK_HELD
     beq.b   ku_sel
@@ -562,9 +590,9 @@ ku_down:
 ku_set:
     move.b  %d0,cl_cur
     jsr     cl_flstop
+    move.b  cl_bank,%d0                 | CL40: the shown bank first -- cl_pshow saves the track's record (it kept
+    move.b  %d0,cl_sbank                | the bank the arrows came from)
     jsr     cl_pshow
-    move.b  cl_bank,%d0
-    move.b  %d0,cl_sbank
     jsr     cl_draw
     clr.l   -(%sp)
     jsr     LED_PAINT                   | the yellow box LED follows
@@ -579,6 +607,9 @@ cl_k_lr:
     FWDCHK
     move.l  8(%sp),%d0
     cmpi.l  #1,%d0
+    bne.b   kl_out
+    jsr     cl_hstate                   | CL43 (B2): as cl_k_ud
+    btst    #1,%d0
     bne.b   kl_out
     clr.b   cl_flash
     tst.l   BANK_HELD
@@ -606,9 +637,9 @@ kl_r:
 kl_set:
     move.b  %d0,cl_cur
     jsr     cl_flstop
+    move.b  cl_bank,%d0                 | CL40: the shown bank first -- cl_pshow saves the track's record (it kept
+    move.b  %d0,cl_sbank                | the bank the arrows came from)
     jsr     cl_pshow
-    move.b  cl_bank,%d0
-    move.b  %d0,cl_sbank
     jsr     cl_draw
     clr.l   -(%sp)
     jsr     LED_PAINT
@@ -627,19 +658,46 @@ cl_k_trig:
     tst.l   BANK_HELD                   | [BANK] held alone (from the chord that opened Clyps):
     beq.b   kt_go                       | nothing; with [PTN] too: the pattern reload
     tst.l   PTN_HELD
-    beq.b   kt_out
+    beq.w   kt_out
+    moveq   #0,%d0                      | CL41 (the user, 2026-11-21): pattern N of the bank SHOWN, from the card
+    move.b  cl_bank,%d0                 | (was the playing bank's) -- not one stock refuses ("BANK UNAVAILABLE",
+    move.l  #BANKSTRIDE,%d1             | 0x4007b30c, the status cl_ptnbank reads)
+    muls.l  %d0,%d1
+    movea.l %d1,%a0
+    adda.l  #BLOB+0x9b336,%a0
+    tst.l   (%a0)
+    bne.w   kt_out
     clr.l   -(%sp)                      | (no track)
-    move.l  8(%sp),%d0
-    andi.l  #15,%d0
-    move.l  %d0,-(%sp)                  | pattern N of the playing bank, from the card
+    lsl.l   #8,%d0
+    moveq   #15,%d1
+    and.l   8(%sp),%d1
+    or.l    %d1,%d0
+    move.l  %d0,-(%sp)                  | bank << 8 | N
     pea     RQ_PTN
     jsr     cl_rlreq
+    move.l  4(%sp),%d0                  | CL40: the pattern's slot flashes, as every load's
     lea     12(%sp),%sp
+    jsr     cl_flcode
+    moveq   #HOV_PPTN,%d0               | CL45 (the user, 2026-11-23): "PTN LOAD: PROJ PTN" until its toast, then while
+    jsr     cl_hsetq                    | that is up (rd_show)
+    moveq   #1,%d0                      | CL47 (the user, 2026-11-24): the toast at the press (this message's UI tail)
+    move.b  %d0,cl_ctoast
     tst.b   cl_chordout                 | the chord opened Clyps: close it (begun inside: stay)
-    beq.b   kt_out
+    beq.w   cl_refresh
     clr.b   cl_chordout
     bra.w   cl_close
 kt_go:
+    tst.l   PTN_HELD                    | CL43 (the user, I5): [PTN] alone held + trig is always stock's pattern
+    beq.b   kt_slot                     | pick (e.g. the chord opened Clyps, [BANK] let go first): its [PTN] +
+    moveq   #1,%d0                      | trig handler, of the bank shown (cl_ptfwd: CL39c's splices)
+    move.b  %d0,cl_ptfwd
+    move.l  8(%sp),-(%sp)
+    move.l  8(%sp),-(%sp)
+    jsr     0x40056b2c
+    addq.l  #8,%sp
+    clr.b   cl_ptfwd
+    rts
+kt_slot:
     move.l  4(%sp),%d0                  | an execution: the active track takes the trig's slot, every other
     andi.l  #15,%d0                     | member its own (cl_exec; the user, 2026-11-06)
     move.l  %d0,-(%sp)
@@ -796,7 +854,9 @@ cl_k_peek:
     beq.w   kqpk_rel
     rts                                 | a hold: nothing
 kqpk_press:
-    bsr.w   kqpk_begin
+    tst.l   FUNC_HELD                   | CL47c (the user on CLB16): [FUNC] held, as stock: SETUP <-> page 1 on every
+    bne.w   kqf_press                   | press -- after a peek's return (cl_layer popped / pushed) the held [FUNC]'s
+    bsr.w   kqpk_begin                  | sub-map no longer reached cl_k_fpeek: the press came here and only peeked
     move.l  4(%sp),%d0
     subi.l  #0x22,%d0
     lea     0x400a7280,%a0              | stock's page of the key
@@ -1126,20 +1186,29 @@ kp_in:
     tst.b   cl_bpno                     | refused (cl_bpgate): no flash
     bne.w   cl_refresh
 .endif
-    jsr     cl_flhdr                    | begun inside: the ORIG PTN+PART box flashes (the user)
+    moveq   #0,%d0                      | begun inside: CL40 (the user, 2026-11-21) the pattern's slot flashes, as
+    move.b  PLAY_BANK,%d0               | every load's (was the ORIG PTN+PART header box)
+    lsl.l   #8,%d0
+    move.b  ACT_PAT,%d0
+    jsr     cl_flcode
     bra.w   cl_refresh
 
 | d0: bit 0 = [BANK] held without [PTN] (the arrows page: "BANK A" boxed), bit 1 = the [PTN]+[BANK]
-| chord held (ORIG PTN/PART). Uses d0.
+| chord held (ORIG PTN/PART), bit 2 = [PTN] held without [BANK] (CL42: "PTN LOAD: CURR PTN+PRT"). Uses d0.
 cl_hstate:
     moveq   #0,%d0
     tst.l   BANK_HELD
-    beq.b   hs_out
+    beq.b   hs_p
     moveq   #1,%d0
     tst.l   PTN_HELD
     beq.b   hs_out
     moveq   #2,%d0
 hs_out:
+    rts
+hs_p:
+    tst.l   PTN_HELD
+    beq.b   hs_out
+    moveq   #4,%d0
     rts
 
 | TRACK 1-8 (0x10..0x17): every event goes through stock's own base handler, as the base keymap
@@ -1162,14 +1231,26 @@ ktr_m:
     bne.b   ktr_any
     rts
 ktr_any:
+    move.l  8(%sp),%d0                  | CL44: the hold / release of a card reload's TRACK press keep its flash
+    tst.b   cl_trl
+    beq.b   ktr_stop
+    subq.l  #1,%d0
+    beq.b   ktr_stop                    | a new press: as always
+    tst.l   8(%sp)
+    bne.b   ktr_ns
+    clr.b   cl_trl                      | its release
+    bra.b   ktr_ns
+ktr_stop:
+    clr.b   cl_trl
     clr.b   cl_flash
     jsr     cl_flstop
+ktr_ns:
 |   a card reload (scope §1.8, the user 2026-10-30): [PTN] alone held = the sequence, [BANK] alone
 |   held = the sequence + its machine / FX (the track's Part slice); both held: nothing. The press
 |   is the reload (not forwarded: no track change, as RELOAD_FROM_PROJECT); the release goes on.
     move.l  8(%sp),%d0
     cmpi.l  #1,%d0
-    bne.b   ktr_fwd
+    bne.w   ktr_fwd
     tst.l   PTN_HELD
     beq.b   ktr_b
     tst.l   BANK_HELD
@@ -1197,8 +1278,21 @@ ktr_t:
     move.l  %d0,-(%sp)                  | the playing pattern
     move.l  %d1,-(%sp)
     jsr     cl_rlreq
+    moveq   #0,%d0                      | CL44 (the user, 2026-11-22): the execute flash on the slot it lands on,
+    move.b  PLAY_BANK,%d0               | the pattern you are on -- also when nothing differs (its toast, CL43);
+    lsl.l   #8,%d0                      | drawn only with that bank shown, as ORIG PTN+PRT's
+    move.b  ACT_PAT,%d0
+    jsr     cl_flcode
+    move.l  (%sp),%d0                   | CL44b: the header reads "Tn LOAD: PROJ TRK SEQ" / "... FULL" meanwhile
+    addq.l  #2,%d0                      | (RQ_TRKSEQ 1 / RQ_TRKFULL 2 -> HOV_PSEQ 3 / HOV_PFULL 4); CL45: until its
+    move.l  8(%sp),%d1                  | toast, then while that is up (rd_show)
+    jsr     cl_hsetq
+    moveq   #1,%d0                      | CL47 (the user, 2026-11-24): its toast at the press -- this message's UI
+    move.b  %d0,cl_ctoast               | tail (cl_rqtoast, once: rq_msg), the header bound to it there
     lea     12(%sp),%sp
-    rts
+    moveq   #1,%d0
+    move.b  %d0,cl_trl
+    bra.w   cl_draw
 ktr_fwd:
     move.l  8(%sp),-(%sp)
     move.l  8(%sp),-(%sp)
@@ -1241,10 +1335,7 @@ cl_k_chord:
     clr.b   cl_bkfwd
     jsr     BANK_TEARDOWN               | its keymap + LED layers off (and a repaint)
 kc_pch:
-    clr.l   -(%sp)
-    jsr     LED_PAINT                   | the pattern view (cl_paint, the chord held)
-    addq.l  #4,%sp
-    rts
+    bra.w   cl_refresh                  | the pattern view of the bank shown (cl_paint; CL41: the view stays)
 kc_pgo:
     moveq   #1,%d1
     move.b  %d1,cl_ptfwd
@@ -1253,7 +1344,13 @@ kc_pfwd:
     beq.w   kc_out
     tst.l   %d0
     bne.w   cp_stock
-    clr.b   cl_ptfwd                    | the release ends the gesture
+    clr.b   cl_ptfwd                    | the release ends the gesture -- CL40: unless it is a tap whose release
+    tst.l   PTN_CONSUMED                | latches stock's SELECT PATTERN (0x4005a088: nothing consumed, the tap
+    bne.w   cp_stock                    | flag 0x460d1ab2 set): that window is the gesture's, of the bank shown
+    tst.l   0x460d1ab2                  | (grid and picks); the next [PTN] closes it (its release: no tap)
+    beq.w   cp_stock
+    moveq   #1,%d1
+    move.b  %d1,cl_ptfwd
     bra.w   cp_stock                    | stock's [PTN] handler; (code, event) still at 4 / 8(sp)
 |   [BANK]
 kc_bank:
@@ -1301,10 +1398,7 @@ kc_bpress:
     moveq   #1,%d1
     move.b  %d1,cl_ptpop
 kc_bch:
-    clr.l   -(%sp)
-    jsr     LED_PAINT
-    addq.l  #4,%sp
-    rts
+    bra.w   cl_refresh
 kc_bgo:
     moveq   #1,%d0
     move.b  %d0,cl_bkfwd
@@ -1403,15 +1497,23 @@ cl_flhdr:                               | the header's label flashes (ORIG / ORI
     move.b  %d0,cl_ftgt
     bra.b   cl_fls
 cl_florig:                              | CL34: an ORIG track load -- its slot (the highlight) flashes, the
-    moveq   #2,%d0                      | header reads ORIG for the flash's length without flashing
+    moveq   #2,%d0                      | header reads ORIG without flashing (CL45: a toast's time, HOV_ORIG)
     move.b  %d0,cl_ftgt
-    bra.b   cl_fls
+    bsr.b   cl_fls
+    moveq   #HOV_ORIG,%d0
+    bra.w   cl_hset
+cl_flcode:                              | CL40: d0 = a slot (bank << 8 | slot) flashes -- a whole pattern picked
+    move.w  %d0,cl_fcode                | ([PTN] + trig, [PTN]+[BANK]+trig / [YES]), as a load's slot does
+    bra.b   fs_slot
 cl_flstart:                             | the select box flashes
     jsr     cl_targets                  | nothing loaded ([CUE] held, no member: the user, 2026-11-06):
     tst.l   %d0                         | no confirmation, the arrows stay
     beq.b   fs_out
+fs_slot:
     clr.b   cl_ftgt
 cl_fls:
+    clr.b   cl_hov                      | CL44b: a new flash -- its caller sets the header it reads, if any
+    clr.b   cl_bt                       | CL40: the cued blink starts after the flash (30 UI ticks = one period)
     moveq   #FL_TICKS,%d0
     move.b  %d0,cl_flk
     moveq   #FL_HALF,%d0
@@ -1420,15 +1522,134 @@ cl_fls:
     move.b  %d0,cl_fph
 fs_out:
     rts
-cl_flstop:
+cl_flstop:                              | CL45: the execution header outlives the flash (cl_hovtick ends it)
     clr.b   cl_flk
     clr.b   cl_fph
+    rts
+| cl_hset (d0 = HOV_*, d1 = its track; 0xff several) / cl_hsetb (the same, bound to the toast just posted): CL45 (the
+| user, 2026-11-23) the execution header lasts exactly as long as its toast shows -- bound, it ends when stock's
+| toast window goes, runs out or a newer toast replaces it; without a toast, TOAST_DUR UI ticks (stock's standard
+| toast time). A new one replaces the old at once with its own full time; a key pressed meanwhile that changes the
+| header ([PTN], [BANK], [FUNC], [CUE]: cl_hkeys, cl_draw) ends it. Uses d0-d1/a0.
+cl_hsetq:                               | CL47: a card reload's header -- bound at once if its toast is up already
+    bsr.b   cl_hset                     | (rq_msg used: the job or the tail ran first), else when this message's
+    tst.b   rq_msg                      | tail shows it (rd_show) -- either order binds it
+    bne.b   hq_out
+    tst.l   TOAST_H
+    bne.b   hb_bind
+hq_out:
+    rts
+cl_hsetb:
+    bsr.b   cl_hset
+hb_bind:
+    move.l  TOAST_T,%d0
+    move.l  %d0,cl_hovc
+    moveq   #1,%d0
+    move.b  %d0,cl_hovb
+    rts
+cl_hset:
+    move.l  %d0,-(%sp)
+    move.b  %d1,cl_hovt
+    moveq   #TOAST_DUR,%d0
+    move.b  %d0,cl_hovk
+    clr.b   cl_hovb
+    bsr.b   cl_hkeys
+    andi.l  #HK_TRK-1,%d0               | (a TRACK key is the trigger, not the chord: [PTN] / [BANK] + TRACK)
+    move.b  %d0,cl_hovh                 | the keys held now (the gesture's own)
+    move.l  (%sp)+,%d0
+    move.b  %d0,cl_hov                  | CL47: last -- a draw in between (the sys task) sees the old header or the
+    rts                                 | whole new one, never the new kind with the old keys (it ended it)
+| cl_hkeys -> d0 = the keys that shape the header: [BANK] 1, [PTN] 2, [FUNC] 8, [CUE] 16. Uses d0. CL47: the keys
+| themselves, not cl_hstate's bits -- letting go of one key of the [PTN]+[BANK] chord (state 2 -> 1 / 4) read as a
+| new key and ended "PTN LOAD: PROJ PTN" at the chord's release instead of with its toast.
+cl_hkeys:
+    moveq   #0,%d0
+    tst.l   BANK_HELD
+    beq.b   hk_p
+    moveq   #1,%d0
+hk_p:
+    tst.l   PTN_HELD
+    beq.b   hk_f
+    addq.l  #2,%d0
+hk_f:
+    tst.b   HELD_TRK+3                  | CL47: any TRACK key (HK_TRK) -- a chord key only for the temp actions
+    beq.b   hk_t
+    ori.l   #HK_TRK,%d0
+hk_t:
+    tst.b   cl_fn
+    beq.b   hk_c
+    ori.l   #8,%d0
+hk_c:
+    tst.b   cl_cuh
+    beq.b   hk_out
+    ori.l   #16,%d0
+hk_out:
+    rts
+| cl_hrel (the UI tail, after every message, while cl_hov): CL47 (the user, 2026-11-24: "Allow all toasts and header
+| text changes to be dismissed upon release of the various chords that initiate them") -- a key of the chord held at
+| the execution (cl_hovh: [BANK], [PTN], [FUNC], [CUE]; the TRACK keys for the temp actions) let go: the header ends and
+| its toast closes at the next UI tick (as DIRECT JUMP's [PTN] release does); none held (a lone trig or [YES]): its
+| time only. A newly pressed [BANK] / [PTN] / [FUNC] / [CUE] ends the header (CL45), the toast stays. Uses d0-d1/a0.
+cl_hrel:
+    tst.b   cl_hov
+    beq.b   hr_out
+    bsr.w   cl_hkeys
+    moveq   #0,%d1
+    move.b  cl_hovh,%d1
+    movea.l %d0,%a0                     | the keys held now
+    not.l   %d0
+    and.l   %d1,%d0
+    bne.b   hr_rel                      | one of the chord's let go
+    move.l  %a0,%d0
+    not.l   %d1
+    and.l   %d1,%d0
+    andi.l  #HK_TRK-1,%d0
+    beq.b   hr_out                      | no new one
+    bra.w   hv_end
+hr_rel:
+cl_hdrop:                               | (also: a card reload refused after its toast showed at the press)
+    tst.b   cl_hovb
+    beq.w   hv_end
+    tst.l   TOAST_H
+    beq.w   hv_end
+    moveq   #1,%d0
+    move.l  %d0,TOAST_T                 | closed by stock's UI tick next
+    bra.w   hv_end
+hr_out:
+    rts
+| cl_hovtick (the UI tick, cl_uitick, while cl_hov): the header's time; at its end a redraw is asked of the sys
+| task (cl_dreq). Uses d0-d1/a0-a1.
+cl_hovtick:
+    tst.b   cl_hovb
+    beq.b   hv_cnt
+    move.l  TOAST_T,%d0                 | bound (read before stock's own decrement in this tick):
+    beq.b   hv_end                      | run out (or a timeless toast replaced it)
+    tst.l   TOAST_H
+    beq.b   hv_end                      | closed
+    cmp.l   cl_hovc,%d0
+    bhi.b   hv_end                      | a newer toast replaced it
+    subq.l  #1,%d0
+    move.l  %d0,cl_hovc
+    rts
+hv_cnt:
+    moveq   #0,%d0
+    move.b  cl_hovk,%d0
+    subq.l  #1,%d0
+    move.b  %d0,cl_hovk
+    bgt.b   hv_out
+hv_end:
+    clr.b   cl_hov
+    clr.b   cl_hovb
+    tst.b   cl_open
+    beq.b   hv_out
+    jmp     cl_dreq
+hv_out:
     rts
 | cl_flashtick: one UI tick (cl_uitick, UI task, every 1/60 s while cl_flk != 0)
 cl_flashtick:
     tst.b   cl_open
     bne.b   ft_go
-    bra.b   cl_flstop
+    bra.w   cl_flstop
 ft_go:
     moveq   #0,%d0
     move.b  cl_flk,%d0
@@ -1446,10 +1667,10 @@ ft_go:
     move.b  cl_fph,%d0
     eori.l  #1,%d0
     move.b  %d0,cl_fph
-    jmp     cl_draw
+    jmp     cl_dreq                     | CL39b: drawn by the sys task (cl_uitail)
 ft_end:
     clr.b   cl_fph
-    jmp     cl_draw
+    jmp     cl_dreq
 ft_out:
     rts
 
@@ -1513,35 +1734,37 @@ cl_srccode:
 sc2_out:
     rts
 
-| cl_boxhome: the select box (and the shown bank) on the active track's sequence (cl_srccode). Opening
-| Clyps and every change of the viewed track; moving it within a view is free (the user, 2026-11-04).
-| Uses d0, d1, a0.
+| cl_boxhome: the select box on the active track's sequence (cl_srccode). Opening Clyps and every change of
+| the viewed track; moving it within a view is free (the user, 2026-11-04). CL41 (the user, 2026-11-21): the
+| shown bank stays. CL44b (the user, 2026-11-22): a track without arrows has none shown until an arrow press -- the
+| unseen cursor waits on the select box when it is in the bank viewed, else on the highlight when that is in view
+| (else the box's slot number), so the first arrow starts there; it follows the loads (cl_ychk / ex2_cur). Uses d0, d1, a0.
 cl_boxhome:
-    clr.b   cl_pmoved                   | home: no pre-select box until the arrows move it -- nor in the
-    jsr     cl_trk                      | active track's record (a card reload, the open of a track
-    lea     cl_pre,%a0                  | without one)
+    clr.b   cl_pmoved                   | none shown -- nor in the active track's record (a card reload, the open
+    clr.b   cl_ysup                     | of a track without one)
+    jsr     cl_trk
+    lea     cl_pre,%a0
     add.l   %d0,%d0
     adda.l  %d0,%a0
     bclr    #7,(%a0)
     jsr     cl_srccode
+    move.l  %d0,%d1
+    lsr.l   #8,%d1
+    cmp.b   cl_bank,%d1
+    beq.b   bh_set                      | the box in the bank viewed (or the highlight: ORIG / SAVED / card)
+    move.b  PLAY_BANK,%d1
+    cmp.b   cl_bank,%d1
+    bne.b   bh_set                      | neither in view: the box's slot number
+    moveq   #0,%d0
+    move.b  PLAY_BANK,%d0
+    lsl.l   #8,%d0
+    move.b  ACT_PAT,%d0                 | the highlight
+bh_set:
     move.b  %d0,%d1
     andi.l  #15,%d1
     move.b  %d1,cl_cur
-    lsr.l   #8,%d0
+    move.b  cl_bank,%d0                 | in the bank viewed (the first arrow moves them there anyway)
     move.b  %d0,cl_sbank
-    move.b  %d0,cl_bank
-    clr.b   cl_ysup                     | (no arrows until one moves them -- the user, 2026-11-12)
-    jsr     cl_srccode                  | CL34 (the user, 2026-11-13): a select box -> the arrows are tucked
-    moveq   #0,%d1                      | under it (shown again when it goes); none -> nothing on screen
-    move.b  PLAY_BANK,%d1
-    lsl.l   #8,%d1
-    move.b  ACT_PAT,%d1
-    cmp.l   %d1,%d0
-    beq.b   bh_out
-    moveq   #1,%d0
-    move.b  %d0,cl_pmoved
-    move.b  %d0,cl_ysup
-bh_out:
     rts
 
 | cl_cueslot -> d0 = the active track's cued slot (bank << 8 | slot; an original / saved / card source: the
@@ -1570,17 +1793,185 @@ cs2_none:
     moveq   #-1,%d0
     rts
 
-| cl_cblink (the UI task's 1/60 s tick, cl_uitick; Clyps open): while the active track has a load cued, its arrows
-| blink at a fixed 120 BPM whatever the tempo (the user, 2026-11-13: as the grid's red / yellow flash) -- a 0.5 s period
-| of 30 ticks, shown for the first two thirds (20 ticks), hidden for the last (10); each cue starts shown. The
-| screen is redrawn when the phase changes, and once more when the cue ends. Uses d0-d1/a0-a1.
+| cl_pcue (CL39, the user 2026-11-20) -> d0 = stock's cued pattern change, PEND_BANK << 8 | PEND_PAT: a [PTN] +
+| trig, or a card reload of another pattern ([PTN]+[BANK]+trig -> cl_ptnswitch), waiting for CHAIN AFTER / the
+| pattern's end (DIRECT JUMP on: its landing step); -1 = none -- stopped, nothing cued (PEND_PAT 0xff), or the cue
+| is the playing pattern (stock's own cancel, cl_ptncancel, ORIG PTN+PRT). The test the chord's grid uses (pv_cue).
+| Uses d0-d1.
+cl_pcue:
+    tst.l   RUNNING
+    beq.b   pq_none
+    moveq   #0,%d0
+    move.b  PEND_BANK,%d0
+    cmpi.l  #16,%d0
+    bcc.b   pq_none
+    moveq   #0,%d1
+    move.b  PEND_PAT,%d1
+    cmpi.l  #16,%d1
+    bcc.b   pq_none
+    lsl.l   #8,%d0
+    or.l    %d1,%d0
+    moveq   #0,%d1
+    move.b  PLAY_BANK,%d1
+    lsl.l   #8,%d1
+    move.b  ACT_PAT,%d1
+    cmp.l   %d1,%d0
+    beq.b   pq_none
+    rts
+pq_none:
+    moveq   #-1,%d0
+    rts
+
+| cl_ptnbank / cl_ptnbank2 / cl_ptnpat (CL39c, the user 2026-11-20): [PTN] pressed in Clyps (cl_ptfwd) acts on the bank
+| Clyps shows (cl_bank, paged with [BANK] + arrows): stock's [PTN] + trig 0x40056b2c cues (that bank, N) -- the call
+| stock's own cross-bank cue makes (0x4007b36e) -- and stock's [PTN] LED painter 0x400353d4 shows that bank: its
+| patterns' data (green), a cue in it (yellow), no red (cl_ptnpat 16: the playing pattern is not in it). Splices
+| `mvzb <bank / pattern>,%d0` -> jsr (build_clyps.py DETOURS). A bank stock refuses (0x4007b30c: "BANK UNAVAILABLE")
+| is not paged to. Only reached with stock's [PTN] layer up, long after the DRAM part is in place. Keep all but d0.
+cl_ptnbank:                             | 0x40056b60, 0x40035522: stock reads the current bank 0x100b14ce
+    moveq   #0,%d0
+    move.b  0x100b14ce,%d0
+    bra.b   pb_go
+cl_ptnbank2:                            | 0x400354ae: stock reads its twin 0x80000002
+    moveq   #0,%d0
+    move.b  UI_BANK,%d0
+pb_go:
+    tst.b   cl_open
+    beq.b   pb_out
+    tst.b   cl_ptfwd
+    beq.b   pb_out
+    lea     -12(%sp),%sp
+    movem.l %d0-%d1/%a0,(%sp)
+    moveq   #0,%d0
+    move.b  cl_bank,%d0
+    andi.l  #15,%d0
+    move.l  #BANKSTRIDE,%d1
+    muls.l  %d0,%d1
+    movea.l %d1,%a0
+    adda.l  #BLOB+0x9b336,%a0
+    tst.l   (%a0)                       | stock's "BANK UNAVAILABLE" flag (0x4007b30c)
+    bne.b   pb_keep
+    move.l  %d0,(%sp)                   | the paged bank
+pb_keep:
+    movem.l (%sp),%d0-%d1/%a0
+    lea     12(%sp),%sp
+pb_out:
+    rts
+cl_ptnpat:                              | 0x40035432: stock reads the playing pattern 0x100b14d0 (its red LED)
+    bsr.b   cl_ptnbank
+    cmp.b   0x100b14ce,%d0
+    bne.b   pp_none
+    moveq   #0,%d0
+    move.b  0x100b14d0,%d0
+    rts
+pp_none:
+    moveq   #16,%d0                     | a paged bank: none of its patterns plays
+    rts
+cl_ptnpick:                             | 0x40056b60, stock's [PTN] + trig (d2 = N): CL40 (the user, 2026-11-21) a pattern
+    bsr.b   cl_ptnbank                  | picked in Clyps -- another than the one you are on -- gets the load
+    tst.b   cl_ptfwd                    | confirmation flash on its slot (drawn by the tail, cl_drq); its cue then
+    beq.b   pk3_out                     | blinks (CL46: its slot's text)
+    tst.b   cl_open
+    beq.b   pk3_out
+    lea     -16(%sp),%sp
+    movem.l %d0-%d1/%a0-%a1,(%sp)
+    lsl.l   #8,%d0
+    or.l    %d2,%d0
+    move.l  %d0,-(%sp)
+    jsr     cl_flcode                   | CL44b (the user, 2026-11-22): the pattern you are on too (a cancel / CURR
+                                        | PTN+PRT) -- one rule: every execution flashes its slot
+    move.l  (%sp)+,%d0
+    bsr.b   cl_xpat                     | CL45: and the arrows on it hide, as a landing there
+    moveq   #1,%d0
+    move.b  %d0,cl_drq
+pk3_r:
+    movem.l (%sp),%d0-%d1/%a0-%a1
+    lea     16(%sp),%sp
+pk3_out:
+    rts
+
+| cl_xpat (d0 = bank << 8 | slot): CL45 (the user, 2026-11-23) a pick of the pattern you are on lands nothing, yet
+| looks as a landing there: the arrows on it hide (cl_phide), as when a pattern lands. Uses d0-d1/a0.
+cl_xpat:
+    moveq   #0,%d1
+    move.b  PLAY_BANK,%d1
+    lsl.l   #8,%d1
+    move.b  ACT_PAT,%d1
+    andi.l  #0x0f0f,%d0
+    cmp.l   %d1,%d0
+    bne.b   xp_out
+    andi.l  #15,%d0
+    jmp     cl_phide
+xp_out:
+    rts
+
+| cl_bkpick (CL44, the user 2026-11-22): stock's [BANK] layer, its pattern pick (0x4007b37c, the second trig after
+| [BANK] + a bank's trig; args as pushed for 0x400a1030: bank, pattern) -- the cue as stock makes it; in Clyps the view
+| then pages to that bank, as a paging (the arrows follow), and the picked slot gets the execute flash (CL44b: also
+| the pattern you are on -- one rule) and the header reads "PTN LOAD: CURR PTN+PRT" meanwhile, so its cue box blinks
+| and lands in view. The bank's trig alone changes nothing (a [NO] or
+| release after it makes no change). A user gesture: the view still never follows a landing. Keeps d2-d7/a2-a6.
+cl_bkpick:
+    moveq   #0,%d0
+    move.b  7(%sp),%d0
+    lsl.l   #8,%d0
+    move.b  11(%sp),%d0
+    move.l  %d0,-(%sp)                  | the pick, before it may land (stopped: at once)
+    move.l  12(%sp),-(%sp)
+    move.l  12(%sp),-(%sp)
+    jsr     0x400a1030
+    addq.l  #8,%sp
+    move.l  (%sp)+,%d1
+    tst.b   cl_open
+    beq.b   bk4_out
+    move.l  %d1,-(%sp)
+    jsr     cl_flstop
+    move.b  7+4(%sp),%d0
+    move.b  %d0,cl_bank
+    jsr     cl_pfollow
+    move.l  (%sp)+,%d0
+    move.l  %d0,-(%sp)
+    jsr     cl_flcode
+    moveq   #HOV_CURRP,%d0              | CL45: no toast -- a toast's time
+    jsr     cl_hset
+    move.l  (%sp)+,%d0
+    bsr.w   cl_xpat                     | CL45: your own pattern again -- the arrows on it hide
+    bra.w   cl_refresh
+bk4_out:
+    rts
+
+| cl_cblink (the UI task's 1/60 s tick, cl_uitick; Clyps open): while the active track has a load cued, its slot
+| blinks (CL46: its text; CL40-CL45 the box's frame; until CL39c its arrows) at a fixed 120 BPM whatever the tempo (the user,
+| 2026-11-13: as the grid's red / yellow flash) -- a 0.5 s period of 30 ticks, shown for the first two thirds (20 ticks), hidden for the last (10); each cue starts shown. The
+| screen is redrawn when the phase changes, and once more when the cue ends. CL39 (the user, 2026-11-20): a stock
+| pattern cue (cl_pcue) blinks in the same phase -- its slot's second highlight (cl_draw); the screen is redrawn
+| too whenever that cue starts, changes, lands or goes (cl_pcq). CL46: the texts are hidden in the off phase, so
+| nothing cued = the on phase (cl_cph 1), and a track cue other than the one drawn (cl_cq: new, landed, cancelled,
+| another track's) redraws too. Uses d0-d1/a0-a1.
 cl_cblink:
     tst.b   cl_open
     beq.b   cb_out
+    jsr     cl_pcue
+    moveq   #0,%d1                      | d1 = 1: redraw (the stock cue changed)
+    cmp.w   cl_pcq,%d0
+    beq.b   cb_pk
+    move.w  %d0,cl_pcq
+    moveq   #1,%d1
+cb_pk:
+    move.l  %d1,-(%sp)
     jsr     cl_cueslot
+    cmp.l   cl_cq,%d0                   | CL46: not the track cue drawn last: redraw
+    beq.b   cb_tq
+    moveq   #1,%d1
+    move.l  %d1,(%sp)
+cb_tq:
     moveq   #0,%d1
     tst.l   %d0
-    bmi.b   cb_none
+    bpl.b   cb_cue                      | the active track's load is cued
+    move.w  cl_pcq,%d0
+    cmpi.w  #-1,%d0
+    beq.b   cb_none                     | and no stock cue either
+cb_cue:
     moveq   #0,%d0
     move.b  cl_bt,%d0
     addq.l  #1,%d0
@@ -1595,12 +1986,40 @@ cb_k:
     bra.b   cb_set
 cb_none:
     clr.b   cl_bt                       | the next cue starts shown
+    moveq   #1,%d1                      | CL46: nothing cued -- every text shown (a cue that ends in the off phase redraws)
 cb_set:
+    move.l  (%sp)+,%d0                  | the stock cue changed: redraw in any case
     cmp.b   cl_cph,%d1
+    bne.b   cb_draw
+    tst.l   %d0
     beq.b   cb_out
+cb_draw:
     move.b  %d1,cl_cph
-    jsr     cl_draw
+    jmp     cl_dreq                     | CL39b: the sys task draws (cl_uitail), never this UI task
 cb_out:
+    rts
+
+| cl_dreq / cl_dpost (CL39b, 2026-11-20; the UI task's tick only): the UI tick (cl_uitick) runs in the UI task (prio 3,
+| 0x40056c40, queue 0x460d1664), every other cl_draw -- keys, the UI tail -- in the sys task (prio 1, queue 0x460d17ae).
+| A draw from the tick preempted a sys-task draw midway (CL39 on the unit: garbage text, blank cells, stray pixels after
+| loads: cl_buf, the surface and the XORed cells are shared). So the tick only asks: cl_drq, and a type-0 message on the
+| sys queue, which the loop sends straight to its tail 0x40062d1c (msg[0] - 1 = 255 > 77, 0x40061ce2; the UI gate's
+| own tail post): cl_uitail draws there. The kernel post 0x40000c3c from a task (not the frame path), as DIRECT JUMP
+| posts on this queue. Uses d0-d1/a0-a1.
+cl_dreq:
+    moveq   #1,%d0
+    move.b  %d0,cl_drq
+cl_dpost:                               | CL39c: one message outstanding at most (cl_dpend, cleared by the tail)
+    tst.b   cl_dpend
+    bne.b   dp_out
+    moveq   #1,%d0
+    move.b  %d0,cl_dpend
+dp_post:
+    pea     cl_dmsg
+    pea     SYS_Q
+    jsr     KPOST
+    addq.l  #8,%sp
+dp_out:
     rts
 
 | cl_hideunder / cl_showunder (CL37, the user 2026-11-15): Clyps' window is 112 px wide; a SETUP window under it (full
@@ -1693,25 +2112,43 @@ pv3_out:
     lea     20(%sp),%sp
     rts
 
-| cl_tuck -> d0 = 1: the active track's arrows are tucked under its select box -- the slot under them has landed
-| (cl_ysup) and the box is there: its sequence came from that slot, or (an original) the pattern's own slot, whose
-| highlight stands for the box (the user, 2026-11-13). Tucked arrows and
-| their solid yellow are not shown; when the box goes (an original, ORIG PTN+PRT, SAVED, a card reload, a pattern
-| change) or moves (a trig load elsewhere) they show again where they were (the user, 2026-11-13). Uses d0, d1, a0.
+| cl_tuck -> d0 = 1: the active track's arrows are hidden -- CL44b (the user, 2026-11-22): after an arrow press they
+| show, on the highlight, the select box or a cue's box too; an execution landing on their slot in the bank viewed
+| hides them (cl_ysup, cl_hc = that slot: cl_ychk / cl_phide); hidden, they show again the moment that mark (the
+| select box or the highlight) leaves cl_hc -- cl_ysup goes then, here -- or with the next arrow (cl_pshow), and
+| show in another bank than cl_hc's (CL42c: a mark covers them only in its bank). Keeps all but d0.
 cl_tuck:
     tst.b   cl_ysup
-    beq.b   tk_no
-    jsr     cl_srccode                  | (an original / saved / card source: the pattern's own slot -- its
-    andi.l  #0x0f0f,%d0                 | highlight stands for the box: the user, 2026-11-13)
-    moveq   #0,%d1
-    move.b  cl_sbank,%d1
-    lsl.l   #8,%d1
-    move.b  cl_cur,%d1
-    cmp.l   %d1,%d0
-    bne.b   tk_no
+    beq.b   tk_vis
+    lea     -12(%sp),%sp
+    movem.l %d1-%d2/%a0,(%sp)
+    move.w  cl_hc,%d2
+    andi.l  #0x0f0f,%d2                 | d2 = the mark that hid them
+    moveq   #0,%d0
+    move.b  PLAY_BANK,%d0
+    lsl.l   #8,%d0
+    move.b  ACT_PAT,%d0
+    cmp.l   %d2,%d0
+    beq.b   tk_on                       | the highlight still there
+    jsr     cl_srccode
+    andi.l  #0x0f0f,%d0
+    cmp.l   %d2,%d0
+    beq.b   tk_on                       | the select box still there
+    clr.b   cl_ysup                     | it left: shown again, for good
+    moveq   #0,%d0
+    bra.b   tk_r
+tk_on:
+    moveq   #0,%d0
+    move.l  %d2,%d1
+    lsr.l   #8,%d1
+    cmp.b   cl_sbank,%d1
+    bne.b   tk_r                        | another bank than the mark's: shown
     moveq   #1,%d0
+tk_r:
+    movem.l (%sp),%d1-%d2/%a0
+    lea     12(%sp),%sp
     rts
-tk_no:
+tk_vis:
     moveq   #0,%d0
     rts
 
@@ -1732,7 +2169,7 @@ cl_playt:
     lsl.l   #8,%d2
     move.b  1(%a0,%d1.l),%d2
     cmp.l   %d0,%d2
-    bne.b   cy_out
+    bne.b   cy_rec
     lea     cl_src,%a0
     moveq   #0,%d0
     move.b  (%a0,%d1.l),%d0
@@ -1740,6 +2177,73 @@ cl_playt:
     move.b  1(%a0,%d1.l),%d0
 cy_out:
     move.l  (%sp)+,%d2
+    rts
+cy_rec:                                 | CL47 (the user, 2026-11-24): the last load homed elsewhere -- this pattern's
+    move.l  %d0,%d2                     | own record (cl_bxt), else the pattern itself
+    lsr.l   #4,%d2
+    move.l  %d0,-(%sp)
+    andi.l  #15,%d0
+    add.l   %d0,%d2                     | d2 = P, bank << 4 | pattern
+    move.l  %d2,%d0
+    lsl.l   #5,%d0
+    add.l   %d1,%d0
+    lsr.l   #1,%d0                      | P * 16 + track
+    lea     cl_bxt,%a0
+    move.b  (%a0,%d0.l),%d1
+    move.l  (%sp)+,%d0
+    andi.l  #0xff,%d1
+    beq.b   cy_out                      | none: the pattern itself
+    eor.l   %d2,%d1                     | the source, bank << 4 | slot
+    move.l  %d1,%d0
+    lsr.l   #4,%d0
+    lsl.l   #8,%d0
+    andi.l  #15,%d1
+    or.l    %d1,%d0
+    bra.b   cy_out
+
+| cl_bxrec (d0 = track, d1 = a load's code: bank << 8 | slot; SRC_* << 8 or the pattern's own slot = none): CL47 (the
+| user, 2026-11-24) the select box per track AND pattern -- the slot last loaded into that track while that pattern
+| played, kept when the pattern changes: cl_bxt[P * 16 + track] = (bank << 4 | slot) ^ P, P = bank << 4 | pattern
+| (0 = none: the pattern's own slot). Written for the playing pattern beside cl_home / cl_src (cl_provset, cl_apply,
+| cl_hoff); a card reload of a pattern clears its row; a project load clears it all (boot: .dram's zeros). Uses d0-d1/a0.
+cl_bxrec:
+    move.l  %d2,-(%sp)
+    move.l  %d0,-(%sp)                  | the track
+    moveq   #0,%d2
+    move.b  PLAY_BANK,%d2
+    lsl.l   #4,%d2
+    moveq   #0,%d0
+    move.b  ACT_PAT,%d0
+    add.l   %d0,%d2                     | d2 = P
+    move.l  %d1,%d0
+    lsr.l   #8,%d0
+    cmpi.l  #16,%d0
+    bcc.b   bx_off                      | SRC_ORIG / SAVED / CARD: none
+    lsl.l   #4,%d0
+    andi.l  #15,%d1
+    or.l    %d0,%d1
+    eor.l   %d2,%d1                     | the pattern's own slot: 0
+    bra.b   bx_st
+bx_off:
+    moveq   #0,%d1
+bx_st:
+    lsl.l   #4,%d2
+    add.l   (%sp)+,%d2
+    lea     cl_bxt,%a0
+    move.b  %d1,(%a0,%d2.l)
+    move.l  (%sp)+,%d2
+    rts
+| cl_hoff (d0 = track): its provenance off -- cl_home and the playing pattern's record (CL47). Uses d0-d1/a0.
+cl_hoff:
+    move.l  %d0,-(%sp)
+    moveq   #-1,%d1
+    bsr.b   cl_bxrec
+    move.l  (%sp)+,%d0
+    add.l   %d0,%d0
+    lea     cl_home,%a0
+    moveq   #-1,%d1
+    move.b  %d1,(%a0,%d0.l)
+    move.b  %d1,1(%a0,%d0.l)
     rts
 
 | cl_nlocks (a0 = a track record, d0 = its track, MIDI 8..15) -> d0 = its locks, counted by STEP as the trigs
@@ -1984,6 +2488,9 @@ cl_cueload:
     bne.b   lo_go
 lo_same:
     jsr     cl_provset
+    moveq   #1,%d0                      | CL45 (the user, 2026-11-23): an execution onto / from the slot under the
+    lsl.l   %d3,%d0                     | arrows hides them though nothing lands -- as a landing would (cl_ychk:
+    jsr     cl_ychk                     | cl_hc, the LED), at once (nothing is cued)
     bra.w   lo_cancel
 lo_go:
     tst.l   RUNNING
@@ -2221,6 +2728,9 @@ ss_out:
 | cl_provset (d3 = track, d2 = code): the provenance of a load that needed no data -- a slot (or SAVED): the
 | track plays it on the playing pattern; its own slot / SRC_ORIG: none. Uses d0-d1/a0.
 cl_provset:
+    move.l  %d3,%d0                     | CL47: this pattern's record too
+    move.l  %d2,%d1
+    jsr     cl_bxrec
     move.l  %d3,%d1
     add.l   %d1,%d1
     moveq   #0,%d0
@@ -2297,11 +2807,13 @@ ex2_trig:
 ex2_act:
     tst.b   cl_pmoved
     beq.b   ex2_none
-    moveq   #0,%d3                      | the active track's arrows (on screen)
+    moveq   #0,%d3                      | the active track's arrows: shown, or hidden under the box / the highlight
+                                        | there -- that slot then, with its flash (CL43 D1 / D3; CL44b: hidden
+                                        | arrows are always under their mark in the bank shown, cl_tuck)
     move.b  cl_sbank,%d3
     lsl.l   #8,%d3
     move.b  cl_cur,%d3
-    bra.b   ex2_have
+    bra.w   ex2_have
 ex2_rec:
     lea     cl_pre,%a0                  | another member's arrows
     move.l  %d2,%d0
@@ -2327,6 +2839,9 @@ ex2_none:
     andi.l  #0x0f0f,%d1
     cmp.l   %d0,%d1
     beq.w   ex2_n
+    lsr.l   #8,%d1                      | CL44b: and only in the bank shown (CL43 D2: what you see -- its arrows
+    cmp.b   cl_bank,%d1                 | used to tuck under it, cl_atbox's bank test)
+    bne.w   ex2_n
     bra.w   ex2_have
 ex2_box:
     move.l  %d2,%d0                     | its select box, else its own slot
@@ -2900,17 +3415,60 @@ ty_n:
     cmpi.l  #8,%d2
     bne.b   ty_l
     jsr     cl_bend
-    pea     TOAST_DUR                   | one toast, whatever the tracks (the user, 2026-11-02)
-    pea     cl_s_ttsv                   | "TEMP TRK SAVED" (81 px)
+    tst.l   %d5                         | CL44b (the user, 2026-11-22): done -- the execute flash on the pattern you
+    beq.b   ty_nfl                      | are on (its own slot: the track's sequence there)
+    moveq   #0,%d0
+    move.b  PLAY_BANK,%d0
+    lsl.l   #8,%d0
+    move.b  ACT_PAT,%d0
+    jsr     cl_flcode
+ty_nfl:
+    moveq   #-1,%d2                     | d2 = the track held (MIDI 8..15); -1: several (CL45)
+    move.l  %d3,%d1
+    subq.l  #1,%d1
+    and.l   %d3,%d1
+    bne.b   ty_m                        | several held
+    move.l  %d3,%d1
+ty_lo:
+    addq.l  #1,%d2
+    lsr.l   #1,%d1
+    bcc.b   ty_lo
+    tst.l   MIDI_MODE
+    beq.b   ty_m
+    addq.l  #8,%d2
+ty_m:
+    pea     TOAST_DUR                   | one toast, whatever the tracks (the user, 2026-11-02); CL45 (the user,
+    pea     cl_s_ttsv                   | 2026-11-23): "TRKS" with several held -- "TEMP TRK SAVED" (81 px) /
+    tst.l   %d2                         | "TEMP TRKS SAVED" (87)
+    bpl.b   ty_1s
+    move.l  #cl_s_ttsvs,(%sp)
+ty_1s:
     tst.l   %d4
     beq.b   ty_toast
-    move.l  #cl_s_ttrl,(%sp)            | "TEMP TRK RELOADED" (99 px)
+    move.l  #cl_s_ttrl,(%sp)            | "TEMP TRK RELOADED" (99 px) / "TEMP TRKS RELOADED" (105)
+    tst.l   %d2
+    bpl.b   ty_1r
+    move.l  #cl_s_ttrls,(%sp)
+ty_1r:
     tst.l   %d5
     bne.b   ty_toast
     move.l  #cl_s_savef2,(%sp)          | nothing saved for any held track: "SAVE FIRST!"
 ty_toast:
     jsr     TOAST
     addq.l  #8,%sp
+    moveq   #HOV_TOAST,%d0              | CL47 (the user, 2026-11-24): every temp toast ends with its TRACK keys
+    tst.l   %d4
+    beq.b   ty_hs
+    tst.l   %d5
+    beq.b   ty_hs
+    moveq   #HOV_TEMP,%d0               | a reload done: "Tn LOAD: TEMP TRK" (several: "MULTI LOAD: TEMP TRKS")
+ty_hs:
+    move.l  %d2,%d1                     | while its toast is up (CL45)
+    jsr     cl_hsetb
+    moveq   #0,%d0                      | its chord: the TRACK keys
+    move.b  cl_hovh,%d0
+    ori.l   #HK_TRK,%d0
+    move.b  %d0,cl_hovh
 ty_view:
     tst.b   cl_open                     | inside Clyps: the view follows (SAVED TRK, the grid)
     beq.b   ty_done
@@ -3028,6 +3586,7 @@ pl_tp:
     subq.l  #1,%d0
     bne.b   pl_tp
     clr.b   cl_ysup
+    clr.b   cl_pmoved                   | (CL42: cl_close saves the screen's arrows -- none now)
     lea     cl_svalid,%a0               | ... and no saved sequence survives
     clr.l   (%a0)+
     clr.l   (%a0)+
@@ -3040,6 +3599,12 @@ pl_h:
     move.l  %d1,(%a0)+
     subq.l  #1,%d0
     bne.b   pl_h
+    lea     cl_bxt,%a0                  | CL47: ... and every pattern's select-box record
+    move.l  #1024,%d0
+pl_bx:
+    clr.l   (%a0)+
+    subq.l  #1,%d0
+    bne.b   pl_bx
     clr.b   cl_flash
     moveq   #0,%d0
     move.b  cl_nproj,%d0
@@ -3277,10 +3842,7 @@ ap_wlen:
 ap_back:
     jsr     cl_back                     | put back: with every track original again, the pattern's
     move.l  %d6,%d0                     | length / scale / mode too; provenance off
-    add.l   %d0,%d0
-    lea     cl_home,%a0
-    moveq   #-1,%d1
-    move.b  %d1,(%a0,%d0.l)
+    jsr     cl_hoff
     moveq   #1,%d0
     bra.w   ap_out
 ap_dst:
@@ -3298,6 +3860,11 @@ ap_conv:
     jsr     cl_convert                  | a2 = slab, d3 = len-byte offset (kept)
 ap_prov:
 |   provenance: this track now plays (sbank, spat) on the playing pattern
+    move.l  %d2,%d1                     | CL47: this pattern's record too
+    lsl.l   #8,%d1
+    or.l    %d7,%d1
+    move.l  %d6,%d0
+    jsr     cl_bxrec
     move.l  %d6,%d0
     add.l   %d0,%d0
     lea     cl_src,%a0
@@ -3336,19 +3903,12 @@ ac_pt:
     move.b  %d0,cl_wslab
 ac_off:
     move.l  %d6,%d0                     | a card reload is no Clyps load: provenance off
-    add.l   %d0,%d0
-    lea     cl_home,%a0
-    moveq   #-1,%d1
-    move.b  %d1,(%a0,%d0.l)
-    move.b  %d1,1(%a0,%d0.l)
+    jsr     cl_hoff
     moveq   #1,%d0
     bra.w   ap_out
 ap_own:
     move.l  %d6,%d0                     | back to its own: provenance off
-    add.l   %d0,%d0
-    lea     cl_home,%a0
-    moveq   #-1,%d1
-    move.b  %d1,(%a0,%d0.l)
+    jsr     cl_hoff
 ap_none:
     moveq   #0,%d0
 ap_out:
@@ -4476,7 +5036,9 @@ th_rd:
     rts
 
 | cl_ptnswitch (UI task): a pattern reload from the card finished (cl_ptngo = 0x80 | N, clyps_reload.s):
-| the OT goes to pattern N of the playing bank (the user, 2026-11-06), as stock's [PTN] + trig does
+| the OT goes to pattern N of the job's bank (rq_jbk; CL41: the bank Clyps showed at the chord -- the cue
+| 0x400a1030(bank, N) is the one stock's [BANK] + bank + trig makes, 0x4007b36e, with the same refreshes)
+| (the user, 2026-11-06), as stock's [PTN] + trig does
 | (0x40056b2c, without its window teardown, PTN_CONSUMED -- which would close Clyps -- or chain bits):
 | the chain off (0x4009a404), the cue 0x400a1030(bank, N) -- running: a pending change, so DIRECT JUMP
 | (on) jumps at its landing point and stock (off) switches at CHAIN AFTER / the pattern end; stopped: at
@@ -4484,19 +5046,24 @@ th_rd:
 cl_ptnswitch:
     move.l  %d2,-(%sp)
     moveq   #0,%d2
+    move.b  rq_jbk,%d2
+    lsl.l   #8,%d2
     move.b  cl_ptngo,%d2
     clr.b   cl_ptngo
-    andi.l  #15,%d2
+    andi.l  #0x0f0f,%d2                 | d2 = bank << 8 | N
     moveq   #0,%d0
+    move.b  PLAY_BANK,%d0
+    lsl.l   #8,%d0
     move.b  ACT_PAT,%d0
     cmp.l   %d2,%d0
     beq.b   pw_out
 pw_cue:
     jsr     0x4009a404                  | the chain off
-    move.l  %d2,-(%sp)
-    moveq   #0,%d0
-    move.b  PLAY_BANK,%d0
+    moveq   #15,%d0
+    and.l   %d2,%d0
     move.l  %d0,-(%sp)
+    lsr.l   #8,%d2
+    move.l  %d2,-(%sp)
     jsr     0x400a1030                  | the cue
     jsr     0x400418e0                  | stock's refreshes after it (0x40056b6e..0x40056b8c)
     pea     -1
@@ -4522,6 +5089,8 @@ cl_ptncancel:
 pk_go:
     move.l  %d2,-(%sp)
     moveq   #0,%d2
+    move.b  PLAY_BANK,%d2
+    lsl.l   #8,%d2
     move.b  ACT_PAT,%d2
     bra.w   pw_cue
 pk_out:
@@ -4621,8 +5190,9 @@ ta_mn:
     bne.b   ta_m
     move.w  %d1,cl_tog
     bne.b   ta_out
-    clr.b   cl_togr                     | nothing differs (no rate, no link change): only the Part's rest
-    clr.b   cl_togp
+    clr.b   cl_togr                     | nothing differs (no rate, no link change): only the Part's rest --
+    jsr     cl_togpre                   | CL43 (H3): and the trailer (CHAIN AFTER +6, +8..+0xb; the rate and the
+    jsr     cl_trlui                    | link already equal), into the engine's slab now and the UI's mirror
 ta_rest:
     tst.b   cl_pwhole                   | the rest of the Part when no FULL landing took it: now (data)
     beq.b   ta_t
@@ -4642,12 +5212,10 @@ ta_rest:
     moveq   #1,%d0
     move.b  %d0,cl_wpart
 ta_t:
-    tst.l   RUNNING
-    bne.b   ta_out
-    cmpi.l  #SRC_CARD,%d3
-    bne.b   ta_out
+    cmpi.l  #SRC_CARD,%d3               | CL43 (the user, G13): the card's toast now -- stopped (it landed) or
+    bne.b   ta_out                      | running with nothing to land, as when something differs
     moveq   #1,%d0
-    move.b  %d0,cl_ctoast               | stopped: it landed now
+    move.b  %d0,cl_ctoast
 ta_out:
     movem.l (%sp),%d2-%d3/%a2
     lea     12(%sp),%sp
@@ -4740,8 +5308,15 @@ cl_ychk:
     lea     -16(%sp),%sp
     movem.l %d2-%d4/%a2,(%sp)
     move.l  %d0,%d4                     | d4 = the mask
+    moveq   #-1,%d3                     | CL42: Clyps closed -- the records only (cl_close saved the screen's)
+    move.b  PLAY_BANK,%d0               | ... and the bank viewed is the one it opens on
+    tst.b   cl_open
+    beq.b   yc_c
     jsr     cl_trk
     move.l  %d0,%d3                     | d3 = the active track
+    move.b  cl_bank,%d0
+yc_c:
+    move.b  %d0,cl_hvb                  | CL42 (the user): only a landing in the bank viewed hides arrows
     moveq   #0,%d2
 yc_l:
     btst    %d2,%d4
@@ -4762,29 +5337,25 @@ yc_s:
     bne.b   yc_m
     tst.b   cl_pmoved                   | the active track: the screen's arrows
     beq.b   yc_t
-    moveq   #0,%d1
-    move.b  cl_sbank,%d1
-    lsl.l   #8,%d1
-    move.b  cl_cur,%d1
-    cmp.l   %d1,%d0
+    tst.b   cl_ysup                     | CL44b: hidden ones stay where they are (they show when their mark
+    bne.b   yc_n                        | leaves, cl_tuck)
+    move.l  %d0,%d1                     | CL42 (the user): visible ones hide when the slot under them lands in
+    lsr.l   #8,%d1                      | the bank viewed (they follow the view: that is where they show)
+    cmp.b   cl_hvb,%d1
     bne.b   yc_n
+    moveq   #15,%d1
+    and.l   %d0,%d1
+    cmp.b   cl_cur,%d1
+    bne.b   yc_n
+    move.w  %d0,cl_hc                   | CL44b: the mark that hides them
     moveq   #1,%d0
     move.b  %d0,cl_ysup
     bra.b   yc_n
 yc_t:
-    moveq   #0,%d1                      | CL34: none yet and a select box now (not the pattern's own slot): the
-    move.b  PLAY_BANK,%d1               | arrows tucked under it, as a load from them (the user, 2026-11-13)
-    lsl.l   #8,%d1
-    move.b  ACT_PAT,%d1
-    cmp.l   %d1,%d0
-    beq.b   yc_n
-    move.b  %d0,%d1
-    move.b  %d1,cl_cur
+    move.b  %d0,%d1                     | none shown yet (CL44b): the unseen cursor follows the landing, so the
+    move.b  %d1,cl_cur                  | first arrow starts there (CL22 / CL28)
     lsr.l   #8,%d0
     move.b  %d0,cl_sbank
-    moveq   #1,%d0
-    move.b  %d0,cl_pmoved
-    move.b  %d0,cl_ysup
     bra.b   yc_n
 yc_m:
     lea     cl_pre,%a2                  | another track: its record
@@ -4795,18 +5366,79 @@ yc_m:
     move.w  (%a2),%d1
     btst    #15,%d1
     beq.b   yc_n
-    andi.l  #0x0f0f,%d1
-    cmp.l   %d1,%d0
+    move.l  %d0,%d1                     | CL42: a landing in the bank viewed, on their slot number
+    lsr.l   #8,%d1
+    cmp.b   cl_hvb,%d1
     bne.b   yc_n
     move.w  (%a2),%d1
-    ori.l   #0x4000,%d1
-    move.w  %d1,(%a2)
+    eor.l   %d0,%d1
+    andi.l  #15,%d1
+    bne.b   yc_n
+    ori.l   #0xc000,%d0                 | hidden; CL44b: the record's bank = the mark's (cl_pload: cl_hc)
+    move.w  %d0,(%a2)
 yc_n:
     addq.l  #1,%d2
     cmpi.l  #16,%d2
     bne.w   yc_l
     movem.l (%sp),%d2-%d4/%a2
     lea     16(%sp),%sp
+    rts
+
+| cl_phide (d0 = the playing pattern's slot; UI tail, Clyps open or not): CL42 (the user, 2026-11-21) a pattern landed
+| (a stock cue, [PTN] + trig, a card reload, DIRECT JUMP, MIDI / the arranger -- any way): its highlight is on
+| that slot, so every track's visible arrows on that slot number hide until the next arrow -- the screen's (the
+| active track, Clyps open) and the records; only when it landed in the bank viewed (the user: a landing in another
+| bank hides nothing; Clyps closed: it opens on the playing bank). Uses d0-d1/a0.
+cl_phide:
+    tst.b   cl_open
+    beq.b   ph_go
+    move.b  cl_bank,%d1
+    cmp.b   PLAY_BANK,%d1
+    bne.w   ph_out
+ph_go:
+    lea     -8(%sp),%sp
+    movem.l %d2-%d3,(%sp)
+    move.l  %d0,%d2                     | d2 = the slot
+    moveq   #-1,%d3                     | d3 = the screen's track (closed: none)
+    tst.b   cl_open
+    beq.b   ph_r
+    jsr     cl_trk
+    move.l  %d0,%d3
+    tst.b   cl_pmoved
+    beq.b   ph_r
+    move.b  cl_cur,%d0
+    cmp.b   %d2,%d0
+    bne.b   ph_r
+    moveq   #0,%d0                      | CL44b: the mark = the highlight (the bank viewed is the playing one here)
+    move.b  PLAY_BANK,%d0
+    lsl.l   #8,%d0
+    or.l    %d2,%d0
+    move.w  %d0,cl_hc
+    moveq   #1,%d0
+    move.b  %d0,cl_ysup
+ph_r:
+    lea     cl_pre,%a0
+    moveq   #0,%d1
+ph_l:
+    cmp.l   %d3,%d1
+    beq.b   ph_n
+    moveq   #0,%d0
+    move.w  (%a0),%d0
+    bpl.b   ph_n                        | (bit 15: shown)
+    eor.l   %d2,%d0
+    andi.l  #15,%d0
+    bne.b   ph_n
+    move.b  PLAY_BANK,%d0               | 0x4000: hidden; CL44b: the record's bank = the mark's (the highlight's)
+    ori.l   #0xc0,%d0
+    move.b  %d0,(%a0)
+ph_n:
+    addq.l  #2,%a0
+    addq.l  #1,%d1
+    cmpi.l  #16,%d1
+    bne.b   ph_l
+    movem.l (%sp),%d2-%d3
+    lea     8(%sp),%sp
+ph_out:
     rts
 
 | cl_pre[16] (the user, 2026-11-06): per track, its pre-select arrows: 0x8000 = shown | bank << 8 | slot
@@ -4827,12 +5459,13 @@ cl_psave:
     ori.l   #0x8000,%d1
     tst.b   cl_ysup
     beq.b   pv_w
-    ori.l   #0x4000,%d1                 | ... their solid yellow off (CL32)
+    move.w  cl_hc,%d1                   | ... hidden (CL32 / CL42): CL44b, under the mark at cl_hc (same slot)
+    ori.l   #0xc000,%d1
 pv_w:
     move.w  %d1,(%a0)
     rts
-| cl_pload (d0 = track) -> d0 = 1: its record shows arrows -- they are the screen's now (the shown bank too);
-| 0: none. Uses d0-d1/a0.
+| cl_pload (d0 = track) -> d0 = 1: its record shows arrows -- they are the screen's now, in the bank shown (CL41,
+| the user 2026-11-21: a track change keeps the view; the arrows follow it, cl_pfollow); 0: none. Uses d0-d1/a0.
 cl_pload:
     lea     cl_pre,%a0
     add.l   %d0,%d0
@@ -4843,18 +5476,18 @@ cl_pload:
     move.b  %d1,%d0
     andi.l  #15,%d0
     move.b  %d0,cl_cur
+    move.w  %d1,cl_hc                   | CL44b: hidden -> the mark that hid them (bank << 8 | slot, cl_tuck masks)
     lsr.l   #8,%d1
-    clr.b   cl_ysup                     | 0x4000: their solid yellow off (CL32)
+    clr.b   cl_ysup                     | 0x4000: hidden (CL32 / CL42)
     btst    #6,%d1
     beq.b   pl2_y
     moveq   #1,%d0
     move.b  %d0,cl_ysup
 pl2_y:
-    andi.l  #0x0f,%d1
-    move.b  %d1,cl_sbank
-    move.b  %d1,cl_bank
     moveq   #1,%d0
     move.b  %d0,cl_pmoved
+    jsr     cl_pfollow
+    moveq   #1,%d0
     rts
 pl2_no:
     moveq   #0,%d0
@@ -5004,19 +5637,21 @@ pu_n:
     lea     20(%sp),%sp
     rts
 
-| cl_pmark (d3 = Part index, a2 = that Part, of the playing bank): stock's Part-edited mark follows
+| cl_pmark (d3 = Part index, a2 = that Part, of the playing bank; cl_pmarkb: d0 = the bank, CL41): stock's Part-edited mark follows
 | "differs from its SAVE PART copy" (bank +0x9504a + part * PARTSZ, valid when +0x9b312 + part != 0, the
 | test stock's PART RELOAD makes); the Part's SRAM copy when the playing bank is the UI's -- d4 in = the
 | tracks whose slice changed (only those slices are copied), 0 = the whole Part; the bank marked changed.
 | -> d4 = 1: the playing bank is the UI's. Data only (UI task or the card worker). Keeps d2, d3, a2.
 cl_pmark:
+    moveq   #0,%d0
+    move.b  PLAY_BANK,%d0
+cl_pmarkb:
     move.l  %d5,-(%sp)
+    move.l  %d0,-(%sp)                  | 0(sp) = the bank
 |   d5 = 1: the Part now equals its SAVE PART copy (the user, 2026-10-30: then it is not edited,
 |   as after stock's own PART RELOAD, 0x4004ab46): the "saved" flag set (bank +0x9b312 + part, the
 |   test stock's PART RELOAD makes) and the bytes equal (bank +0x9504a + part * PARTSZ)
     moveq   #0,%d5
-    moveq   #0,%d0
-    move.b  PLAY_BANK,%d0
     move.l  #BANKSTRIDE,%d1
     muls.l  %d1,%d0
     movea.l #BLOB,%a1
@@ -5038,7 +5673,7 @@ cl_pmark:
 pm_neq:
     move.l  %d4,%d1                     | d1 = the slices that changed (0: the whole Part)
     moveq   #0,%d4                      | d4 = 1: the UI bank
-    move.b  PLAY_BANK,%d0
+    move.l  (%sp),%d0
     cmp.b   UI_BANK,%d0
     bne.b   pm_flags
     moveq   #1,%d4
@@ -5079,8 +5714,7 @@ pm_mk:
     beq.b   pm_flags
     bclr    %d3,PEDIT_S
 pm_flags:
-    moveq   #0,%d0
-    move.b  PLAY_BANK,%d0
+    move.l  (%sp),%d0
     move.l  #BANKSTRIDE,%d1
     muls.l  %d1,%d0
     movea.l #BLOB,%a0
@@ -5096,6 +5730,7 @@ pm_fl2:
     moveq   #1,%d0
     move.l  %d0,(%a1)
     move.l  %d0,DIRTY2
+    addq.l  #4,%sp
     move.l  (%sp)+,%d5
     rts
 
@@ -5736,6 +6371,37 @@ tp2_l:
     andi.l  #3,%d0
     move.b  %d0,0x80000003              | the playing pattern's Part (mirror, as stock's pattern change)
 tp2_out:
+    rts
+| cl_trlui (CL43): the playing pattern's trailer -> its SRAM mirror (the UI bank only), the bank changed, a
+| redraw -- the UI side of cl_togpre when no track lands to carry it (cl_postmask). Uses d0-d1/a0-a1.
+cl_trlui:
+    move.b  PLAY_BANK,%d0
+    cmp.b   UI_BANK,%d0
+    bne.b   tu_d
+    bsr.w   cl_live
+    adda.l  #TRAILER,%a0
+    move.l  %a0,%a1
+    moveq   #0,%d0
+    move.b  ACT_PAT,%d0
+    move.l  #PATSTRIDE,%d1
+    muls.l  %d1,%d0
+    addi.l  #SRAM_PAT+TRAILER,%d0
+    pea     PATSTRIDE-TRAILER
+    move.l  %a1,-(%sp)
+    move.l  %d0,-(%sp)
+    jsr     MEMCPY
+    lea     12(%sp),%sp
+tu_d:
+    moveq   #0,%d0
+    move.b  PLAY_BANK,%d0
+    move.l  #BANKSTRIDE,%d1
+    muls.l  %d1,%d0
+    movea.l #BLOB+BDIRTY,%a0
+    adda.l  %d0,%a0
+    moveq   #1,%d0
+    move.l  %d0,(%a0)
+    move.l  %d0,DIRTY2
+    move.l  %d0,RDRAW
     rts
 
 | cl_mrate (a0 = a slab) -> d0 = the master's ticks per step, d1 = the master length (0 = INF), d2 = its
@@ -6698,6 +7364,14 @@ cl_uitail:
 .ifdef BP_UITAIL
     jsr     BP_UITAIL                   | KYOTI V1.8BC: BLACKPYRAMIDS_303's net first (the site is ours: SUPERSEDE)
 .endif
+    clr.b   cl_dpend                    | CL39c: the UI tick may post again
+    jsr     cl_hrel                     | CL47 (the user, 2026-11-24): a chord let go ends its toast and header
+    jsr     cl_pkt                      | CL39b: what the UI tick asked for, drawn here in the sys task: a peek's
+    tst.b   cl_drq                      | deferred return, the blink / flash phases (cl_dreq)
+    beq.b   ut_ndq
+    clr.b   cl_drq
+    jsr     cl_draw                     | (Clyps closed meanwhile: cl_draw draws nothing)
+ut_ndq:
     tst.b   cl_ptngo                    | a pattern reload from the card finished: go to that pattern
     beq.b   ut_ng
     jsr     cl_ptnswitch
@@ -6735,6 +7409,16 @@ ut_nlk:
 ut_nsp:
     clr.b   cl_self                     | stopped before it landed: ORIG PTN+PART's request goes
 ut_run:
+    moveq   #0,%d0                      | CL42: the pattern you are on changed (any way, Clyps open or not): the
+    move.b  PLAY_BANK,%d0               | arrows on its slot hide (cl_phide)
+    lsl.l   #8,%d0
+    move.b  ACT_PAT,%d0
+    cmp.w   cl_lasth,%d0
+    beq.b   ut_run2
+    move.w  %d0,cl_lasth
+    andi.l  #15,%d0
+    jsr     cl_phide
+ut_run2:
     tst.b   cl_open
     bne.b   ut_op
     clr.b   cl_pclose
@@ -6742,7 +7426,7 @@ ut_run:
 ut_op:
 |   a project load closes Clyps (the user, 2026-11-07; cl_projload asks). A pattern picked the stock way inside
 |   Clyps -- [PTN] + trig, SELECT PATTERN, a [BANK] + trig bank then a trig -- no longer closes it (the user,
-|   2026-11-07; scope §1.0 step 2 superseded): the view follows the pattern change (ut_pm)
+|   2026-11-07; scope §1.0 step 2 superseded): the highlight follows the pattern change, the view stays (ut_pm, CL42)
     tst.b   cl_pclose
     beq.b   ut_box
     clr.b   cl_pclose
@@ -6778,12 +7462,9 @@ ut_pm:
     moveq   #0,%d1
     move.w  cl_lastp,%d1
     move.w  %d0,cl_lastp
-    eor.l   %d0,%d1                     | another bank (a stock pick inside Clyps; the user, 2026-11-07):
-    andi.l  #0xff00,%d1                 | the view goes to it; the arrows go with it, same slot number (CL34,
-    beq.b   ut_refr                     | cl_pfollow), without arrows the box goes home
-    lsr.l   #8,%d0
-    move.b  %d0,cl_bank
-    jsr     cl_pfollow
+    eor.l   %d0,%d1                     | another bank: CL42 (the user, 2026-11-21) the view stays -- it moves only
+    andi.l  #0xff00,%d1                 | when you page or open Clyps, never to a landing (was: the view to it,
+    beq.b   ut_refr                     | §1.26); without arrows the box goes home
     tst.b   cl_pmoved
     bne.b   ut_refr
     jsr     cl_boxhome
@@ -6799,7 +7480,8 @@ ut_post:
     tst.b   cl_open
     beq.b   ut_out
     tst.b   cl_boxreq                   | a card reload: the box / LEDs go to the active track's sequence --
-    beq.b   ut_rf                       | not while the arrows show: they stay (the user, 2026-11-07)
+    beq.b   ut_rf                       | not while the arrows show: they stay (the user, 2026-11-07); the view
+                                        | stays too (CL41: cl_boxhome keeps the bank shown)
     clr.b   cl_boxreq
     tst.b   cl_pmoved
     bne.b   ut_rf
@@ -6920,6 +7602,12 @@ bl_src2:
     jsr     cl_srccode
     cmp.l   %d2,%d0
     beq.w   bl_page                     | cued again (a FULL re-load): flashing yellow only
+    moveq   #0,%d1                      | CL47 (the user, 2026-11-24): no select box -- the sequence is the pattern's
+    move.b  PLAY_BANK,%d1               | own (the highlight alone): its trig solid red, never the red / yellow flash
+    lsl.l   #8,%d1
+    move.b  ACT_PAT,%d1
+    cmp.l   %d1,%d0
+    beq.w   bl_page
     tst.b   cl_pmoved
     beq.b   bl_src3
     move.l  %d0,-(%sp)
@@ -6980,8 +7668,18 @@ cl_uitick:
     move.l  cl_magic,%d0
     cmpi.l  #CL_MAGIC,%d0
     bne.b   uk_out
-    jsr     cl_cblink                   | CL34: a cued load's arrows blink
-    jsr     cl_pkt                      | CL36: a peek's deferred return
+    jsr     cl_cblink                   | CL34: a cued load blinks (CL40: its box)
+    tst.b   cl_pkw                      | CL36: a peek's deferred return -- CL39b: shown by the sys task (cl_uitail
+    beq.b   uk_npk                      | -> cl_pkt: window, layers, redraw), this task only asks -- CL39c: once
+    moveq   #14,%d0                     | stock's double-tap window is past (cl_pkt's own test)
+    cmp.l   0x460d5de0,%d0
+    bge.b   uk_npk
+    jsr     cl_dpost
+uk_npk:
+    tst.b   cl_hov                      | CL45: the execution header's time (a toast's)
+    beq.b   uk_nh
+    jsr     cl_hovtick
+uk_nh:
     tst.b   cl_flk
     beq.b   uk_out
     jsr     cl_flashtick
@@ -7186,7 +7884,7 @@ gl_inv:
 
 | cd_frame: a cell's full 1 px frame (d5 / d6 its x, d4 its y): top (y + 5) -- not on the top row, where the
 | band stands for it -- and bottom (y - 1), not on the bottom row (the frame); left and right, y .. y + 4.
-| Keeps d2-d7.
+| d3 = 0 set, 1 inverted (CL40: a cue's frame on the highlight bar). Keeps d2-d7.
 cd_frame:
     move.l  %d4,%d0
     addq.l  #5,%d0
@@ -7212,7 +7910,7 @@ cd_hline:
     move.l  %d6,-(%sp)
     move.l  %d0,-(%sp)
     move.l  %d5,-(%sp)
-    bsr.w   cl_set
+    bsr.w   gl_px
     lea     16(%sp),%sp
     rts
 
@@ -7223,7 +7921,7 @@ cd_vline:
     move.l  %d0,-(%sp)
     move.l  %d4,-(%sp)
     move.l  %d0,-(%sp)
-    bsr.w   cl_set
+    bsr.w   gl_px
     lea     16(%sp),%sp
     rts
 
@@ -7299,6 +7997,51 @@ cl_draw:
     move.l  %d0,%d7                     | d7 = header state (free until the cells)
     jsr     cl_trk
     move.l  %d0,%d6                     | d6 >= 8: the MIDI side
+    tst.b   cl_hov                      | CL44b (the user, 2026-11-22): an execution's header (cl_hov); CL45: for a
+    beq.w   cd_nov                      | toast's time (cl_hovtick); CL47: a key pressed or let go ends it (cl_hrel)
+    moveq   #0,%d0
+    move.b  cl_hov,%d0
+    cmpi.l  #HOV_ORIG,%d0
+    beq.w   cd_nov                      | ORIG TRK SEQ / FULL: the usual label, forced (cd_r1)
+    cmpi.l  #HOV_TOAST,%d0
+    beq.w   cd_nov
+    lea     cl_s_pptn,%a2
+    cmpi.l  #HOV_PPTN,%d0
+    beq.b   cd_ov1
+    lea     cl_s_currp,%a2
+    subq.l  #1,%d0
+    bne.b   cd_ov2
+cd_ov1:
+    moveq   #4,%d0                      | HOV_CURRP: "PTN LOAD: CURR PTN+PRT", the [PTN]-alone header (CL42);
+    or.l    %d0,%d7                     | HOV_PPTN: "PTN LOAD: PROJ PTN"
+    bra.w   cd_rl
+cd_ov2:
+    lea     cl_s_ttrk,%a2               | HOV_TEMP "TEMP TRK" (30 px), HOV_PSEQ "PROJ TRK SEQ" (45),
+    subq.l  #1,%d0                      | HOV_PFULL "PROJ TRK FULL" (49: its box ends at x 85, as ORIG TRK FULL's)
+    bne.b   cd_ov4
+    tst.b   cl_hovt                     | CL45 (the user): several tracks, "MULTI LOAD: TEMP TRKS" (34 px: its box
+    bpl.b   cd_ov3                      | ends at x 82)
+    lea     cl_s_ttrks,%a2
+    bra.b   cd_ov3
+cd_ov4:
+    lea     cl_s_pseq,%a2
+    subq.l  #1,%d0
+    beq.b   cd_ov3
+    lea     cl_s_pfull,%a2
+cd_ov3:
+    movea.l %a2,%a0
+    jsr     cl_textw
+    move.l  %d0,%d5                     | d5 = the label's width
+    moveq   #0,%d6
+    move.b  cl_hovt,%d6                 | the track it reloaded ("Tn" / "Mn"); 0xff: several, "MULTI LOAD:"
+    cmpi.l  #16,%d6
+    bcs.w   cd_one
+    moveq   #0,%d7                      | (MULTI, not PTN)
+    bra.w   cd_mh
+cd_nov:
+    lea     cl_s_currp,%a2              | CL42 (the user, 2026-11-21): [PTN] alone held, "PTN LOAD: CURR PTN+PRT"
+    btst    #2,%d7                      | (46 px, as ORIG PTN+PRT: its box ends at x 86)
+    bne.b   cd_rl
     btst    #1,%d7
     beq.b   cd_r1
     lea     cl_s_origp,%a2
@@ -7306,10 +8049,10 @@ cl_draw:
 cd_r1:
     jsr     cl_onorig
     move.l  %d0,%d4                     | d4 = the box is on the original (your own pattern's slot)
-    tst.b   cl_ftgt                     | CL32: an ORIG load's flash reads ORIG wherever the arrows are
-    beq.b   cd_r1o
-    tst.b   cl_flk
-    beq.b   cd_r1o
+    moveq   #0,%d0                      | CL32: an ORIG load's flash reads ORIG wherever the arrows are; CL45: for
+    move.b  cl_hov,%d0                  | a toast's time (HOV_ORIG)
+    cmpi.l  #HOV_ORIG,%d0
+    bne.b   cd_r1o
     moveq   #1,%d4
 cd_r1o:
     jsr     cl_ismulti
@@ -7337,14 +8080,16 @@ cd_rl:
     move.l  %d0,%d5                     | d5 = the label's width
 |   a group ("MULTI LOAD:") or the [PTN]+[BANK] chord held ("PTN LOAD:", the user 2026-11-05) at x 3 and the
 |   label 2 dark columns after it -- "PTN LOAD: ORIG PTN+PRT"'s box ends at x 86
-    btst    #1,%d7
+    moveq   #6,%d0                      | the chord, or [PTN] alone (CL42)
+    and.l   %d7,%d0
     bne.b   cd_mh
     jsr     cl_ismulti
     tst.l   %d0
     beq.b   cd_one
 cd_mh:
     lea     cl_s_multi,%a0              | a group: "MULTI LOAD:"
-    btst    #1,%d7
+    moveq   #6,%d0
+    and.l   %d7,%d0
     beq.b   cd_mh2
     lea     cl_s_ptnld,%a0              | the chord: "PTN LOAD:" (the user, 2026-11-05)
 cd_mh2:
@@ -7468,6 +8213,10 @@ cd_corner:
     subq.l  #1,%d2
     bne.b   cd_corner
 |   the 16 cells (bars XORed with their text; the select box after them, cd_box)
+    jsr     cl_cueslot                  | CL46: the cues whose slot's text blinks (cd_sum): the active track's
+    move.l  %d0,cl_cq                   | load (-1: none) and stock's pattern cue
+    jsr     cl_pcue
+    move.l  %d0,cl_pq
     jsr     cl_trk
     move.l  %d0,-(%sp)
     jsr     cl_toff
@@ -7606,6 +8355,27 @@ cd_half:                                | data but no sample / note trigs: "A01 
 cd_empty:
     lea     cl_s_emp,%a0
 cd_sum:
+    tst.b   cl_cph                      | CL46 (the user, 2026-11-23): a cued slot's text (name / summary / ---)
+    bne.b   cd_tx                       | blinks: not drawn in the off phase; the number and the "x" stay; the
+    moveq   #0,%d0                      | highlight's bar shows it inverted. Not while the execute flash runs on
+    move.b  cl_bank,%d0                 | that cell (the flash first, then the blink)
+    lsl.l   #8,%d0
+    or.l    %d2,%d0
+    cmp.l   cl_cq,%d0
+    beq.b   cd_tq
+    cmp.l   cl_pq,%d0
+    bne.b   cd_tx
+cd_tq:
+    tst.b   cl_flk
+    beq.b   cd_thide
+    cmp.w   cl_fcode,%d0
+    bne.b   cd_thide
+    moveq   #1,%d1
+    cmp.b   cl_ftgt,%d1
+    bne.b   cd_tx                       | the flash is on this cell (cl_ftgt 1: on the header)
+cd_thide:
+    bra.b   cd_trect
+cd_tx:
     move.l  %a0,-(%sp)
     move.l  %d4,-(%sp)
     move.l  %d3,%d0
@@ -7618,6 +8388,7 @@ cd_sx:
     move.l  %d0,-(%sp)
     bsr.w   cl_text
     lea     12(%sp),%sp
+cd_trect:
 |   the cell's rectangle: x d5..d6, y d4-1 .. d4+5 (one row above and below the text)
     moveq   #0,%d5
     move.w  2(%a3),%d5
@@ -7643,7 +8414,8 @@ cd_next:
     cmpi.l  #16,%d2
     bne.w   cd_cell
 |   the boxes (the user, 2026-11-05 / 06), SET after every bar -- a box in the row next to the highlight shares
-|   a pixel row with its bar, where an XOR would cancel. None while the [PTN]+[BANK] chord is held.
+|   a pixel row with its bar, where an XOR would cancel. The select box and the arrows: none while the [PTN]+[BANK]
+|   chord is held (CL40: the confirmation and the cued boxes show then too).
 |   * the select box, a full 1 px frame: where the track's playing sequence was loaded from (cl_srccode; the
 |     grid's red / yellow blink); not moved by the keys; not shown on the playing slot (an original, a card
 |     reload, SAVED TRK)
@@ -7651,9 +8423,6 @@ cd_next:
 |     (cl_sbank / cl_cur, the grid's solid yellow), shown from an arrow until the next execution (cl_pmoved);
 |     over the highlight bar they are inverted
 |   * a load confirmation (cl_fph) inverts the box's cell, phase by phase (the user, 2026-10-30)
-    move.b  cl_hdrst,%d0
-    btst    #1,%d0
-    bne.w   cd_boxed
     jsr     cl_srccode
     move.l  %d0,%d7                     | d7 = the select box: (bank << 8) | slot
 |   the load confirmation (cl_ftgt 0: the loaded slot; 2: an ORIG track load's own slot, CL34; 1: the header)
@@ -7682,13 +8451,15 @@ cd_next:
     bsr.w   cl_xor
     lea     16(%sp),%sp
 cd_nlf:
+|   CL46 (the user, 2026-11-23): no cue frames (CL40's cd_cbox) -- a cued slot's text blinks instead (cd_sum)
+|   CL47 (the user, 2026-11-24): the [PTN]+[BANK] chord held no longer hides the select box and the arrows
 |   the select box
     moveq   #0,%d0
     move.b  PLAY_BANK,%d0
     lsl.l   #8,%d0
     move.b  ACT_PAT,%d0
     cmp.l   %d7,%d0
-    beq.b   cd_nosel                    | the playing slot: none
+    beq.b   cd_nosel                    | the playing slot: none (CL46: a cue there no longer blinks the box)
     move.l  %d7,%d0
     lsr.l   #8,%d0
     cmp.b   cl_bank,%d0
@@ -7700,37 +8471,20 @@ cd_nlf:
     move.w  2(%a3),%d5
     moveq   #0,%d6
     move.w  4(%a3),%d6
+    moveq   #0,%d3                      | set
     bsr.w   cd_frame
 cd_nosel:
-|   the pre-select box
-    jsr     cl_cueslot                  | CL34: the active track's cued slot (-1: none)
-    move.l  %d0,cl_cq
+|   the pre-select arrows: the cursor, the one set of arrows in the window (CL40, the user: never a second set)
     tst.b   cl_pmoved
-    beq.b   cd_cq
+    beq.w   cd_boxed
     jsr     cl_tuck                     | CL34: tucked under the select box -- not drawn
     tst.l   %d0
-    bne.b   cd_cq
+    bne.w   cd_boxed
     move.b  cl_bank,%d0
     cmp.b   cl_sbank,%d0
-    bne.b   cd_cq
-    moveq   #0,%d2
-    move.b  cl_sbank,%d2
-    lsl.l   #8,%d2
-    move.b  cl_cur,%d2
-    cmp.l   cl_cq,%d2
-    beq.b   cd_cq                       | cued there: they blink (below)
-    andi.l  #15,%d2
-    bsr.w   cd_arrows
-|   the cued slot (the user, 2026-11-13): its arrows blink at the pattern's tempo until the load lands
-cd_cq:
-    move.l  cl_cq,%d2
-    bmi.w   cd_boxed
-    tst.b   cl_cph
-    beq.w   cd_boxed
-    move.l  %d2,%d0
-    lsr.l   #8,%d0
-    cmp.b   cl_bank,%d0
     bne.w   cd_boxed
+    moveq   #0,%d2
+    move.b  cl_cur,%d2
     andi.l  #15,%d2
     bsr.w   cd_arrows
     bra.w   cd_boxed
@@ -8060,7 +8814,8 @@ pc_out:
 | (the user, 2026-11-04):
 |   yellow, flashing   the active track's cued sequence (cl_blink: off half of every period)
 |   red / yellow blink the active track's sequence: where what it plays was loaded from (cl_srccode;
-|                      cl_blink lights its green die 3 ticks a period, as stock's p-locked trig)
+|                      cl_blink lights its green die 3 ticks a period, as stock's p-locked trig) -- the select
+|                      box's slot only: the pattern's own (the highlight alone) is solid red (CL47)
 |   yellow             the pre-select box while its arrows are shown (cl_pmoved), on any slot
 |   red                the pattern you are on
 |   green 15 / 7       a slot with sample/note trigs / other data only; off = empty
@@ -8085,16 +8840,9 @@ cl_paint:
     move.b  cl_sbank,%d6
     lsl.l   #8,%d6
     move.b  cl_cur,%d6                  | d6 = the box
-    jsr     cl_tuck                     | CL34: tucked arrows -- no yellow (none of the slots matches)
-    tst.l   %d0
-    bne.b   cp_nt1
-    moveq   #0,%d0                      | CL34 (the user, 2026-11-13, option b): arrows on the pattern you are on
-    move.b  PLAY_BANK,%d0               | show on screen, but its LED stays red -- never yellow
-    lsl.l   #8,%d0
-    move.b  ACT_PAT,%d0
-    cmp.l   %d6,%d0
-    bne.b   cp_nt
-cp_nt1:
+    jsr     cl_tuck                     | CL34: tucked arrows -- no yellow (none of the slots matches); CL44b (the
+    tst.l   %d0                         | user, 2026-11-22): shown ones light their slot yellow everywhere, the
+    beq.b   cp_nt                       | pattern you are on too (was CL34's option b: red)
     moveq   #-1,%d6
 cp_nt:
     moveq   #0,%d2
@@ -8176,10 +8924,12 @@ cp_done:
     movem.l (%sp),%d2-%d6/%a2-%a5
     lea     36(%sp),%sp
     rts
-| the pattern view (the user, 2026-10-30: with [PTN]+[BANK] held, whichever came first): the playing
-| bank's patterns as stock's [PTN] view lights them -- your pattern red, a cued one yellow, those
-| with data green (stock's own test PAT_HASDATA), empty off
+| the pattern view (the user, 2026-10-30: with [PTN]+[BANK] held, whichever came first): the shown
+| bank's patterns (CL41, the user 2026-11-21: was the playing bank's) as stock's [PTN] view lights them --
+| your pattern red, a cued one yellow, those with data green (stock's own test PAT_HASDATA), empty off
 cp_pview:
+    moveq   #0,%d5
+    move.b  cl_bank,%d5                 | d5 = the bank shown
     moveq   #0,%d2
 pv_lp:
     lea     LED_TBL,%a0
@@ -8196,6 +8946,8 @@ pv_lp:
     move.b  ACT_PAT,%d0
     cmp.l   %d2,%d0
     bne.b   pv_cue
+    cmp.b   PLAY_BANK,%d5
+    bne.b   pv_cue
     move.l  %d3,-(%sp)                  | red
     jsr     (%a4)
     move.l  %d4,(%sp)
@@ -8206,7 +8958,7 @@ pv_cue:
     tst.l   RUNNING
     beq.b   pv_data
     move.b  PEND_BANK,%d0
-    cmp.b   PLAY_BANK,%d0
+    cmp.b   %d5,%d0
     bne.b   pv_data
     moveq   #0,%d0
     move.b  PEND_PAT,%d0
@@ -8222,9 +8974,7 @@ pv_data:
     move.l  %d3,-(%sp)
     jsr     (%a5)                       | red off
     addq.l  #4,%sp
-    moveq   #0,%d0
-    move.b  PLAY_BANK,%d0
-    move.l  %d0,-(%sp)
+    move.l  %d5,-(%sp)
     move.l  %d2,-(%sp)
     jsr     PAT_HASDATA
     addq.l  #8,%sp
@@ -8752,7 +9502,13 @@ cl_ledrec:  .long 0, cl_paint, cl_blink
             .align 2
 
 cl_win:     .long 0
-cl_gmask:   .long 0                     | the painters' group test (cl_gupd): 0 = none, else 0x10000 | members
+cl_pq:      .long -1                    | CL46: stock's cued pattern as cl_draw last saw it (cl_pcue, -1: none): its text blinks
+cl_pcq:     .short 0xffff               | CL39: stock's cued pattern as cl_cblink last saw it (cl_pcue, 0xffff: none)
+cl_dmsg:    .byte 0, 0                  | CL39b: the type-0 sys message (cl_dpost: its tail only)
+cl_drq:     .byte 0                     | CL39b: the UI tick asks the sys task for a redraw (cl_dreq -> cl_uitail)
+cl_dpend:   .byte 0                     | CL39c: its message is posted, the tail has not run yet
+            .short 0
+cl_gmask:   .long 0                    | the painters' group test (cl_gupd): 0 = none, else 0x10000 | members
 cl_tabsig:  .long 0                     | the tabs' last group / active / side (cl_tabhook)
 cl_xc:      .fill 16, 4, 0xffffffff     | cl_exec: each target's code (pass 1), -1 = none
 cl_xany:    .byte 0                     | ... one of them loads (not a restore): all cued
@@ -8786,13 +9542,26 @@ cl_bkfwd:   .byte 0                     | a [BANK] pressed in Clyps: stock's ges
 cl_bkarm:   .byte 0                     | ... BANK_SEL 2 from now on is a pick (it closed Clyps until CL22; unused)
 cl_bkused:  .byte 0                     | ... the arrows paged during it: no SELECT BANK on release
 cl_nproj:   .byte 0                     | project loads seen (the emulator gate reads it)
+cl_trl:     .byte 0                     | CL44: the TRACK key held was a card reload (its flash outlives the key)
+cl_hov:     .byte 0                     | CL44b: the header while the execute flash runs (HOV_*; 0: as usual)
+cl_hovt:    .byte 0                     | ... its track (0..15), 0xff: several (MULTI)
+cl_hovk:    .byte 0                     | CL45: ... UI ticks left (no toast)
+cl_hovb:    .byte 0                     | CL45: ... bound to the toast up (cl_hsetb)
+cl_hovh:    .byte 0                     | CL45: ... the keys held when it was set (cl_hkeys)
+            .align 2
+cl_hovc:    .long 0                     | CL45: ... the bound toast's countdown, as last seen less one
             .align 2
 cl_cls:     .space 16
 | the valid marks: inside the loaded image, so every boot's depack zeroes them (the buffers they
 | describe are not)
 cl_lastp:   .short 0xffff               | the pattern you were on at the last redraw (cl_uitail)
+cl_lasth:   .short 0                    | CL42: the pattern you were on at the last UI tail (cl_phide)
+cl_hc:      .short 0                    | CL44b: the mark (bank << 8 | slot) that hid the screen's arrows (cl_ysup)
+cl_hvb:     .byte 0                     | CL42: cl_ychk's bank viewed (a landing elsewhere hides no arrows)
 cl_magic:   .long CL_MAGIC              | the DRAM part is in place (the boot loader put it there)
 cl_svalid:  .space 16                   | per track: a saved sequence is held
+            .align 2
+cl_bxt:     .space 4096                 | CL47: per (bank, pattern, track) the select box's slot (cl_bxrec)
 cl_namesok: .byte 0                     | the names are cleared (at the first project load) and usable
             .align 2
 cl_nedit:   .long 0                     | the name being edited (its index)
@@ -8905,7 +9674,13 @@ cl_s_emp:   .asciz "---"
 cl_s_orig:  .asciz "ORIG"
 cl_s_origs: .asciz "ORIG TRK SEQ"
 cl_s_origf: .asciz "ORIG TRK FULL"
-cl_s_origp: .asciz "ORIG PTN+PRT"         | 46 px: its box ends at x 86, as T6 LOAD:'s longest
+cl_s_origp: .asciz "ORIG PTN"             | CL45 (the user): was ORIG PTN+PRT -- 30 px, its box ends at x 70
+cl_s_pptn:  .asciz "PROJ PTN"             | CL47c (the user): was PRJ PTN -- 30 px, its box ends at x 70 (BNK's at 88)
+cl_s_currp: .asciz "CURR PTN"             | [PTN] alone held (CL42, the user); CL45 (the user): was CURR PTN+PRT -- 30 px
+cl_s_ttrk:  .asciz "TEMP TRK"             | CL44b: the execution headers (header font 0x400c246a): 30 px
+cl_s_ttrks: .asciz "TEMP TRKS"            | CL45: several tracks held, 34 px
+cl_s_pseq:  .asciz "PROJ TRK SEQ"         | 45 px
+cl_s_pfull: .asciz "PROJ TRK FULL"        | 49 px: after "Tn LOAD:" its box ends at x 85 (BNK's box: 88)
 cl_s_saved: .asciz "SAVED TRK"           | 34 px: the slot label after a temp reload (the user, 2026-11-02)
 cl_fmt_srct:.asciz "%c%02d %02d TR"       | 33 px: "B14 06 TR" (the user, 2026-10-29)
 cl_fmt_srcl:.asciz "%c%02d %02d LK"       | as cl_fmt_lk
@@ -8923,6 +9698,8 @@ cl_tname:   .space 16
 cl_s_savef2:.asciz "SAVE FIRST!"
 cl_s_ttsv:  .asciz "TEMP TRK SAVED"        | toast font 0x400ba862: 81 px
 cl_s_ttrl:  .asciz "TEMP TRK RELOADED"     | 99 px
+cl_s_ttsvs: .asciz "TEMP TRKS SAVED"       | CL45 (the user): several tracks held, 87 px
+cl_s_ttrls: .asciz "TEMP TRKS RELOADED"    | 105 px (a toast line holds 113)
 .ifdef BP_CLASH
             .align 2
 cl_bpsv:    .space 32                   | cl_bpgate: each audio track's source Part (0: it keeps its own)

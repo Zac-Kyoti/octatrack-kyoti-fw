@@ -160,8 +160,9 @@ def main(argv):
     u.hook_add(er.eb.UC_HOOK_CODE, on_out, begin=syms["wr_out"], end=syms["wr_out"])
     u.hook_add(er.eb.UC_HOOK_CODE, on_apply, begin=syms["cl_apply"], end=syms["cl_apply"])
     u.hook_add(er.eb.UC_HOOK_CODE, on_trk, begin=TRK_APPLY, end=TRK_APPLY)
-    u.hook_add(er.eb.UC_HOOK_CODE, lambda uc, ad, sz, ud: events.append(dict(where="toast")),
-               begin=syms["cl_rqtoast"], end=syms["cl_rqtoast"])
+    CL47b = "cl_hrel" in syms     # (the user, 2026-11-24) a card reload's toast at the press, once: count the toasts
+    tsym = syms["cl_toast2"] if CL47b else syms["cl_rqtoast"]   # shown (cl_toast2), not cl_rqtoast's calls
+    u.hook_add(er.eb.UC_HOOK_CODE, lambda uc, ad, sz, ud: events.append(dict(where="toast")), begin=tsym, end=tsym)
     stock_sw = {"n": 0}
     u.hook_add(er.eb.UC_HOOK_CODE, lambda uc, ad, sz, ud: stock_sw.__setitem__("n", stock_sw["n"] + 1),
                begin=0x400A45BA, end=0x400A45BA)               # stock's real-switch hand-off
@@ -314,7 +315,10 @@ def main(argv):
                       and e["ticks"][0] == tps(e["tscale"][0]) - 2,
                       f"B: T1's step as stock had it, fired at once (step {e['step'][0]} -> {out['step'][0]}, "
                       f"ticks {e['ticks'][0]} -> {out['ticks'][0]})")
-            check(e["toast_after"] and not e["toast_before"], "B: the toast after the landing, not before")
+            if CL47b:
+                check(e["toast_before"] and not e["toast_after"], "B: the toast at the press (before the landing), once")
+            else:
+                check(e["toast_after"] and not e["toast_before"], "B: the toast after the landing, not before")
         check(same_rec(rec(0), card_slab[:TRAC_A]), "B: T1's record from the card")
         check(pending(), "B: nothing left pending")
 
@@ -559,7 +563,9 @@ def main(argv):
         gesture([(PTN, 1), (0x10, 1), (0x10, 0), (PTN, 0)])
         res = landing("F", [0])
         if res:
-            check(res[0]["where"] == "now" and res[0]["toast_after"], "F: stopped: at once, then its toast")
+            nt_ = sum(1 for x in events if x["where"] == "toast")
+            check(res[0]["where"] == "now" and (nt_ == 1 if CL47b else res[0]["toast_after"]),
+                  "F: stopped: at once" + (f", its toast once at the press ({nt_})" if CL47b else ", then its toast"))
         check(same_rec(rec(0), card_slab[:TRAC_A]), "F: T1's record from the card")
     print("VERDICT:", "PASS" if not fails else f"FAIL ({len(fails)})")
     return 0 if not fails else 1

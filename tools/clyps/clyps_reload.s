@@ -13,7 +13,7 @@
 |   * the requests come only from Clyps' keys -- [PTN] alone + TRACK = the track's sequence;
 |     [BANK] alone + TRACK = the sequence + that track's Part slice (Clyps' FULL load: machine, FX,
 |     pages, scene locks, designer), never the whole Part; [PTN]+[BANK] + trig N = pattern N of the
-|     playing bank, its slab and its whole Part;
+|     bank Clyps shows (CL41, the user 2026-11-21; was the playing bank), its slab and its whole Part;
 |   * the Part comes from the card: the .strd's WORKING Part chunk (stock's bank reader reads the
 |     16 PTRN chunks, then the 4 working PART chunks, then the 4 SAVE PART copies), parsed with
 |     stock's own 0x4008be2c into our buffer;
@@ -49,7 +49,8 @@
 
 | ================================================================ the request (UI task)
 | cl_rlreq(kind, pattern, t): arm the message, then post the job (S93: the message first).
-| t = 0..15 (MIDI 8..15) for the track kinds; the pattern is in the PLAYING bank.
+| t = 0..15 (MIDI 8..15) for the track kinds (the playing pattern); RQ_PTN: pattern = bank << 8 | N, the bank
+| Clyps shows (CL41) -- the job reads, writes and cues THAT bank's pattern (rq_tgt -> rq_jbk).
     .global cl_rlreq
 cl_rlreq:
     lea     -16(%sp),%sp
@@ -58,6 +59,7 @@ cl_rlreq:
     move.l  24(%sp),%d3                 | pattern
     move.l  28(%sp),%d4                 | t
     move.b  %d4,rq_t
+    clr.b   rq_hk                       | CL45: a track's execution header comes back with its toast (rd_show)
 |   the message: line 1 / line 2 (one line for the pattern)
     lea     rq_s_proj,%a0               | line 2 for every kind (the user, 2026-10-30; "RELOADED FROM
     move.l  %a0,rq_l2p                  | PROJECT" is 123 px: wider than a toast line)
@@ -65,11 +67,14 @@ cl_rlreq:
     move.b  %d0,rq_nl
     cmpi.l  #RQ_PTN,%d2
     bne.b   rr_trk
-    move.l  %d3,%d0
+    moveq   #HOV_PPTN,%d0               | CL45: "PTN LOAD: PROJ PTN"
+    move.b  %d0,rq_hk
+    moveq   #15,%d0
+    and.l   %d3,%d0
     addq.l  #1,%d0
     move.l  %d0,-(%sp)                  | pattern 1..16
-    moveq   #0,%d0
-    move.b  PLAY_BANK,%d0
+    move.l  %d3,%d0
+    lsr.l   #8,%d0
     addi.l  #'A',%d0
     move.l  %d0,-(%sp)                  | its bank
     pea     rq_fmt_ptn
@@ -78,6 +83,9 @@ cl_rlreq:
     lea     16(%sp),%sp
     bra.b   rr_post
 rr_trk:
+    move.l  %d2,%d0
+    addq.l  #2,%d0
+    move.b  %d0,rq_hk                   | HOV_PSEQ / HOV_PFULL
     pea     rq_s_seq                    | "TRK SEQ" / "TRK ALL", either side (the user, 2026-11-02: no track
     cmpi.l  #RQ_TRKSEQ,%d2              | numbers); line 2 "RELOADED FROM PROJ"
     beq.b   rr_k
@@ -101,7 +109,8 @@ rr_post:
     move.b  ACT_PAT,%d5
     bra.b   rr_tg
 rr_tp:
-    move.b  %d3,%d5
+    move.l  %d3,%d5                     | CL41: the bank asked for << 8 | N
+    andi.l  #15,%d3
 rr_tg:
     cmpi.l  #RQ_PTN,%d2
     beq.b   rr_new
@@ -133,9 +142,11 @@ rr_same:
     move.b  %d0,rq_ptnr
     move.b  %d3,rq_pat
     moveq   #0,%d0                      | the pattern you are on while another is cued: that cue goes, by
-    move.b  ACT_PAT,%d0                 | stock's own cue (as [PTN] + its trig does; 2026-11-09, HW) --
-    cmp.l   %d3,%d0                     | and every track's pending load: nothing cued may land after it
-    bne.w   rr_msgx                     | (item 11)
+    move.b  PLAY_BANK,%d0               | stock's own cue (as [PTN] + its trig does; 2026-11-09, HW) --
+    lsl.l   #8,%d0                      | and every track's pending load: nothing cued may land after it
+    move.b  ACT_PAT,%d0                 | (item 11). CL41: bank and pattern
+    cmp.l   %d5,%d0
+    bne.w   rr_msgx
     jsr     cl_dropall
     jsr     cl_ptncancel
     bra.w   rr_msgx
@@ -199,7 +210,7 @@ rr_out:
     rts
 
 | rq_setkind: the job's kind for the generation -- the pattern, or tracks (their Part is always read: a
-| FULL chord may join). rq_post: that, then the type-0x14 storage job for the playing bank. UI task.
+| FULL chord may join). rq_post: that, then the type-0x14 storage job for the target's bank. UI task.
 rq_setkind:
     moveq   #RQ_TRKFULL,%d0
     tst.b   rq_ptnr
@@ -211,7 +222,7 @@ rk_k:
 rq_post:
     bsr.b   rq_setkind
     moveq   #0,%d0
-    move.b  PLAY_BANK,%d0
+    move.b  rq_tgt,%d0                  | CL41: the target's bank (rq_tgt = bank << 8 | pattern)
     moveq   #1,%d1
     lsl.l   %d0,%d1
     move.l  %d1,-(%sp)
@@ -241,7 +252,9 @@ rj_ours:
     lea     -40(%sp),%sp
     movem.l %d2-%d7/%a2-%a5,(%sp)
     moveq   #0,%d5
-    move.b  rq_pat,%d5                  | d5 = pattern P (playing bank)
+    move.b  rq_pat,%d5                  | d5 = pattern P (of bank rq_jbk)
+    move.b  rq_tgt,%d0                  | CL41: the bank this read serves -- the request's (a pattern: the bank
+    move.b  %d0,rq_jbk                  | Clyps showed; a track: the playing one); every site below uses it
     moveq   #0,%d7
     move.b  rq_kind,%d7                 | d7 = kind
     clr.b   rq_kind                     | consumed: a re-entrant stock job must not see it
@@ -399,7 +412,7 @@ rj_parsed:
     jsr     FCLOSE
     addq.l  #4,%sp
     moveq   #0,%d0
-    move.b  PLAY_BANK,%d0
+    move.b  rq_jbk,%d0
     move.l  %d5,%d1
     movea.l #BLOB,%a1
     jsr     cl_partin                   | a0 = the live pattern's Part (its current link)
@@ -407,7 +420,7 @@ rj_parsed:
     move.l  %d0,%d2
     move.l  %d5,-(%sp)
     moveq   #0,%d0
-    move.b  PLAY_BANK,%d0
+    move.b  rq_jbk,%d0
     move.l  %d0,-(%sp)
     jsr     cl_slab
     addq.l  #8,%sp
@@ -441,6 +454,9 @@ rj_nt:
     bne.w   rj_stale
     cmpi.l  #RQ_PTN,%d7
     bne.w   rj_stage
+    move.b  rq_jbk,%d0                  | CL41: a pattern of another bank is never the one you are on
+    cmp.b   PLAY_BANK,%d0
+    bne.w   rj_ptn
     moveq   #0,%d0
     move.b  ACT_PAT,%d0
     cmp.l   %d5,%d0
@@ -468,38 +484,37 @@ rj_ptn:
     jsr     MEMCPY
     lea     12(%sp),%sp
     moveq   #0,%d0
-    move.b  PLAY_BANK,%d0
+    move.b  rq_jbk,%d0
     move.l  %d5,%d1
     movea.l #BLOB,%a1
-    jsr     cl_partin                   | now the saved link: a0 = that Part, d0 = its index
+    jsr     cl_partin                   | now the saved link: a0 = that Part (of bank rq_jbk), d0 = its index
     move.l  %d0,%d2
     pea     PARTSZ
     pea     RQ_PART
     move.l  %a0,-(%sp)
     jsr     MEMCPY
     lea     12(%sp),%sp
-    moveq   #0,%d0
-    move.b  ACT_PAT,%d0
-    cmp.l   %d5,%d0
-    bne.b   rj_pshare
-    move.b  %d2,RL_CURPART              | the playing pattern: its Part is the sounding one
-    bra.b   rj_papply
-rj_pshare:
+    move.b  rq_jbk,%d0                  | (P is never the pattern you are on here.) CL41: another bank's Part
+    cmp.b   PLAY_BANK,%d0               | never sounds -- written, and stock applies it when the cue lands
+    bne.b   rj_pmk
     moveq   #0,%d0
     move.b  RL_CURPART,%d0
     cmp.l   %d2,%d0
     beq.b   rj_papply                   | the Part sounding: applied, and cl_postpart marks it
+rj_pmk:
 |   another Part than the one sounding: nothing to apply, but stock's edited mark follows the reload --
 |   of the Part pattern P links to (as just reloaded) and no other (the user, 2026-11-02)
     moveq   #0,%d0
-    move.b  PLAY_BANK,%d0
+    move.b  rq_jbk,%d0
     move.l  %d5,%d1
     movea.l #BLOB,%a1
     jsr     cl_partin                   | a0 = P's Part, d0 = its index (= d2)
     movea.l %a0,%a2
     move.l  %d2,%d3
     moveq   #0,%d4                      | the whole Part (cl_pmark: no slice mask)
-    jsr     cl_pmark
+    moveq   #0,%d0
+    move.b  rq_jbk,%d0                  | CL41: of that bank
+    jsr     cl_pmarkb
     bra.w   rj_ok
 rj_papply:
     move.l  %d2,-(%sp)
@@ -518,21 +533,29 @@ rj_ok:
 |   what the card brought is no Clyps load any more (the user, 2026-11-05): the reloaded tracks' provenance
 |   off -- a track: its own; a pattern: every track homed on it -- so their box / LEDs go to the pattern's
 |   own slot (cl_boxreq: cl_boxhome at the UI tail)
-    lea     cl_home,%a0
     cmpi.l  #RQ_PTN,%d7
     beq.b   rj_hp
     moveq   #0,%d0
     move.b  rq_t,%d0
-    add.l   %d0,%d0
-    moveq   #-1,%d1
-    move.b  %d1,(%a0,%d0.l)
-    move.b  %d1,1(%a0,%d0.l)
+    jsr     cl_hoff                     | CL47: with the playing pattern's select-box record
     bra.b   rj_hd
 rj_hp:
+    moveq   #0,%d0                      | CL47: that pattern's select-box records, every track
+    move.b  rq_jbk,%d0
+    lsl.l   #4,%d0
+    add.l   %d5,%d0
+    lsl.l   #4,%d0
+    lea     cl_bxt,%a0
+    adda.l  %d0,%a0
+    clr.l   (%a0)+
+    clr.l   (%a0)+
+    clr.l   (%a0)+
+    clr.l   (%a0)
+    lea     cl_home,%a0
     moveq   #16,%d1
 rj_hpl:
     move.b  (%a0),%d0
-    cmp.b   PLAY_BANK,%d0
+    cmp.b   rq_jbk,%d0
     bne.b   rj_hpn
     moveq   #0,%d0
     move.b  1(%a0),%d0
@@ -581,7 +604,7 @@ rj_ng:
 |   (cl_postmask, the cl_post bit above); a Part: cl_pmark (rj_pshare here, or cl_postpart).
 |   A track reload copies its record + trailer of P here too: the UI tail's copy is of the pattern
 |   playing THEN, which a pattern change in between makes another one.
-    move.b  PLAY_BANK,%d0
+    move.b  rq_jbk,%d0
     cmp.b   UI_BANK,%d0
     bne.b   rj_lv
     move.l  %d5,%d0
@@ -626,6 +649,13 @@ rj_lv:
     bsr.w   rq_ncopy                    | ... a pattern you are not on: they land with it now
     moveq   #1,%d0
 rj_exit:
+    tst.l   %d0                         | CL42: a failed read (never saved, a bad file) reaches no cl_rldone (doneFn's
+    bpl.b   rj_ex2                      | success path): not busy any more, or every later chord waits on it for
+    clr.b   rq_busy                     | good (rr_nq) -- and no toast of ours (stock's says why); CL43: the
+    clr.b   rq_msg                      | target is still unread, so the next chord for it reads it again
+    moveq   #1,%d1
+    move.b  %d1,rq_need
+rj_ex2:
     move.w  rq_cksum,%d1
     move.w  %d1,RL_CKSUM
     movem.l (%sp),%d2-%d7/%a2-%a5
@@ -661,7 +691,7 @@ rn2_c:
     bne.b   rn2_c
     pea     cl_s_strd
     moveq   #0,%d0
-    move.b  PLAY_BANK,%d0
+    move.b  rq_jbk,%d0
     move.l  %d0,-(%sp)
     pea     rq_path
     jsr     cl_cpath
@@ -773,7 +803,7 @@ rs_ok:
 rs_out:
     rts
 
-| cl_rlopen -> d0 = FOPEN's result: "<project>/bankNN.strd" of the playing bank, read-only
+| cl_rlopen -> d0 = FOPEN's result: "<project>/bankNN.strd" of the job's bank (rq_jbk), read-only
 cl_rlopen:
     lea     -8(%sp),%sp
     movem.l %d2/%a2,(%sp)
@@ -782,7 +812,7 @@ cl_rlopen:
     jsr     PROJDIR
     addq.l  #8,%sp
     moveq   #0,%d1
-    move.b  PLAY_BANK,%d1
+    move.b  rq_jbk,%d1
     addq.l  #1,%d1
     move.l  %d1,-(%sp)
     move.l  %d0,-(%sp)
@@ -879,6 +909,16 @@ rd_show:
     pea     rq_lines
     jsr     cl_toast2
     addq.l  #8,%sp
+    moveq   #0,%d0                      | CL45 (the user, 2026-11-23): a track's "Tn LOAD: PROJ TRK SEQ / FULL"
+    move.b  rq_hk,%d0                   | while this toast is up
+    beq.b   rs_nh
+    moveq   #0,%d1
+    move.b  rq_t,%d1
+    jsr     cl_hsetb
+    tst.b   cl_open
+    beq.b   rs_nh
+    jmp     cl_dreq
+rs_nh:
     rts
 rd_done:
     jmp     RL_DONEEPI                  | skip the whole-bank reload
@@ -911,6 +951,9 @@ cl_rqarm:
     move.b  rq_pat,%d0
     cmp.b   ACT_PAT,%d0
     bne.w   qa_out                      | no longer the pattern you are on (a stock change landed): drop it
+    move.b  rq_tgt,%d0                  | CL41: bank and all
+    cmp.b   PLAY_BANK,%d0
+    bne.w   qa_out
 .ifdef BP_CLASH
     move.l  #0xff,%d0                   | KYOTI V1.8BC: refused whole when a core would hold two BLKPYRAMD
     move.l  #0x10000+(SRC_CARD<<8),%d1  | (cl_bpgate)
@@ -918,6 +961,7 @@ cl_rqarm:
     tst.l   %d0
     bne.b   qa_bpg
     clr.b   rq_msg                      | refused: no card toast either
+    jsr     cl_hdrop                    | CL47: and the one shown at the press goes, with its header
     bra.b   qa_bpp
 qa_bpg:
 .endif
@@ -940,6 +984,7 @@ qa_trk:
     clr.w   rq_seqm
     clr.w   rq_fullm
     clr.b   rq_msg                      | refused: no card toast either
+    jsr     cl_hdrop                    | CL47: and the one shown at the press goes, with its header
     bra.w   qa_out
 qa_bpok:
 .endif
@@ -992,6 +1037,7 @@ cl_rqarm1:
     tst.l   %d0
     bne.b   q1_bpok
     clr.b   rq_msg                      | refused: no card toast either
+    jsr     cl_hdrop                    | CL47: and the one shown at the press goes, with its header
     bra.w   q1_out
 q1_bpok:
 .endif
@@ -1018,7 +1064,7 @@ q1_run:
     lea     cl_cue,%a0
     move.b  (%a0,%d0.l),%d0
     cmpi.b  #SRC_CARD,%d0
-    bne.b   q1_out                      | nothing to land (it already plays)
+    bne.b   q1_same                     | nothing to land (it already plays)
     jsr     cl_live
     adda.l  #TRAILER,%a0
     tst.b   T_SMODE(%a0)
@@ -1038,6 +1084,10 @@ q1_rate:
     move.b  %d0,cl_togr
     move.b  #SRC_CARD,%d0
     move.b  %d0,cl_togs
+    bra.b   q1_out
+q1_same:
+    moveq   #1,%d0                      | CL43 (the user): already as on the card -- its toast all the same, as
+    move.b  %d0,cl_ctoast               | stopped (no "unchanged" wording)
 q1_out:
     move.l  (%sp)+,%d2
     rts
@@ -1064,7 +1114,7 @@ dc_n:
 | rq_ncopy (worker, a pattern you are not on): its staged names -> its names now.
 rq_ncopy:
     moveq   #0,%d0
-    move.b  PLAY_BANK,%d0
+    move.b  rq_jbk,%d0
     lsl.l   #4,%d0
     add.l   %d5,%d0
     lsl.l   #4,%d0
@@ -1227,8 +1277,10 @@ rq_lines:   .long 0, 0
 rq_ndir:    .long 0                     | direct (seek) reloads done: gates X / L read it
 rq_seq:     .byte 0                     | the fallback's second open is running
 rq_kind:    .byte 0                     | 0 idle, 1 TRK SEQ, 2 TRK FULL, 3 PTN
+rq_jbk:     .byte 0                     | CL41: the bank the running / last read serves (rq_tgt's at its start)
 rq_pat:     .byte 0
 rq_t:       .byte 0
+rq_hk:      .byte 0                     | CL45: the request's execution header (HOV_*; 0 a pattern)
 rq_nl:      .byte 0
 rq_msg:     .byte 0                     | armed before the post
 rq_own:     .byte 0                     | the job succeeded: doneFn's next success is ours

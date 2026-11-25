@@ -149,6 +149,14 @@ DETOURS = [  # (site, symbol, stock bytes, length[, opcode: jmp unless given])
     (0x40083f04, "cl_act5", "71b980000000", 6, "4eb9"),
     (0x40083f24, "cl_act5", "71b980000000", 6, "4eb9"),
     (0x40083f36, "cl_act5", "71b980000000", 6, "4eb9"),
+    # CL39c (the user, 2026-11-20): [PTN] in Clyps acts on the bank Clyps shows -- stock's [PTN] + trig
+    # 0x40056b2c's bank, and its [PTN] LED painter 0x400353d4's bank / playing pattern (cl_ptnbank, scope §1.39)
+    (0x40056b60, "cl_ptnpick", "71b9100b14ce", 6, "4eb9"),   # ... -> 0x400a1030(bank, N); CL40: its flash
+    (0x40035522, "cl_ptnbank", "71b9100b14ce", 6, "4eb9"),   # ... -> PAT_HASDATA(N, bank): green
+    (0x400354ae, "cl_ptnbank2", "71b980000002", 6, "4eb9"),  # mvzb 0x80000002,d0: a cue in it: yellow
+    (0x40035432, "cl_ptnpat", "71b9100b14d0", 6, "4eb9"),    # mvzb 0x100b14d0,d0: the red one (16: none)
+    # CL44 (the user, 2026-11-22): stock's [BANK] + bank trig + pattern trig inside Clyps -- the view pages to that bank
+    (0x4007b37c, "cl_bkpick", "4eb9400a1030", 6, "4eb9"),    # jsr 0x400a1030(bank, pattern) in the [BANK] layer
 ]
 
 
