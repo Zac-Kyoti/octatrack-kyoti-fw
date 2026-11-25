@@ -1275,6 +1275,28 @@ tm_key:
 tm_none:
     moveq   #0,%d0
     rts
+
+| ev_in_use (Modwerk HOOKS.md): unsigned mm_in_use(void), asked from the base's UI tick.
+| MUTE MODE OT is stock: every hook above passes through to stock there, and `pre` only
+| clears UNHELD and SHADOW (one word) each frame. So in OT the module rests: the base
+| leaves mm_voice_bind out of the voice bind and puts stock's bytes back under the five
+| detours runtime.json marks "rests", so the frame and the trig paths never enter this
+| code. This answer does `pre`'s OT clear itself, once a UI tick, so a track still muted
+| when MUTE MODE leaves OT is held exactly as before (p1_key / p1_hold) when the module
+| wakes at the next tick. Any other MUTE MODE (OTFX, OTFX-T, DT-T, or an unknown value,
+| which `pre` treats as active) is in use. C convention: %d0 only.
+    .global mm_in_use
+mm_in_use:
+    .ifndef ALWAYS_ON
+    tst.l   GATE
+    bne.s   iu_on
+    clr.w   (UNHELD).l                  | `pre`'s OT path: every track held, SHADOW 0
+    moveq   #0,%d0
+    rts
+iu_on:
+    .endif
+    moveq   #1,%d0
+    rts
     .endif
 
 | ============================ hook 11: 0x4000d0ba (THE REL_STATE RACE, FIXED SAFELY) ====

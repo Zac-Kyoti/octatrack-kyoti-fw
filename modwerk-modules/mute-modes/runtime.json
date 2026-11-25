@@ -3,7 +3,9 @@
  "subscribe": [
   {"event": "ev_voice_bind", "fn": "mm_voice_bind", "order": 50, "replaces": "fresh_bind"},
   {"event": "ev_trig_muted", "fn": "mm_trig_muted", "order": 50},
-  {"event": "module_tick", "fn": "mm_restore"}
+  {"event": "module_tick", "fn": "mm_restore"},
+  {"event": "ev_in_use", "fn": "mm_in_use", "order": 50}
  ],
- "raise": ["ev_mute_keep"]
+ "raise": ["ev_mute_keep"],
+ "rests": ["0x40004dc6", "0x40006844", "0x4000f4dc", "0x4000d498", "0x40004c72"]
 }
