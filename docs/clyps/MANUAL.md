@@ -26,7 +26,7 @@ Clyps brings two things to the Octatrack: a **clip launcher** in the style of Ab
 complete **reload suite** around it. Clyps is best learned using a project that contains lots of patterns and track
 sequences. The factory OT DEMO project is a good starting point for your explorations.
 
-**The clip launcher.** In Session view each track is a column of clips, and you can launch any clip on any track
+**The clip launcher.** In Live's session view each track is a column of clips, and you can launch any clip on any track
 while everything else keeps playing. Clyps reads an Octatrack bank the same way. Each of the 16 patterns holds a
 sequence for every track, and each of those sequences is a clip. Pick a track, pick a pattern, and that track
 plays the other pattern's sequence on the pattern you're on. The other tracks don't change.
