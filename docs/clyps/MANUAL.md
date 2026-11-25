@@ -66,7 +66,8 @@ other tracks stay as they were.
 
 **The active track.** Everything happens to the active track (the one picked with the TRACK keys), or to every
 member of a Multi. The Clyps view shows one column of the library: the sequences available to the active track; one from each of
-the 16 pattern slots of the currently active bank.
+the 16 patterns in the currently active bank. Sequences can be loaded from any bank, and the Clyps view will be
+updated accordingly (a total of 256 sequences are available per track per project).
 
 **SEQ or FULL.** A load comes in two sizes:
 - **SEQ** brings the sequence. Your track keeps its own sound.
