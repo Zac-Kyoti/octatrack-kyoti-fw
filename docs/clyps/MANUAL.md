@@ -183,7 +183,7 @@ While Clyps is open, the trig LEDs show the active track's 16 slots in the shown
 | flashing yellow | a load is cued for that slot (the active track's) and waiting to land |
 | solid yellow | the arrows' slot, while the arrows are shown (the active pattern's LED included) |
 | red / yellow flicker | the box's slot: where the track's sequence came from |
-| red | the active pattern (solid red when the track plays its own sequence) |
+| solid red | the active pattern |
 | bright green | the slot has trigs |
 | dim green | the slot has only locks or trigless trigs |
 | off | empty |
