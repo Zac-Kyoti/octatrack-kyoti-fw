@@ -147,7 +147,9 @@ highlighted, changed (x), its sequence loaded from A05. (4) Slot 3, named BASS1,
     - While [PTN] + [BANK] is held: `PTN LOAD: ORIG PTN`. While [PTN] alone is held: `PTN LOAD: CURR PTN`.
     - While [BANK] is held, the bank gets a box.
   - After an action, the header briefly names it, for as long as its message shows (about a second when there's
-    no message); the next action, or a [PTN], [BANK], [FUNC] or [CUE] press, ends it early:
+    no message). If you did the action with keys held ([PTN], [BANK], [FUNC], [CUE], or the TRACK keys of a temp
+    save or reload), letting go of them ends the header and closes the message at once. The next action, or a
+    [PTN], [BANK], [FUNC] or [CUE] press, also ends it early:
     `PTN LOAD: CURR PTN` (a [BANK] pattern pick), `PTN LOAD: PROJ PTN` (a card pattern reload),
     `T1 LOAD: TEMP TRK` (several tracks: `MULTI LOAD: TEMP TRKS`), `T1 LOAD: PROJ TRK SEQ` / `PROJ TRK FULL`
     (card track reloads), `ORIG TRK SEQ` / `ORIG TRK FULL` (ORIG).
@@ -162,7 +164,7 @@ highlighted, changed (x), its sequence loaded from A05. (4) Slot 3, named BASS1,
     - **box**: the slot the active track's sequence was loaded from. There's no box when the track plays its own
     pattern's sequence; the highlight stands for it. Each pattern keeps its own box for each track: leave a pattern
     and come back, and its box is where you left it. ORIG, a temp reload or a card reload of that track removes
-    that pattern's box; a card reload of the whole pattern removes all its boxes;
+    that pattern's box; a card reload of the whole pattern removes all its boxes, and a project load or power-off removes every box;
   - **arrows**: your aim (§6);
   - **a blinking slot**: while a load or a pattern change waits to land, that slot's text (name, summary or `---`)
     blinks; its number and x stay steady. You see the active track's cue and any pending pattern change; each
@@ -281,7 +283,8 @@ Copy/paste, CLEAR, and Clyps' own loads and card reloads never change the origin
 - **Hold TRACK, press [NO]:** put the temp save back (`TEMP TRK RELOADED`; several tracks: `TEMP TRKS RELOADED`), sequence
   and sound, legato. The
   slot then reads `SAVED TRK`.
-- Both flash the active pattern's slot. They work inside and outside Clyps. They take over stock's ARM / DISARM REC TRK shortcut, which still works
+- Both flash the active pattern's slot. The message (or `SAVE FIRST!`) stays while you hold the TRACK key and goes
+  when you let go. They work inside and outside Clyps. They take over stock's ARM / DISARM REC TRK shortcut, which still works
   while the Recording Setup menu is open.
 - There's one temp save per track: 8 audio and 8 MIDI. Every originals retake (§5.3) refills each one with what
   that track plays at that moment, so there's always something to go back to.
@@ -300,10 +303,12 @@ These read the project as last saved with SAVE PROJECT or SAVE BANK.
 Notes:
 - They are available inside Clyps only. The TRACK you press is reloaded, on the pattern you're on, whichever track
   is active and whichever bank you're looking at.
-- Every reload confirms with its message and a flash, even when nothing differed from the card. A reload of
-  another pattern blinks that slot's text until the change lands.
-- A bank that was never saved shows stock's `THIS BANK HAS NEVER BEEN SAVED!` and nothing changes; later reloads
-  work as usual.
+- Every reload confirms with its message and a flash, even when nothing differed from the card. The message
+  appears at once, when you press the keys (the reload itself lands as described above), stays while you hold
+  [PTN] or [BANK], and goes when you let go of them. A reload of another pattern blinks that slot's text until
+  the change lands.
+- A bank that was never saved shows stock's `THIS BANK HAS NEVER BEEN SAVED!` in place of the message, and nothing
+  changes; later reloads work as usual.
 - Several track reloads pressed before a landing all land; the same track twice means the later one wins. A
   pattern reload replaces any pending track reloads.
 - Names come back from the card too.
@@ -393,7 +398,8 @@ Hold PLAYBACK, AMP, LFO, FX1 or FX2: that page replaces the Clyps view and the k
 SETUP, whichever you left it on. Release, and the Clyps view comes back exactly as it was.
 
 - A quick double tap, or [FUNC] + the page key, flips that page between page 1 and SETUP, as in stock, and the
-  choice sticks.
+  choice sticks. Keep [FUNC] held and press the page key again to flip it back; Clyps comes back each time you let
+  go of the page key.
 - Holding two page keys shows the latest one; Clyps returns when both are released.
 - The grid keeps showing the Clyps LEDs during a peek, and a cued load still lands (its blink shows again when the
   view comes back).
