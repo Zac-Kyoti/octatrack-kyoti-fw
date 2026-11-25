@@ -40657,3 +40657,116 @@ unchanged (V1.8BC CAVE 636, ENC 96, SPRING 82, PERS1 128, PERS2 64).
   PROJ TRK FULL during the flash; Mn on the MIDI side). §5: every execution flashes its slot -- [PTN] + your own
   pattern's trig, card track reloads, temp save / reload included. §8: [BANK] + bank + pattern inside Clyps pages the
   view to that bank when you pick the pattern (the bank's trig alone changes nothing).
+
+## 2026-11-24 (`release-1119`, CLYPS) — CL45 (written up 2026-11-24; built 2026-11-23): same-data executions hide the arrows; headers last as the toast; TEMP TRKS; PRJ PTN / ORIG PTN / CURR PTN (test images CLB12, CLB13; WIP, NOT promoted)
+
+- **The user on KY18BCCLBB (CLB11, everything else passed):** (1) arrows aimed at the highlight / the select box hide
+  (and their yellow LED goes) when an execution fires onto / from that slot again, though nothing changes data-wise;
+  (2) several TRACK keys: "MULTI LOAD: TEMP TRKS", "TEMP TRKS RELOADED" / "TEMP TRKS SAVED"; (3) an execution's header
+  lasts exactly as long as its toast (no toast: a toast's time; a newer header cuts it short); "PTN LOAD: PRJ PTN" for
+  [PTN]+[BANK]+trig; "ORIG PTN+PRT" -> "ORIG PTN", "CURR PTN+PRT" -> "CURR PTN"; a cue box above / below the select
+  box must blink its whole outline. Scope §1.45.
+- **Code:** ef8515e (1)-(3): `cl_cueload`'s same-data path runs `cl_ychk` (at once); stock's picks of your own pattern
+  `cl_xpat` -> `cl_phide`; `ty_ours` counts the held tracks (TEMP TRKS texts, 87 / 105 / 34 px); the header's life
+  `cl_hset` / `cl_hsetb` / `cl_hovtick` (bound to stock's toast window 0x460d1e70 / countdown 0x460d1e6c, else TOAST_DUR
+  48 UI ticks; ended by `cl_hkeys` [PTN] / [BANK] / [FUNC] / [CUE], a new header or flash, close / open; the UI tick
+  only asks for the redraw). 98a1f60: the cue frames drawn last, inverted (CLB12) -- the user: "not quite right. Go back
+  to how it was before" -> 12e1b3a: the CL44b drawing again (CLB13; its mainos = ef8515e's build).
+- **Net code lines (patch_clyps.s, comments and labels out), CL44b (53a13a2) -> CL45 (12e1b3a):** +141 / -36, net +105.
+- **Gates (diag_clyps_lock.py, out/rc3clyps/gates8):** new ops TSm / TRm, TX<k>, TT, Hw<k>, HD / HDn / HD0, HP, H0, QB;
+  `a-` wants the LED not yellow, `r` checks ORIG PTN / PRJ PTN. CLB12 partial: x12 b/c/s 8, y12 b/c/s 5, u12s 6 PASS
+  (the other jobs were stopped when CLB12 was reverted). CLB13: hAc13 14 PASS; diag_clyps_ui on V1.8C ABCDY, J, FQ, L,
+  XOW, VZI, T, H, 8, 9, MU (JAM2), NPK PASS, ABCDY V1.8BC / CLYPS PASS; the rest of the CLB13 lock set, EGRS and the
+  quant runs did not finish (the session was cut off) -- re-run on CLB14 (CL46, next entry) and CLB15 (CL47).
+- **Images (KYOTI_ALLOW_WIP=1, out/rc3clyps/wt8; copies in CLB12, CLB13; NOT promoted):** CLB12 KY18BCCLBC (98a1f60)
+  syx da094eb0..., mainos 5e673d71... -- FLASHED by the user (verdict above); KY18C syx 65c08faf..., CLYPS syx
+  e6c87daa.... CLB13 KY18BCCLBD (12e1b3a) syx 44a50f4a..., mainos c94468ef...; KY18C syx b28f57f8... (mainos
+  19eaae9b...); CLYPS syx 761cad2e... (mainos 3e8be446...). Not flashed; superseded by CLB14.
+
+## 2026-11-24 (`release-1119`, CLYPS) — CL46 (written up 2026-11-24; built 2026-11-23): a pending cue blinks its slot's text, not a frame (test images CLB14; WIP, NOT promoted)
+
+- **The author (via the coordinator, 2026-11-23):** remove the blinking cue box (CL40's `cd_cbox`) for track and stock
+  pattern cues, and the select box's blink for a cue on its own slot: a cue between the highlight and the select box
+  showed no visible change (the shared border rows, CL45). Instead the cued slot's TEXT (name / summary / `---`) blinks
+  in the old phase (`cl_cph`, 20 on / 10 off); the number and the "x" stay; plain, under the select box or inside the
+  highlight (inverted there); the execute flash first, the blink while pending, none after a landing or a cancel. The
+  active track's cue (per track already: `cl_cue[16]`) and stock's pattern cues, in the bank viewed. Scope §1.46.
+- **Code (0f5a511, patch_clyps.s only):** `cl_draw` takes `cl_cq` (`cl_cueslot`) and `cl_pq` (`cl_pcue`) before the
+  cell loop; `cd_sum` skips the text (`cd_thide` -> `cd_trect`) in the off phase for either cue unless the flash runs
+  on that cell; removed `cd_cbox`, `cl_cqd`, `cl_pbq`, the select box's blink and the arrows' notch on a cue frame;
+  `cl_cblink`: nothing cued = the on phase, a track cue other than the one drawn asks for a redraw (`cl_dreq`; only the
+  sys task draws). Net code lines 12e1b3a -> 0f5a511: +27 / -57, net -30.
+- **Gates (diag_clyps_lock.py, a59e72d: per draw the texts left out; `QT` / `QTn` / `QT0`, `G<tracks>`; q / r / t /
+  QB / qsettled in their CL46 form; out/rc3clyps/gates9):** diag_clyps_ui V1.8C ABCDY, J, FQ, L, XOW, VZI, T, 8, 9, H,
+  MU (JAM2), NPK, EGRS and ABCDY on V1.8BC / CLYPS PASS; diag_clyps_quant DJ off / on PASS; smoke smk14 15 PASS; the
+  lock set 94 of 114 + 15 of 24 jobs PASS. The FAILs, triaged in CL47 (scope §1.47): `r`'s PRJ PTN ended at the chord's
+  release (rx, c14a, c14d, m14j, n14a, b14a, s14a, b14r, s14r) and hE (the card toast closed by DIRECT JUMP's [PTN]
+  release, its header unbound) were firmware bugs; qB, tC, tF, tG were gate assumptions (a cue landing before or
+  inside the sample window; ORIG is legato); rz* the expected injected failure, line for line as CLB9 / CLB11.
+- **Images (KYOTI_ALLOW_WIP=1, out/rc3clyps/wt9 at 0f5a511; copies in out/rc3clyps/CLB14; NOT promoted):**
+  KY18BCCLB14 ('KY18BCCLBE') syx b5ac457b..., mainos 7ddd065c... -- FLASHED by the author (CL47's list: items 1-3 and
+  5-9 and every item still open from CL45 passed); KY18C CLBE syx 760e4edd..., mainos 55090d90...; CLYPS CLBE syx
+  4fe82361..., mainos 2695c184.... Script out/rc3clyps/build_clb14.sh.
+- **Manual:** the CL39-CL46 change list is in out/rc3clyps/cl46_docs/manual_changes.md (docs/clyps/MANUAL.md not
+  edited); CL46: a cued slot's text blinks, the arrows never blink.
+
+## 2026-11-24 (`release-1119`, CLYPS) — CL47 / CL47b / CL47c: the chord hides nothing; the highlight alone is solid red; a select box per track and pattern; toasts and headers end with their chord; PROJ PTN; [FUNC] + page while peeking; the CL46 gate triage (test images CLB15-CLB17; KY18BCCLBH FLASHED, ALL PASSED; promotion ordered)
+
+- **The author on KY18BCCLBE (CLB14):** (A) "When holding PTN + BANK, the arrows and the selection box (if visible) are
+  being hidden upon the addition of the BANK button to the chord ... Let's have it not do that." (B) "When actions
+  have produced a view where there is a single highlighted box and no solid selection box, the led on the grid should
+  never be the blinking red/yellow. It should be the solid red." (C) "How can I even test this?" (the text blink
+  inside the highlight). (D) the select box shown after leaving and returning to a pattern only for the track's most
+  recent load -- "preferred ... any track/pattern the user navigates to will show its own individual selection box, on
+  whatever slot was last loaded to that track". Scope §1.47.
+- **CL47 (dc02065):** A: `cl_draw` no longer skips the select box and the arrows while the chord is held (arrow keys
+  still do nothing, CL43). B: `cl_blink` skips the red / yellow flash when `cl_srccode` is the playing pattern (the
+  highlight alone): solid red; the select box's flash, the arrows' solid yellow and the cued yellow blink unchanged.
+  D: `cl_bxt` (256 patterns x 16 tracks, 1 B: `(bank << 4 | slot) ^ P`, 0 = none) written beside `cl_home` / `cl_src`
+  (`cl_bxrec` from `cl_provset` / `cl_apply`, `cl_hoff` for ORIG / a card landing / the own slot), a card pattern reload
+  clears its row, a project load all; `cl_playt` reads it when the track's last load was homed elsewhere. Cost 4,096 B
+  of DRAM data (+4,312 raw, +171 packed, +1 arena page), about 68 net code lines. C: no change -- every own-slot cue is
+  a legato reload and lands at the track's next step, inside its own execute flash; the blink shows only when a step
+  lasts longer than 0.83 s (scales below 1x at slow tempos).
+- **The CL46 triage (gates9; table in §1.47):** firmware -- `r`'s "PTN LOAD: PRJ PTN" ended at the chord's release
+  (`cl_hkeys` now returns the keys, not `cl_hstate`), `cl_hset` wrote `cl_hov` before `cl_hovh` (a sys-task draw in
+  between ended it), the card toast closed by DIRECT JUMP's [PTN] release with an unbound header (hE); gate -- qB / tC
+  / tF / tG (cue timing, ORIG is legato, an @m1 wait that timed out); rz* expected.
+- **CL47b (9ac6f01), the user on KY18BCCLBF (CLB15: everything passed, the per-pattern select box included, except the
+  card toasts now appearing at [PTN]'s release):** "I want one toast, one header change, same duration, and both on
+  press", then "Allow all toasts and header text changes to be dismissed upon release of the various chords that
+  initiate them." CL47's deferral reverted; a card reload's toast is shown by the press's own UI tail (`cl_ctoast`,
+  once), its header bound whichever runs first (`cl_hsetq`); `cl_hrel` (the UI tail, every message): a key of the
+  chord held at the execution let go ends the header and closes its toast at the next UI tick; TRACK keys count as
+  the chord for the temp actions (`HK_TRK`, `HOV_TOAST` for temp save / SAVE FIRST!), not for [PTN] / [BANK] + TRACK
+  (the trigger); a single key (a trig, [YES]) keeps the timed header. Per-initiator table in §1.47.
+- **CL47c (f847ace), the user on KY18BCCLBG (everything else passed):** "PRJ PTN" -> "PROJ PTN" (30 px, box to x 70,
+  BNK's at 88); [FUNC] held + a page key pressed repeatedly in Clyps only peeked after the first return -- the return
+  re-pushes `cl_layer` above the SETUP opened in the peek (CL38) and the held [FUNC]'s sub-map no longer reached
+  `cl_k_fpeek`; `cl_k_peek` now sends a press with stock's FUNC_HELD (0x46c7dd26) to `kqf_press` (SETUP <-> page 1 every
+  press, as stock; emulator FP23: CLB16 [1, 0, 0, 0], CLB17 [1, 0, 1, 0], stock [1, 0, 1, 0]). SAVE FIRST! is
+  unreachable in practice (temp saves are refilled at power-on, SAVE PROJECT / BANK and loads): left out of test lists.
+- **Hardware:** KY18BCCLBF (CLB15) flashed: all passed except the card toasts at [PTN]'s release (-> CL47b);
+  KY18BCCLBG (CLB16) flashed: all passed except the PRJ PTN wording and [FUNC] + page (-> CL47c); **KY18BCCLBH (CLB17)
+  flashed 2026-11-24: ALL TESTS PASSED.** The user ordered the promotion to FINAL of CLYPS, BLACKPYRAMIDS_303 and KYOTI
+  (a separate step: pins, rebase, push).
+- **Net code lines (comments and labels out), a59e72d -> f847ace:** patch_clyps.s +146 / -35 (net +111),
+  clyps_reload.s +16 / -5 (net +11); total +162 / -40, net +122 -- A -3, B +6, D about +68, the triage fixes +8
+  (`cl_hkeys` +6, `cl_hset` +2), CL47b about +34 net (the release rule, the press toast, `cl_hsetq`, `HOV_TOAST`,
+  the refusal drop; CL47's +7 deferral reverted), CL47c +2.
+- **Gates (emulator, out/rc3clyps/gates10):** CLB15 smokes smkE15 17/17 (A, B, D there and back), smkR15b 21/21,
+  smkH15b 11/11, then its full set until replaced: 10 lock jobs and every diag_clyps_ui set PASS. CLB16 smokes s16a-f
+  PASS; its full set stopped for CLB17 after the UI sets (PASS) and 4 lock jobs (PASS). CLB17 smoke: FP23 / FP25, r5
+  23/23, Ru / TR / temp held 14/14, diag_clyps_ui ABCDY + 8 (V1.8BC) PASS; the full set (all of it on the flashed
+  V1.8BC image, an image-specific subset on V1.8C / CLYPS -- the user's trimmed plan) is running: results in the next
+  entry. (diag_clyps_ui C run alone fails one post count inside the double-tap window on CLB16 and CLB17 alike -- the
+  set's order matters; C inside ABCDY passes.)
+- **Images (KYOTI_ALLOW_WIP=1, out/rc3clyps/wt10; script out/rc3clyps/build_clb15.sh, V=CLBx N=clbNN; NOT promoted):**
+  CLB15 (dc02065) KY18BCCLB15 ('KY18BCCLBF') syx b41cde72..., mainos 207d07cc... -- FLASHED by the user (verdict
+  above); KY18C CLBF syx 10985ea9..., CLYPS CLBF syx 3c187dec.... CLB16 (9ac6f01) KY18BCCLB16 ('KY18BCCLBG') syx
+  3b05747c..., mainos 5b0ba6f9... -- FLASHED (above); KY18C CLBG syx a3be5fd9..., CLYPS CLBG syx 5e9830ff.... CLB17
+  (f847ace) KY18BCCLB17 ('KY18BCCLBH') syx 26eceedd..., mainos 0a8aad47... -- FLASHED, all passed; KY18C CLBH syx
+  72fdc2a5..., mainos 94fe94c2...; CLYPS CLBH syx c1ad2d22..., mainos eb3cc85b....
+- **Manual:** addendum in out/rc3clyps/cl46_docs/manual_changes.md (docs/clyps/MANUAL.md not edited): the
+  per-pattern box, the solid red highlight, the chord keeping the marks, toasts and headers at the press and ending
+  with their chord, PROJ PTN, [FUNC] + page flipping SETUP on every press while peeking.
