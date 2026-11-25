@@ -176,7 +176,7 @@ highlighted, changed (x), its sequence loaded from A05. (4) Slot 3, named BASS1,
 
 ### The grid
 
-While Clyps is open, the trig LEDs show the active track's 16 slots in the shown bank, in this order of priority:
+While Clyps is open, the trig LEDs show the active track's 16 slots in the shown bank:
 
 | LED | Meaning |
 |---|---|
