@@ -8,7 +8,7 @@ include Direct Jump Kyoti.*
 2. [The big ideas](#2-the-big-ideas)
 3. [The controls' grammar](#3-the-controls-grammar)
 4. [Opening Clyps and reading the view](#4-opening-clyps-and-reading-the-view)
-5. [The loads, as one family](#5-the-loads-as-one-family)
+5. [Load types](#5-load-types)
 6. [Aiming: the arrows and the box](#6-aiming-the-arrows-and-the-box)
 7. [Multi: several tracks at once](#7-multi-several-tracks-at-once)
 8. [Banks, patterns and Direct Jump Kyoti](#8-banks-patterns-and-direct-jump-kyoti)
@@ -192,7 +192,7 @@ looking at, so you can pick a pattern. While [BANK] alone is held you see stock'
 Multi, every member's TRACK LED shows the active colours. The active member's tab is filled and the other
 members' tabs are outlined.
 
-## 5. The loads, as one family
+## 5. Load types
 
 Every load is one of four kinds, set apart by where the material comes from:
 
