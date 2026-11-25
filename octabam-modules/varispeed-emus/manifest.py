@@ -32,7 +32,10 @@ choosers' YES, and the slot columns of the SRC menu's and the audio editor's mac
 choosers (a machine change by a slot pick names that track). The
 STATIC and FLEX descriptors: TSTR count 4 -> 5 with stock's 5-position select and this
 unit's formatter; PTCH's widget and encoder step; TSNS's widget. The domain swap keeps
-PTCH / TSNS of each machine in NEIGHBOR's '---' bytes of the same track (claimed below).
+PTCH / TSNS of each machine, and the QUAN / EMUS it remembers off VARI, in four bytes of the
+same track's record that stock never edits or shows (VRG3: THRU page 1 slots 2 / 5, THRU's and
+NEIGHBOR's slot bytes; claimed below). An older build's park in NEIGHBOR's '---' bytes is moved
+in at first sight and cleared there, on a track whose NEIGHBOR bytes hold nothing else.
 
 DSP. The S950 / SP12 kernel (vem_dsp.asm, a copy of the hardware-proven one), two hooks:
 zqrp at the voice kernel's prologue (A P:0x40b, B P:0x20e), zqboot at each payload's
@@ -74,7 +77,7 @@ U = "vem_cf"
 LINKED = (
     Linked(U, os.path.join(_HERE, "varispeed_emus.s"),
            reference=(0x400d6500,
-                      "77fe72cdc550184353ff715c4e552135fee6358722b154fc762323881ec8ed4d")),
+                      "25de0d630af0d7e7c338184920cc3253d6b6ccafd13d8704ad93b53f94a4cffb")),
 )
 
 _X = bytes.fromhex
@@ -138,13 +141,14 @@ KEEPS = (
     Keep(0x40046b9e, _u32(0x400be316), "the 5-position select's stock icons"),
 )
 
-# NEIGHBOR's '---' bytes of every track, in the Part window (offsets from 0x8ed80): the
-# parks of STATIC's and FLEX's PTCH (page 1 slots 0 / 5) and TSNS (page 2 slots 5 / 3).
+# VRG3: the four bytes of every track this module keeps, in the Part window (offsets from 0x8ed80):
+# THRU page 1 slots 2 / 5 ('---', never editable: STATIC's / FLEX's PTCH park) and THRU's / NEIGHBOR's
+# slot bytes (no slot list, ignored on a THRU / NEIGHBOR trig: STATIC's / FLEX's side byte)
 _PARKS = tuple(
-    (base + 30 * t + slot, 1, f"T{t + 1} {what}")
+    (base + k * t + slot, 1, f"T{t + 1} {what}")
     for t in range(8)
-    for base, slot, what in ((0x2a, 18, "STATIC PTCH park"), (0x2a, 23, "FLEX PTCH park"),
-                             (0x1da, 23, "STATIC TSNS park"), (0x1da, 21, "FLEX TSNS park")))
+    for base, k, slot, what in ((0x2a, 30, 14, "STATIC PTCH park"), (0x2a, 30, 17, "FLEX PTCH park"),
+                                (0x2ca, 5, 2, "STATIC side byte"), (0x2ca, 5, 3, "FLEX side byte")))
 
 PLACES = ("DRAM", "CAVE")
 

@@ -18,7 +18,13 @@ slot picked from a slot list that changes its machine (VEM10, "6b, option B exte
 safety net -- run in the UI task's message loop when a signature of the estimate's inputs
 changes -- steps just enough tracks to OT however else a core got over (Part change,
 reload, loads, machine, paste), in its order; the toast MAX DSP: EMU LIMIT is raised from
-that loop only.
+that loop only. VEM11 (2026-11-18, VEMG2): a sequencer Part switch is priced as the TRANSITION
+it plays -- each track keeps the old Part's FX, engine and speed until its own first trig in
+the new Part; a track sure to trig on the new pattern's first step switches at once -- before
+the switch; over the budget, carried notes are clamped to OT first (temporary), the new Part's
+EMUS stepped to OT only if that is not enough. Nothing is written until the switch: the frame
+hook applies the decisions on the real switch frame (APPLIED_B / APPLIED_P), the UI task then
+commits the step-downs to the Part and raises the toast; a cancelled cue leaves nothing.
 Spec: reference/handoffs/VARISPEED_SPEC.md (clean-room); facts:
 VARISPEED_SCOPE.md + VARISPEED_SCOPE_EMUS.md; this build:
 reference/handoffs/VARISPEED_IMPL.md.
@@ -27,7 +33,13 @@ reference/handoffs/VARISPEED_IMPL.md.
             one unit linked at the classic cave's proven start (0x400d6500), 24 detours,
             12 descriptor pokes; the sites, pokes and splice it shares with VARISPEED
             (tools/build_varispeed.py, the same source with VEM_EMUS = 0) are in
-            tools/varispeed_buildlib.py.
+            tools/varispeed_buildlib.py. VEM11: the guard code only the UI task runs (the
+            net's signature, the transition pricing) is the source's .vemui section
+            (`as --defsym VEM_UI_SECTION=1`), linked as a DRAM unit at the arena base and
+            carried by tools/dram/'s loader (MKI-proven, reference/kb/caves.md §5): the
+            classic cave has no room for it. The frame path stays in the cave. octabam
+            assembles the file without the symbol: one unit, as before (its manifest's
+            reference is that link).
   DSP:      the hardware-proven S950/SP12 kernel (tools/varispeed_emus_dsp.asm via
             tools/varispeed_emus_dsp_src.py) in SPRING REVERB's P module and X data, its voice
             and boot hooks, SPRING removed from both FX choosers -- the old builder's DSP
@@ -38,13 +50,15 @@ reference/handoffs/VARISPEED_IMPL.md.
     out/OCTATRACK_VARISPEED_EMUS.bin                CF card
     out/elek_varispeed_emus.bin                     the EFT container (make_bin's input)
     out/varispeed_emus_syms.json                    unit symbols, hooks, pokes (the tests read it)
+    out/varispeed_emus_dram.bin                     the DRAM unit's bytes (feature_image.py relinks
+                                                    the bug fixes' DRAM pieces behind it)
 
 Every splice asserts the stock bytes it overwrites and that nothing branches into the
 middle of what it displaces; the cave must be zero in stock and inside the classic
 cave from 0x400d6500; no reference into 0x80006a40..0x80006abf; the unit must link to
 the same bytes for -mcpu=5407 and 54455 (octabam assembles DRAM units for 54455).
 
-Usage:  python3 tools/build_varispeed_emus.py [VERSTR]   (default 140C_VEM10)
+Usage:  python3 tools/build_varispeed_emus.py [VERSTR]   (default 140C_VEM11)
 """
 import hashlib, importlib.util, json, os, pathlib, struct, subprocess, sys
 from kyoti_status import gate, seal
@@ -52,6 +66,8 @@ from kyoti_status import gate, seal
 gate(__file__)
 
 import varispeed_buildlib as L
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "dram"))
+import dram                                    # noqa: E402  (tools/dram/dram.py)
 
 BASE = L.BASE
 HERE = L.HERE
@@ -64,8 +80,9 @@ ELEK = ROOT / "out/elek_varispeed_emus.bin"
 OUT_SYX = ROOT / "out/OCTATRACK_OS1.40C_VARISPEED_EMUS.syx"
 OUT_BIN = ROOT / "out/OCTATRACK_VARISPEED_EMUS.bin"
 SYMS_JSON = ROOT / "out/varispeed_emus_syms.json"
+DRAM_RAW = ROOT / "out/varispeed_emus_dram.bin"
 WORK = ROOT / "out/vem_build"
-VERSTR = sys.argv[1] if len(sys.argv) > 1 else "140C_VEM10"
+VERSTR = sys.argv[1] if len(sys.argv) > 1 else "140C_VEM11"
 # A TEST variant (the harness's deliberately wrong builds): VEM_VARIANT=<tag> and
 # VEM_VARIANT_SRC=<.s> build out/vem_variants/mainos_varispeed_emus_<tag>.bin from that
 # source, with every check, and no wrap. Never a flash candidate.
@@ -74,6 +91,7 @@ if VARIANT:
     SRC = pathlib.Path(os.environ["VEM_VARIANT_SRC"]).resolve()
     OUT = ROOT / f"out/vem_variants/mainos_varispeed_emus_{VARIANT}.bin"
     SYMS_JSON = ROOT / f"out/vem_variants/varispeed_emus_{VARIANT}_syms.json"
+    DRAM_RAW = ROOT / f"out/vem_variants/varispeed_emus_{VARIANT}_dram.bin"
     WORK = ROOT / f"out/vem_variants/build_{VARIANT}"
     OUT.parent.mkdir(parents=True, exist_ok=True)
 
@@ -191,6 +209,26 @@ CONTEXT.update({
     # (0x40079672, no machine write); else the machine byte written at 0x40079522
     0x400794b6: "7190b081670001b6",
     0x40079520: "79101082",
+    # ---- VEM11, the transition (NOTES 2026-11-18, emus-guard): a cue waits in PEND (bank 0x800065bf, pattern
+    # 0x800065c0) while the transport runs (0x800065b8 == 1; else the cue applies at once) ...
+    0x400a05a8: "7001b0b9800065b867000124",
+    0x400a06d6: "13c4800065bf13c5800065c0",
+    # ... the commit at the boundary copies a set PEND (-1: none) into PLAY (0x800065bd / be) ...
+    0x400a44b8: "1239800065c0710174ffb480671c7139800065bfb480671213c1800065be41f9800065bf13d0800065bd",
+    # ... and hands the UI the new pattern's Part: blob + pattern * 0x8ed8 + 0x8e57
+    0x400a4568: "7339800065be7139800065bd243c00008ed84c021800263c0009b3404c030800d28041f9400eb03641f0180113d0",
+    # the render state of track t: 0x80004898 + 40t (its +36 = the increment the engine rides in)
+    0x4000d386: "223c8000489823c1800062a4",
+    0x4000d536: "7028d1b9800062a4",
+    # VEMG2: stock's per-track pair of the Part a track's live bytes came from, 0x8000182a + t (bank)
+    # / 0x80001832 + t (part): written at the track's trig (0x80000110 + t + 0x171a / + 0x1722) ...
+    0x4000bf5a: "102f0076206f00a41140171a102f007711401722",
+    # ... and by the heavy apply for every track; the light apply (a sequencer switch) does not
+    0x40009390: "0dbc102f004a1340171a122f004b1341",
+    # the step handler: the trig word of step s at track + 0x89a + 2s, its condition (bits 6-0) the
+    # test 0x400a5164 skips the trig on; the note / trig-type masks ORed for "anything on this step"
+    0x4009d318: "203c0000048d4c070800222f0078243c0000476c4c021800d081d0af007c240006820000044d10332a01767fc6802f032f2f00802f074eb9",
+    0x4009d36e: "43f2cc08323c091a4c071800d3c141f2cc00d1c12031b80080b0b80041f2cc10d1c180b0b80041f2cc18d1c180b0b800",
 })
 
 
@@ -364,6 +402,73 @@ def dsp_install(img, touched):
 # ---- end VARISPEED_DSP_INSTALL.py ----
 
 
+def link_two(src, work, cpu):
+    """The standalone's link: .text at the classic cave, .vemui at the DRAM arena base.
+    -> (text bytes, vemui bytes, {symbol: address})."""
+    work.mkdir(parents=True, exist_ok=True)
+    o, e = work / f"vem2_{cpu}.o", work / f"vem2_{cpu}.elf"
+    L.run("m68k-elf-as", f"-mcpu={cpu}", "--defsym=VEM_UI_SECTION=1", "-I", ROOT / "tools", "-o", o, src)
+    L.run("m68k-elf-ld", "-e", "vem_frame", f"-Ttext=0x{CAVE:x}",
+          f"--section-start=.vemui=0x{dram.ARENA_BASE:x}", "-o", e, o)
+    out = []
+    for sec in (".text", ".vemui"):
+        b = work / f"vem2_{cpu}{sec}.bin"
+        L.run("m68k-elf-objcopy", "-O", "binary", "-j", sec, e, b)
+        out.append(b.read_bytes())
+    hdr = L.run("m68k-elf-objdump", "-h", e).stdout
+    for sec, at in ((".text", CAVE), (".vemui", dram.ARENA_BASE)):
+        row = [l.split() for l in hdr.splitlines() if f" {sec} " in f" {l} "]
+        if len(row) != 1 or int(row[0][3], 16) != at:
+            sys.exit(f"{sec} is not linked at 0x{at:08x}: {row}")
+    syms = {}
+    for line in L.run("m68k-elf-nm", e).stdout.splitlines():
+        f = line.split()
+        if len(f) != 3:
+            sys.exit(f"unresolved symbol in {e.name}: {line}")
+        syms[f[2]] = int(f[0], 16)
+    return out[0], out[1], syms
+
+
+def build_units(src, work):
+    """The cave unit and the DRAM unit, checked: 5407 == 54455 bytes, vem_end, the cave inside the
+    classic cave, no scratch-block reference, the clamp's identity table. -> (text, ui, syms, end)."""
+    t1, u1, s1 = link_two(src, work, "5407")
+    t2, u2, s2 = link_two(src, work, "54455")
+    if (t1, u1, s1) != (t2, u2, s2):
+        sys.exit("the units link to different bytes for -mcpu=5407 and 54455 -- refusing")
+    end = CAVE + len(t1)
+    if s1["vem_end"] != end:
+        sys.exit(f"vem_end 0x{s1['vem_end']:08x} != the cave unit's end 0x{end:08x}")
+    if end > L.CAVE_END:
+        sys.exit(f"the cave unit 0x{CAVE:08x}..0x{end:08x} runs past the classic cave (0x{L.CAVE_END:08x})")
+    for name, b in (("cave", t1), ("DRAM", u1)):
+        for i in range(0, len(b) - 3):
+            v = int.from_bytes(b[i:i + 4], "big")
+            if L.SCRATCH[0] <= v < L.SCRATCH[1]:
+                sys.exit(f"the {name} unit references 0x{v:08x} (the unreliable scratch block) at +0x{i:x}")
+    # vem_frame's clamp reads emus_idx as the DSP mode: emus_mode must stay the identity
+    m = s1["emus_mode"] - CAVE
+    if t1[m:m + 3] != bytes([0, 1, 2]):
+        sys.exit(f"emus_mode is {t1[m:m + 3].hex()}, not the identity the clamp relies on")
+    # the frame path stays in the cave: nothing vem_frame reaches may sit in the DRAM unit
+    for k in L.FRAME_PATH + ("db_tsns", "emus_idx"):
+        if not CAVE <= s1[k] < end:
+            sys.exit(f"{k} (frame path) is not in the cave unit")
+    print(f"  cave unit {len(t1)} B @ 0x{CAVE:08x}..0x{end:08x}  ({L.CAVE_END - end} B of the classic cave "
+          f"left); DRAM unit {len(u1)} B @ 0x{dram.ARENA_BASE:08x}; 5407 == 54455 bytes")
+    return t1, u1, s1, end
+
+
+def one_section(src, work):
+    """The file as octabam assembles it (no VEM_UI_SECTION: one .text), at the cave address --
+    the octabam module's reference. 5407 == 54455."""
+    b1, _ = L.link_unit(src, work / "one", "5407", CAVE, "5407")
+    b2, _ = L.link_unit(src, work / "one", "54455", CAVE, "54455")
+    if b1 != b2:
+        sys.exit("the one-section unit links to different bytes for -mcpu=5407 and 54455")
+    return b1
+
+
 def main():
     if not STOCK_SECT.exists():
         sys.exit(f"missing {STOCK_SECT} -- run ./fetch-os.sh and ./analyze.sh first")
@@ -378,14 +483,25 @@ def main():
 
     # ---- the ColdFire unit (VEM_EMUS = 1, the source's default) ----------------------
     print("=== ColdFire: varispeed_emus.s (VEM_EMUS = 1) ===")
-    blob, syms, end = L.build_unit(SRC, WORK)
+    blob, ui, syms, end = build_units(SRC, WORK)
     # ---- context bytes, detours, pokes: all asserted against stock first ------------
-    L.splice(img, blob, syms, DETOURS, POKES, CONTEXT, RETURNS)
+    L.splice(img, blob, syms, DETOURS, POKES, CONTEXT, RETURNS, ui=(dram.ARENA_BASE, ui))
 
     # ---- DSP -----------------------------------------------------------------------
     print("\n=== DSP: the S950/SP12 kernel (SPRING REVERB donor) ===")
     touched = set()
     orgs = dsp_install(img, touched)
+
+    # ---- the UI section: a DRAM unit at the arena base, behind tools/dram/'s loader ----
+    print("\n=== DRAM: the guard's UI section (.vemui) ===")
+    if len(img) != len(stock):
+        sys.exit("the image is not stock-length before the DRAM append")
+    append, rep = dram.build(ui, WORK / "dram", img)
+    img.extend(append)
+    DRAM_RAW.write_bytes(ui)
+    print(f"  {rep['raw']:,} B linked at 0x{rep['base']:08x}; {rep['pages']} arena page(s) = "
+          f"{rep['reserve_bytes']:,} B of the sample pool; loader + payload {rep['append']:,} B at "
+          f"0x{dram.LOADER_AT:08x}")
 
     OUT.write_bytes(bytes(img))
     seal(__file__, OUT)
@@ -398,11 +514,14 @@ def main():
         detours={f"0x{k:08x}": [v[1], v[2], len(v[0]) // 2] for k, v in DETOURS.items()},
         pokes={f"0x{k:08x}": [v[0], syms[v[1]] if isinstance(v[1], str) else v[1], v[2]]
                for k, v in POKES.items()},
-        dsp_orgs=orgs, mainos_sha256=sha), indent=1))
-    print(f"  octabam reference: unit linked at 0x{CAVE:08x}, {len(blob)} B, sha256 "
-          f"{hashlib.sha256(blob).hexdigest()}")
-    if not VARIANT:                      # the octabam module's REFERENCE must be this unit
-        L.check_manifest_reference(ROOT / "octabam-modules/varispeed-emus/manifest.py", blob)
+        dsp_orgs=orgs, mainos_sha256=sha,
+        dram=dict(base=rep["base"], size=len(ui), sha256=hashlib.sha256(ui).hexdigest(),
+                  raw=str(DRAM_RAW.relative_to(ROOT)), pages=rep["pages"])), indent=1))
+    one = one_section(SRC, WORK)         # the file as octabam links it: one unit
+    print(f"  octabam reference: unit linked at 0x{CAVE:08x}, {len(one)} B, sha256 "
+          f"{hashlib.sha256(one).hexdigest()}")
+    if not VARIANT:                      # the octabam module's REFERENCE must be that unit
+        L.check_manifest_reference(ROOT / "octabam-modules/varispeed-emus/manifest.py", one)
 
     # ---- wrap ------------------------------------------------------------------------
     if VARIANT:

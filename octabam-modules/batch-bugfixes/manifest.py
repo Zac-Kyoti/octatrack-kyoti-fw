@@ -13,8 +13,10 @@ three or none, and a site conflict on any one of them keeps all three out.)
   BUG 2 -- EMPTY-PATTERN LED (patch_pattern_led.s, `EMPTY_PATTERN_LED_FIX`)
     A pattern whose only content is parameter locks -- on a MIDI track, or trigless
     locks on an audio track, with no trig anywhere -- showed as an unused slot, its
-    grid LED unlit under [PTN]. 158 bytes, one 6-byte detour. The [BANK] grid (all
-    256 patterns per LED refresh) gets stock's test: scanning there starved the CPU.
+    grid LED unlit under [PTN]. 318 bytes, one 6-byte detour. The [BANK] grid (all
+    256 patterns per LED refresh) gets stock's test plus a bounded check of the
+    trigless-lock steps only (a full scan there starved the CPU): a bank holding a
+    pattern with trigless locks that carry a locked parameter lights.
 
   BUG 3 -- PART-CHANGE CARRYOVER (patch_partreapply.s, `PART_CHANGE_CARRYOVER_FIX`)
     After a pattern-triggered Part change, stale per-track state from the old Part
@@ -55,8 +57,10 @@ present but does nothing -- no effect, no crash; bugs 1 and 2 are unaffected. Wh
 carryover bugs occur on her Kit change is untested.
 
 MEASURED: bugs 1 and 3 hardware-confirmed on the author's MKI; bug 2's original fix
-too, and its current version confirmed on hardware to end the [BANK]-held stall (its
-[PTN] answers emulator-verified identical to the original). In this repo the
+too, its previous version ended the [BANK]-held stall on hardware (its [PTN] answers
+emulator-verified identical to the original), and this 318-byte version on the author's
+MKI, 20 Nov 2026, in KYOTI V1.8BC / V1.8C release candidates and VARISPEED_EMUS (the
+[PTN] / [BANK] LED checks as specified, [BANK] held with the sequencer running). In this repo the
 three ship together (tools/build_batch_bugfixes.py), and
 tools/feature_image.py composes all three onto every feature image and
 asserts on every run that the composite's changes are the disjoint union of the
@@ -100,13 +104,18 @@ def ts_emit(addr: int):
 PL_HOOK = 0x4009a464
 PL_HOOK_STOCK = bytes.fromhex("2f02202f0008")    # move.l %d2,-(%sp); move.l 8(%sp),%d0
 PL_PINNED = bytes.fromhex(
-    "20170c804000fd8c670000882f2f00082f2f00086100007c508f4a80664c2f02"
-    "2f03262f000c243c00008ed84c023800222f0010243c0009b3404c021800d681"
-    "2043d1fc400e2239223c0000011a611c66102043d1fc400e6ae0223c000000b0"
-    "610a67027001261f241f4e75740843e808002018c098c098c098c098c098c098"
-    "c0984680660ab1c965e8d1c1538266de4e752f02202f00084ef94009a46a"
+    "2f2f00082f2f000861000128508f4a8067024e754fefffe848d70c5c262f001c"
+    "243c00008ed84c023800222f0020243c0009b3404c021800d681202f00180c80"
+    "4000fd8c67242043d1fc400e2239223c0000011a617e666a2043d1fc400e6ae0"
+    "223c000000b0616c605878102043d1fc400e21f043e848d07408201080a80004"
+    "809180a90004660e41e8091a43e908b0538266e6602c45e804492010615c6622"
+    "45e80049202800046150661645e9042020116146660c45e9002020290004613a"
+    "67c656c00280000000014cd70c5c4fef00184e75740843e808002018c098c098"
+    "c098c098c098c098c0984680660ab1c965e8d1c1538266de4e754a80672e2c00"
+    "04c646860d80721fcc81eb8e47f26800221bc29bc29bc29bc29bc29bc29bc29b"
+    "46816608538467064a8066d24e75588f60902f02202f00084ef94009a46a"
 )
-assert len(PL_PINNED) == 158
+assert len(PL_PINNED) == 318
 # the cave replays the displaced prologue in its stock-predicate trampoline
 assert PL_HOOK_STOCK in PL_PINNED
 
@@ -201,7 +210,7 @@ MODULE = Module(
             reference=lambda addr: PL_PINNED,    # position independent
             cpu="5407",
             report_note=" (EMPTY_PATTERN_LED_FIX: a pattern holding only p-locks lights its "
-                        "grid LED under [PTN])",
+                        "grid LED under [PTN]; under [BANK], trigless locks with a locked parameter)",
         ),
         CavePatch(
             label="PART_CHANGE_CARRYOVER_FIX",

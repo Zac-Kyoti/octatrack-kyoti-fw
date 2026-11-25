@@ -23,6 +23,20 @@ it). Clyps owns the phase-D site 0x400a1f72 and chains dj_land (SUPERSEDE). Both
 buffers follow its unit (about 10 MB of the sample/recorder pool). Flashed and checked by the author as
 "KY+CL DJC9" (DIRECT JUMP V7.2.2) and, with V7.3, as "KY18C DJR1" (the same mainos as the FINAL, 9d1a29c9...).
 
+--clyps-bp (alias --bc): KYOTI V1.8BC (the author, 2026-11-17; FINAL 2026-11-19): V1.8C + BLACKPYRAMIDS_303, with both
+SPRING REVERB and PLATE REVERB given up. Their DSP P modules are 1,657 contiguous words on each core
+(A P:$1000..$1679, B P:$0dc0..$1439): SIDE-CHAIN's DSP section from PLATE's first word, the voice right
+after it (inside SPRING's module), DARK REV's helper at SPRING's last 35 words as in the voice's own build.
+Both builders take the placement (sc_dsp_org_*, bp_dsp_org_*) and give up both effects with identical
+bytes (SHARED_OK); PLATE's ColdFire descriptor record stays stock (only its chooser rows and id2e go).
+The voice's ColdFire runtime is a unit of this image's one DRAM payload (before Clyps, which stays last),
+not its own loader + reserve. ERASE_EMPTY_TRIGLESS_LOCKS skips BLKPYRAMD tracks (patch_triglock_bp: an
+empty trigless lock is a tie there). One BLKPYRAMD per DSP core on every path (2026-11-17): Clyps is
+assembled with the voice runtime's bp_refuse_load (BP_CLASH: a FULL load that would put a second one on a
+core is refused whole) and bp_uitail (BP_UITAIL: the UI-tail net); Clyps owns the tail site 0x40062d1c and
+calls the net first (SUPERSEDE), so the voice is built before Clyps here. out/KYOTI/, OS VERSION BC_VERSTR,
+pinned in kyoti_status.FINAL (mainos_kyoti_v1.8bc.bin). Flashed and checked by the author (FLASHING §4).
+
 --clyps-standalone: the standalone CLYPS image (out/CLYPS/, OS VERSION "CLYPS V1.0"), what
 `python3 tools/build_clyps.py` builds. Clyps never ships without DIRECT JUMP (the author, 2026-11-15),
 so it is V1.8C's composition cut down to CLYPS + DIRECT_JUMP_KYOTI + the three BATCH_BUGFIXES; its DRAM
@@ -138,6 +152,7 @@ inside any displaced span; B1, B2 and the reclaim invariants.
 
 Usage:  python3 tools/build_kyoti.py                       KYOTI V1.8
         python3 tools/build_kyoti.py --clyps               KYOTI V1.8C
+        python3 tools/build_kyoti.py --clyps-bp            KYOTI V1.8BC
         python3 tools/build_kyoti.py --clyps-standalone    the standalone CLYPS image
 Outputs (out/KYOTI/, or out/CLYPS/): OCTATRACK_OS1.40C_<TAG>.syx (MIDI), OCTATRACK_<TAG>.bin
 (CF card), mainos_<tag>.bin, <tag>_map.json (every placement + symbol).
@@ -209,6 +224,8 @@ RECLAIM_WHOLE = {"SPRING": (0x400d575e, 0x400d58f0), "PERS1": (0x400b2a34, 0x400
 PLAN = {
     "DRAM":  ["patch_reload3",                     # RELOAD_FROM_PROJECT (V1.2-V1.3, V1.5-V1.8; not in V1.8C)
               "patch_directjump_v7",               # V1.7: out of CAVE (2,026 B), into the same arena page
+              "bp_runtime",                        # V1.8BC: BLACKPYRAMIDS_303's runtime (before Clyps)
+              "patch_varispeed_ui",                # VRG3: VARISPEED's UI-task code (the cave keeps its frame path)
               "patch_clyps_dram"],                 # V1.8C: LAST (its CL_BSS_SIZE buffers follow it)
     "CAVE":  ["patch_varispeed",                   # first: 0x400d6500, VARISPEED's own address (frame ISR)
               "patch_softmute", "patch_partreapply",
@@ -220,10 +237,12 @@ PLAN = {
               "patch_pattern_led",                 # EMPTY_PATTERN_LED_FIX
               "patch_mutemode",
               "rtm_mask"],                         # REC_TRIG_MUTE's state byte, written at runtime
-    "ENC":   ["patch_triglock"],                   # LIVE-erase key path only
+    "ENC":   ["patch_triglock"],                   # LIVE-erase key path only (AUDIO + MIDI entries, 240 B)
     # SPRING REVERB's dead descriptor record (UI-path code ran there in V1.2-V1.3): [PLAY]/[REC]
     # key handlers, moved out of SAFE when SIDE-CHAIN's units grew (2026-10-25)
-    "SPRING": ["patch_qlrec"], "PERS1": [], "PERS2": [],
+    "SPRING": ["patch_qlrec",
+               "patch_triglock_bp"],               # V1.8BC: ERASE's LIVE-erase path (placed when ENC had 40 B left)
+    "PERS1": [], "PERS2": [],
 }
 
 # --- the features: name -> (builder, image, base, placement keys, standalone blob files) --
@@ -255,7 +274,8 @@ FEATURES = {
     # FINAL 2026-10-15. Its builder takes no placement: the plan puts its unit at its own
     # address (asserted after the allocation).
     "VARISPEED": ("build_varispeed.py", "mainos_varispeed.bin", "prep",
-                  {"patch_varispeed": "vari_build/vem_5407.bin"}),
+                  {"patch_varispeed": "vari_build/vem_5407.bin",
+                   "patch_varispeed_ui": "vari_build/vem_ui.bin"}),   # VRG3: its UI-task code, in DRAM
 }
 # --clyps (V1.8C, reference/handoffs/CLYPS_SCOPE.md §1.10): CLYPS replaces RELOAD_FROM_PROJECT (it carries
 # the card reloads); one all-DRAM unit, tick hooks included (the loader runs from the boot site before any
@@ -264,6 +284,22 @@ FEATURES = {
 # composition order V1.8C was flashed with.
 CLYPS_FEATURE = {"CLYPS": ("build_clyps.py", "mainos_clyps.bin", "prep",
                            {"patch_clyps_dram": "patch_clyps_dram.bin"})}
+# --clyps-bp (KYOTI V1.8BC; the author, 2026-11-17, FINAL 2026-11-19): V1.8C + BLACKPYRAMIDS_303. Not in V1.8 / V1.8C.
+BP_FEATURE = {"BLACKPYRAMIDS_303": ("build_blackpyramids_303.py", "mainos_blackpyramids_303.bin", "prep",
+                                    {"bp_runtime": "ot303/cf/ot303_runtime.bin"})}
+BC_VERSTR = "KYOTI1.8BC"            # the 10-char OS VERSION field (the author's name "KYOTI 1.8BC" is 11)
+BC_TAG = "KYOTI_V1.8BC"
+# The DSP donors (both payloads; read off our image: X:$215[$14] / [$15] and the P module walk):
+# PLATE REV's module ends where SPRING REV's begins, 594 + 1,063 = 1,657 contiguous words.
+DSP_DONORS = {"A": dict(va=0x400e2324, ln=0x136cb, plate=0x01000, spring=0x01252, end=0x01679),
+              "B": dict(va=0x400f59ef, ln=0x12d05, plate=0x00dc0, spring=0x01012, end=0x01439)}
+PLATE_P, NONE_P = 0x400d5594 + 0x38, 0x400d45e0 + 0x38
+PLATE_REC = (PLATE_P, PLATE_P + 0x192)   # PLATE's ColdFire descriptor record: stays stock
+DARK_N = 35                              # DARK REV's helper, moved to SPRING's last words by the voice's build
+# pass-1-only placements (sizing a piece that has no standalone address)
+SIZING = {}
+MM_KEYMASK_SIZING = 0x400d72a4      # a stand-in while sizing (an absolute byte read's size does not depend on it)
+
 # Builders whose own standalone image is a test image, never promoted (build_clyps.py's bare Clyps: Clyps
 # ships only with DIRECT JUMP). They run with the WIP opt-in inside this composition, whose own seal()
 # pins the result.
@@ -277,7 +313,12 @@ WIP_FEATURES = {}
 # Detour sites one feature takes over from another that it calls itself: (owner, other, site, n).
 # The other's bytes there must be exactly `jsr <its entry>`, and the owner must have been built
 # with that entry (asserted before the composition; never a silent overwrite).
-SUPERSEDE = [("CLYPS", "DIRECT_JUMP_KYOTI", 0x400a1f72, 6, "dj_land", "DJ_LAND")]
+SUPERSEDE = [("CLYPS", "DIRECT_JUMP_KYOTI", 0x400a1f72, 6, "dj_land", "DJ_LAND"),
+             # V1.8BC: the UI loop's tail is Clyps' (cl_uitail); it calls BLACKPYRAMIDS_303's net first
+             ("CLYPS", "BLACKPYRAMIDS_303", 0x40062d1c, 6, "bp_uitail", "BP_UITAIL")]
+# V1.8BC: BLACKPYRAMIDS_303's entries Clyps calls (FULL loads' one-per-core question, the UI-tail net): stand-ins
+# while sizing (an absolute jsr's size does not depend on them); pass 2 gives the runtime's own
+BP_SIZING = {"bp_refuse_load": 0x40a95000, "bp_uitail": 0x40a95004}
 DJ_SIZING = {"dj_land": 0x400d6eda, "dj_toggle": 0x400d6e54, "dj_state": 0x400d7600, "dj_mode": 0x400d7606,
              "dj_selfvec": 0x400d7608}
 # REC_TRIG_MUTE's code regions: three dead stock routines (build_rec_trig_mute.py REGIONS),
@@ -303,6 +344,20 @@ def flags_for(feat):
         f["clyps_kyoti"] = True
         if "DIRECT_JUMP_KYOTI" in FEATURES:      # pass 1 sizes with these; pass 2 gives DJ's real ones
             f.update(DJ_SIZING)
+        if "BLACKPYRAMIDS_303" in FEATURES:      # V1.8BC: pass 1 sizes with these; pass 2 gives the runtime's
+            f.update(BP_SIZING)
+    if "BLACKPYRAMIDS_303" in FEATURES:          # V1.8BC: PLATE REV is given up as well
+        if feat == "SIDECHAIN_COMPRESSOR":
+            f["sc_donor_ids"] = [0x14, 0x15]
+        if feat == "BLACKPYRAMIDS_303":
+            f["bp_donor_ids"] = [0x14, 0x15]
+            if "MUTE_MODES" in FEATURES:         # the voice drops a silenced track's notes as MUTE_MODES does
+                f["bp_mm_keymask"] = MM_KEYMASK_SIZING   # pass 2: MUTE_MODES' own KEYMASK (built before it)
+    if "BLACKPYRAMIDS_303" in FEATURES and "VARISPEED" in FEATURES:   # V1.8BC: the two meet in FLEX's bytes
+        if feat == "VARISPEED":
+            f["vem_bp"] = True                   # vh_bptake / vh_bpback, which the voice's ot_assign calls
+        if feat == "BLACKPYRAMIDS_303":          # pass 1 sizes with these; pass 2 gives VARISPEED's (built before it)
+            f.update(bp_vari_take=0x40a95008, bp_vari_back=0x40a9500c)
     if feat == "VARISPEED" and "SIDECHAIN_COMPRESSOR" in FEATURES:
         # QUAN's rotary switch is SIDE-CHAIN's ui_switch unit (no copy in VARISPEED's unit:
         # the proven cave cannot hold it). A stand-in address while sizing (a jmp's size does
@@ -344,6 +399,13 @@ def make_sandbox(name, section):
             shutil.copy2(p, sb / p.name)
     (sb / "out/raw").mkdir(parents=True)
     (sb / "out/raw/section_3_MAIN_OS.bin").write_bytes(section)
+    if "BLACKPYRAMIDS_303" in FEATURES:          # its private DSP toolchain (tools/ot303/hwprobe_image.py NEW)
+        tc = ROOT / "out/ot303/dsp56300_new"
+        if not (tc / "build/source/dsp_host/dsp_asm").exists():
+            sys.exit(f"missing {tc}: BLACKPYRAMIDS_303 assembles its voice with octabam's 4 Oct 2026 dsp_asm "
+                     f"(copy out/ot303/dsp56300_new from a checkout that has it)")
+        (sb / "out/ot303").mkdir(parents=True)
+        os.symlink(tc, sb / "out/ot303/dsp56300_new")
     return sb
 
 
@@ -528,7 +590,11 @@ def apply_clyps(argv):
     kyoti_status.FINAL (mainos_kyoti_v1.8c.bin, mainos_clyps.bin)."""
     global VERSTR, TAG, OUTDIR, SANDBOX
     alone = "--clyps-standalone" in argv
-    if not alone and "--clyps" not in argv:
+    bc = "--clyps-bp" in argv or "--bc" in argv
+    if not alone and not bc and "--clyps" not in argv:
+        return
+    if bc:
+        apply_bp()
         return
     FEATURES.pop("RELOAD_FROM_PROJECT")
     FEATURES.update(CLYPS_FEATURE)
@@ -544,14 +610,88 @@ def apply_clyps(argv):
     print(f"  {TAG}: {', '.join(FEATURES)}  ->  OS VERSION {VERSTR!r}, {OUTDIR.relative_to(ROOT)}\n")
 
 
+def apply_bp():
+    """--clyps-bp / --bc: KYOTI V1.8BC = V1.8C + BLACKPYRAMIDS_303, pinned on its own in kyoti_status.FINAL
+    (mainos_kyoti_v1.8bc.bin), out/KYOTI/ beside V1.8 and V1.8C."""
+    global VERSTR, TAG, OUTDIR, SANDBOX
+    FEATURES.pop("RELOAD_FROM_PROJECT")
+    FEATURES.update(BP_FEATURE)                  # before CLYPS: Clyps is built with the voice runtime's entries
+    FEATURES.update(CLYPS_FEATURE)               # (bp_refuse_load, bp_uitail; SUPERSEDE at the UI tail)
+    builder, img, base, keys = FEATURES["ERASE_EMPTY_TRIGLESS_LOCKS"]
+    FEATURES["ERASE_EMPTY_TRIGLESS_LOCKS"] = (builder, img, base, dict(keys, patch_triglock_bp="patch_triglock_bp.bin"))
+    SIZING["ERASE_EMPTY_TRIGLESS_LOCKS"] = {"patch_triglock_bp": 0x400d7400}   # zero in stock, past ERASE's own cave
+    SHARED_OK.add(frozenset({"SIDECHAIN_COMPRESSOR", "BLACKPYRAMIDS_303"}))
+    VERSTR, TAG = BC_VERSTR, BC_TAG
+    from kyoti_status import FINAL
+    if f"mainos_{TAG.lower()}.bin" not in FINAL.get("build_kyoti.py", {}):
+        wip_variant("--clyps-bp")
+    SANDBOX = OUTDIR / "_sandbox"
+    print(f"  {TAG}: {', '.join(FEATURES)}  ->  OS VERSION {VERSTR!r}, {OUTDIR.relative_to(ROOT)}\n")
+
+
+def dsp_layout(sizes_dir):
+    """V1.8BC's DSP plan from the two builders' pass-1 layouts: SIDE-CHAIN at PLATE's first word, the voice
+    right after it, both before DARK REV's helper at SPRING's end. -> {placement key: value}."""
+    sc = json.loads((sizes_dir / "sc_dsp_layout.json").read_text())
+    bp = json.loads((sizes_dir / "bp_dsp_layout.json").read_text())
+    out = {}
+    print("  DSP (PLATE REV + SPRING REV's P modules, both given up):")
+    for t, d in DSP_DONORS.items():
+        sc_at, bp_at = d["plate"], d["plate"] + sc[t]["words"]
+        helper = d["end"] - DARK_N
+        if bp[t]["helper"] != helper or bp_at < d["spring"] or bp_at + bp[t]["words"] > helper:
+            sys.exit(f"payload {t}: SIDE-CHAIN {sc[t]['words']} + voice {bp[t]['words']} words do not fit "
+                     f"P:{d['plate']:05x}..{helper:05x} (the voice must lie in SPRING's module, before DARK REV's helper)")
+        out.update({f"sc_dsp_org_{t}": sc_at, f"sc_dsp_end_{t}": bp_at, f"bp_dsp_org_{t}": bp_at})
+        print(f"    payload {t}: SIDE-CHAIN P:{sc_at:05x}..{bp_at:05x} ({sc[t]['words']} w), voice "
+              f"P:{bp_at:05x}..{bp_at + bp[t]['words']:05x} ({bp[t]['words']} w), {helper - bp_at - bp[t]['words']} w "
+              f"spare, DARK REV's helper P:{helper:05x}..{d['end']:05x}")
+    return out
+
+
+def dsp_module_ranges():
+    """{payload: [(file lo, file hi)]}: PLATE's and SPRING's P module data, as image offsets"""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("mm", ROOT / "refs/octabam/tools/build/dsp_modmap.py")
+    mm = importlib.util.module_from_spec(spec); spec.loader.exec_module(mm)
+    stock = STOCK_SECT.read_bytes()
+    out = {}
+    for t, d in DSP_DONORS.items():
+        mods, _ = mm.modules(stock, d["va"], d["ln"])
+        got = {a: (c, data) for sp, a, c, data in mods if sp == 0 and a in (d["plate"], d["spring"])}
+        if set(got) != {d["plate"], d["spring"]} or d["plate"] + got[d["plate"]][0] != d["spring"] \
+                or d["spring"] + got[d["spring"]][0] != d["end"]:
+            sys.exit(f"payload {t}: PLATE / SPRING P modules are not where V1.8BC expects them")
+        out[t] = [(d["va"] - BASE + data, d["va"] - BASE + data + 3 * c) for c, data in got.values()]
+    return out
+
+
+def move_pattern_led():
+    """EMPTY_PATTERN_LED_FIX's predicate grew from 158 to 318 B (2026-11-19: the [BANK] grid reads the
+    trigless-lock steps). In an image carrying VARISPEED + SIDE-CHAIN + MUTE_MODES the classic cave had 92 B
+    left, and SPRING's reclaim 204 B (V1.8 / V1.8C) or 80 B (V1.8BC): it fits no ROM zone. It runs on the
+    UI task only (the pattern-LED painters and the [BANK] grid's bank_has_content), so it joins the DRAM
+    payload, before Clyps (which stays last: its buffers follow it), as it already runs from DRAM in the
+    VARISPEED_EMUS feature image (tools/feature_image.py). Any image with VARISPEED; the standalone CLYPS
+    image keeps it in the cave (5 KB free there).
+    After the merge with VRG3 (release-1119, 2026-11-19: VARISPEED's UI code is its own DRAM piece) the cave
+    has 636 B left with the predicate in DRAM, so it would fit there again; it stays in DRAM -- the layout every
+    RC1 gate ran on (moving it back would move Clyps' unit and every CAVE piece behind it once more)."""
+    if "VARISPEED" in FEATURES and "patch_pattern_led" in PLAN["CAVE"]:
+        PLAN["CAVE"].remove("patch_pattern_led")
+        d = PLAN["DRAM"]
+        d.insert(d.index("patch_clyps_dram") if "patch_clyps_dram" in d else len(d), "patch_pattern_led")
+
+
 def main():
     global VERSTR
-    if sum(f in sys.argv for f in ("--with", "--without", "--clyps", "--clyps-standalone")) > 1:
-        sys.exit("--with, --without, --clyps and --clyps-standalone make different images: one at a time")
+    if sum(f in sys.argv for f in ("--with", "--without", "--clyps", "--clyps-standalone", "--clyps-bp", "--bc")) > 1:
+        sys.exit("--with, --without, --clyps, --clyps-standalone and --clyps-bp make different images: one at a time")
     apply_with(sys.argv)
     apply_without(sys.argv)
     apply_clyps(sys.argv)
     VERSTR = os.environ.get("KYOTI_VERSTR") or VERSTR   # a WIP test image's own OS VERSION (2026-11-13)
+    move_pattern_led()
     # pairs that must never share an image (tools/feature_exclusions.py, the user 2026-11-07): Clyps
     # with RELOAD_FROM_PROJECT never; Clyps with DIRECT_JUMP_KYOTI only as the integrated pair, i.e.
     # while SUPERSEDE makes the shared site Clyps' and chains dj_land (asserted again after the build)
@@ -609,7 +749,7 @@ def main():
     sb1 = make_sandbox("sizes", stock)
     size = {}
     for feat, (builder, _img, _base, keys) in FEATURES.items():
-        run_builder(sb1, feat, flags_for(feat) or {"_sizing": True})
+        run_builder(sb1, feat, dict(flags_for(feat), **SIZING.get(feat, {})) or {"_sizing": True})
         for key, src in keys.items():
             size[key] = src if isinstance(src, int) else len((sb1 / "out" / src).read_bytes())
     for key in size:
@@ -648,6 +788,8 @@ def main():
         if e1 > a2:
             sys.exit(f"pieces overlap: {k1} 0x{a1:08x}..0x{e1:08x} / {k2} 0x{a2:08x}")
 
+    dsp_place = dsp_layout(sb1 / "out") if "BLACKPYRAMIDS_303" in FEATURES else {}
+
     # QUAN's switch (flags_for): sw9_draw's offset in the ui_switch unit, from pass 1
     uis_sw9 = None
     if "VARISPEED" in FEATURES and "SIDECHAIN_COMPRESSOR" in FEATURES:
@@ -662,12 +804,22 @@ def main():
     for feat, (builder, _img, base, keys) in FEATURES.items():
         p = {k: place[k] for k in keys}
         p.update(flags_for(feat))
+        if feat in ("SIDECHAIN_COMPRESSOR", "BLACKPYRAMIDS_303"):
+            p.update({k: v for k, v in dsp_place.items() if k.startswith("sc_" if feat[0] == "S" else "bp_")})
+        if "bp_mm_keymask" in p:                   # MUTE_MODES is built before it (FEATURES order)
+            p["bp_mm_keymask"] = syms["patch_softmute_dt"]["KEYMASK"]
+        if "bp_vari_take" in p:                    # VARISPEED is built before it (FEATURES order)
+            p.update(bp_vari_take=syms["vari_build/vem_5407"]["vh_bptake"],
+                     bp_vari_back=syms["vari_build/vem_5407"]["vh_bpback"])
         if "uis_sw9_at" in p:
             p["uis_sw9_at"] = uis_sw9
         if feat == "CLYPS" and "DIRECT_JUMP_KYOTI" in FEATURES:     # built after DJ: its real entries
             dj = syms["patch_directjump_v7"]
             p.update(dj_land=dj["dj_land"], dj_toggle=dj["dj_toggle"], dj_state=dj["dj_state"],
                      dj_mode=dj["DJ_MODE"], dj_selfvec=dj["dj_selfvec"])
+        if feat == "CLYPS" and "BLACKPYRAMIDS_303" in FEATURES:     # V1.8BC: built after it (apply_bp's order)
+            bp = syms["ot303/cf/ot303_runtime"]
+            p.update(bp_refuse_load=bp["bp_refuse_load"], bp_uitail=bp["bp_uitail"])
         for k in keys:
             if zone_of.get(k) == "DRAM":
                 p[k + "_dram"] = True
@@ -687,6 +839,13 @@ def main():
                 if any(lo <= i + BASE < hi for i in deltas[feat]):
                     sys.exit(f"{feat} writes into reclaim zone {z}")
 
+    if "BLACKPYRAMIDS_303" in FEATURES:          # the voice's runtime as linked here, for its emulator checks
+        rt = OUTDIR / "bp_runtime"
+        rt.mkdir(parents=True, exist_ok=True)
+        for f in ("ot303_runtime.elf", "ot303_runtime.bin"):
+            shutil.copy2(sbs["prep"] / "out/ot303/cf" / f, rt / f)
+        (rt / "dsp_layout.json").write_text(json.dumps(dsp_place, indent=1))
+
     if uis_sw9 is not None and syms["ui_switch"]["sw9_draw"] != uis_sw9:
         sys.exit(f"VARISPEED jumps to 0x{uis_sw9:08x}; ui_switch's sw9_draw is at "
                  f"0x{syms['ui_switch']['sw9_draw']:08x}")
@@ -701,6 +860,11 @@ def main():
         for a, e in runs(alone):              # the free zones, plus zero gaps inside them
             if 0x400d6500 <= a + BASE < 0x400d7c3c:
                 caves_then.append((a + BASE, e + BASE))
+        if dsp_place and feat in ("SIDECHAIN_COMPRESSOR", "BLACKPYRAMIDS_303"):
+            # V1.8BC: the DSP sections moved within PLATE + SPRING's P modules: those words are their caves
+            donor = [(lo + BASE, hi + BASE) for rs in dsp_module_ranges().values() for lo, hi in rs]
+            caves_now = caves_now + donor
+            caves_then = caves_then + donor
         def in_caves(i, cs):
             return any(lo <= i + BASE < hi for lo, hi in cs)
         outside_now = {i: v for i, v in mine.items() if not in_caves(i, caves_now)}
@@ -861,6 +1025,39 @@ def main():
     for bus, id2e in fx.items():
         if int.from_bytes(comp[o(id2e) + 0x15 * 4:o(id2e) + 0x15 * 4 + 4], "big") != 0x400d45e0 + 0x38:
             flag(f"reclaim SPRING: {bus} id2e[0x15] does not point at NONE")
+    if "BLACKPYRAMIDS_303" in FEATURES:
+        # V1.8BC: PLATE REV given up as SPRING is -- off both choosers, id2e -> NONE, its DSP dispatch the
+        # passthrough stub -- and its ColdFire descriptor record left exactly stock (not reclaimed)
+        bad = []
+        for bus, base_ in (("FX1", 0x400d6060), ("FX2", 0x400d6090)):
+            rows, i = [], 0
+            while (v := int.from_bytes(comp[o(base_) + 4 * i:o(base_) + 4 * i + 4], "big")):
+                rows.append(v); i += 1
+            if PLATE_P in rows or 0x400d5726 + 0x38 in rows:
+                bad.append(f"{bus} still offers PLATE or SPRING")
+        for bus, id2e in (("FX1", 0x400d5f58), ("FX2", 0x400d5fdc)):
+            for fid in (0x14, 0x15):
+                if int.from_bytes(comp[o(id2e) + 4 * fid:o(id2e) + 4 * fid + 4], "big") != NONE_P:
+                    bad.append(f"{bus} id2e[0x{fid:02x}] is not NONE")
+        if comp[o(PLATE_REC[0]):o(PLATE_REC[1])] != stock[o(PLATE_REC[0]):o(PLATE_REC[1])]:
+            bad.append("PLATE's ColdFire descriptor record changed")
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("mm", ROOT / "refs/octabam/tools/build/dsp_modmap.py")
+        mm = importlib.util.module_from_spec(spec); spec.loader.exec_module(mm)
+        stub = {"A": (0x007c8, 0x007c9), "B": (0x00588, 0x00589)}
+        for t, d in DSP_DONORS.items():
+            mods, _ = mm.modules(bytes(comp[:len(stock)]), d["va"], d["ln"])
+            xt = [m for m in mods if m[0] == 1 and m[1] == 0x215][0]
+            xo = d["va"] - BASE + xt[3]
+            for fid in (0x14, 0x15):
+                got = tuple(int.from_bytes(comp[xo + 3 * k:xo + 3 * k + 3], "little") for k in (fid, 0x20 + fid))
+                if got != stub[t]:
+                    bad.append(f"payload {t}: X:$215[0x{fid:02x}] is {got}, not the passthrough stub")
+        for b_ in bad:
+            flag(f"V1.8BC: {b_}")
+        if not bad:
+            print("  V1.8BC: PLATE + SPRING off both choosers, id2e -> NONE, DSP dispatch -> stub on both payloads; "
+                  "PLATE's ColdFire record stock")
     if not RECLAIM_WHOLE:
         print("  reclaim: none in this plan -- SPRING's descriptor and the PERSONALIZE arrays stay stock")
     elif not any("reclaim" in p for p in PROBLEMS):

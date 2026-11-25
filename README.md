@@ -77,7 +77,8 @@ Choose how an audio track's mute behaves, in **PERSONALIZE → MUTE MODE**:
 SOLO follows the same rule as a manual mute; `CUE MUTES TRK` stays a hard cut. The
 setting survives a power cycle.
 
-**Hardware:** confirmed (this image).\
+**Hardware:** the feature confirmed; the bug fixes confirmed (their latest change, the `[BANK]` LEDs, in
+the KYOTI V1.8BC / V1.8C release candidates); this image not flashed as such.\
 **Final build:** [`tools/build_mute_modes.py`](tools/build_mute_modes.py) →
 `out/MUTE_MODES/OCTATRACK_OS1.40C_MUTE_MODES`
 
@@ -99,7 +100,8 @@ does not combine with CLYPS, which has it built in.
 **Hardware:** confirmed: the clock-locked timing, the Part change, trig conditions and the
 SILENCE TRACKS fade, and (in KYOTI V1.8C) a jump after a normal pattern change landing in step
 with it. Not specifically tested: MIDI tracks, Program Change on fast re-cues, START SILENT.
-This image, with the three bug fixes, not flashed as such.\
+The bug fixes confirmed (their latest change, the `[BANK]` LEDs, in the KYOTI V1.8BC / V1.8C release
+candidates); this image not flashed as such.\
 **Final build:** [`tools/build_direct_jump_kyoti.py`](tools/build_direct_jump_kyoti.py) →
 `out/DIRECT_JUMP_KYOTI/OCTATRACK_OS1.40C_DIRECT_JUMP_KYOTI`
 
@@ -139,7 +141,8 @@ still uses it loads it as NONE.
 > [`tools/build_sidechain_compressor_light.py`](tools/build_sidechain_compressor_light.py)
 > builds it behind the WIP gate (`KYOTI_ALLOW_WIP=1`, see above); OS VERSION reads `140C_SCLT`.
 
-**Hardware:** the feature confirmed; this image, with the three bug fixes, not flashed as such.\
+**Hardware:** the feature confirmed; the bug fixes confirmed (their latest change, the `[BANK]` LEDs, in
+the KYOTI V1.8BC / V1.8C release candidates); this image not flashed as such.\
 **Final build:** [`tools/build_sidechain_compressor.py`](tools/build_sidechain_compressor.py) →
 `out/SIDECHAIN_COMPRESSOR/OCTATRACK_OS1.40C_SIDECHAIN_COMPRESSOR`
 
@@ -148,7 +151,10 @@ still uses it loads it as NONE.
 A TB-303 voice as a track machine, shown as **BLKPYRAMD**, running on the Octatrack's DSP in 24-bit fixed
 point with its filter 4× oversampled at 176.4 kHz. Adapted from Open303 and recalibrated on the TB-303's own
 circuit against recordings of a real 303. It is the sixth row of a track's machine list (double-tap the
-track, or `[FUNC]` + `[SRC]` → MACHINE). One per DSP core: one on T1–T4, one on T5–T8.
+track, or `[FUNC]` + `[SRC]` → MACHINE). One per DSP core: one on T1–T4, one on T5–T8. A second one
+on a core is refused wherever it would arrive (the machine list, TRACK PASTE, an SRC page paste, and Clyps
+loads in KYOTI V1.8BC) with `ONE 303 PER CORE!`, and nothing changes; a project saved with two on a core
+keeps the lower-numbered one and turns the other back into its Flex track.
 
 - **SRC:** `PTCH` (C0–C8, a semitone a step, shown as note names; `FUNC` + turn or push + turn
   steps by octaves, on every held trig too) · `CUT` (0–100 the real 303's whole range, evenly; 101–127
@@ -165,6 +171,11 @@ track, or `[FUNC]` + `[SRC]` → MACHINE). One per DSP core: one on T1–T4, one
 - **Slide:** an OT slide trig glides into its note from the previous one, without a retrigger.
 - **Ties:** trigless locks and/or trigless trigs right after a note hold it. A trigless trig
   still resets LFOs and FX envelopes as on stock, so a trigless trig after a note also ties it.
+  A note tied to the end of a pattern holds on through ties at the start of the next pattern.
+- **Pattern and Part changes:** as a stock machine's sound does, the voice carries over a pattern
+  change until the track's own first trig in the new pattern: the last step plays and rings over the
+  change, and a BLKPYRAMD on another track of the same core in the new Part takes the voice at its first
+  trig. Each note plays with its own Part's GATE from the first step on.
 - **Live:** the track key, chromatic keys and MIDI notes play it, held while the key or note is
   down. TRIG + YES previews a step, and one-shot trigs play once until re-armed.
 - **Chromatic mode:** four octaves of absolute notes. `[FUNC]` + `[LEFT]` / `[RIGHT]` pick the
@@ -172,6 +183,9 @@ track, or `[FUNC]` + `[SRC]` → MACHINE). One per DSP core: one on T1–T4, one
   SLOTS and SLICES modes have nothing to play here: their LEDs stay dark.
 - AMP, FX1, FX2, LFOs (`PMTR` lists the six SRC knobs), scenes, p-locks and trig conditions
   work as on any track.
+- **Copy and paste:** its SRC page copies as a BLKPYRAMD: pasted onto another track, it makes that track a
+  BLKPYRAMD with the same knobs. A Flex or Static SRC page pasted onto it makes it that machine with the
+  pasted values; choosing BLKPYRAMD again brings its knobs back. UNDO puts either back.
 
 **Limits:**
 - SPRING REVERB is removed: its DSP space holds the voice.
@@ -185,7 +199,10 @@ calibration and voicing are by Zac Kyoti, every choice made by ear, as is the ha
 Open303's and what is new, every voicing decision and full attribution:
 [`reference/BLACKPYRAMIDS_303.md`](reference/BLACKPYRAMIDS_303.md) and [`CREDITS.md`](CREDITS.md).
 
-**Hardware:** the feature confirmed; this image, with the three bug fixes, not flashed as such.\
+**Hardware:** the voice confirmed; the one-per-core refusals (machine list, TRACK PASTE, SRC page paste,
+Clyps), SRC page copy and paste and a project round trip confirmed in KYOTI V1.8BC; Part and pattern changes
+(no pop, the last step, ties across, the first note's GATE) confirmed in the octabam form; loading a project
+saved with two on a core not tried on the unit. This image, with the three bug fixes, not flashed as such.\
 **Final build:** [`tools/build_blackpyramids_303.py`](tools/build_blackpyramids_303.py) →
 `out/BLACKPYRAMIDS_303/OCTATRACK_OS1.40C_BLACKPYRAMIDS_303`
 
@@ -201,7 +218,9 @@ editor → ATTR) is VARI plays the same way.
 - Above twice the sample's own speed, it folds down an octave.
 - A sample or project tempo outside 30–300 BPM plays as `TSTR` OFF.
 
-**Hardware:** the feature confirmed; this image, with the three bug fixes, not flashed as such.\
+**Hardware:** confirmed in the KYOTI V1.8BC / V1.8C release candidates and in VARISPEED_EMUS (the same code):
+`QUAN` on entering VARI and across a save, a project saved with the earlier version, a held VARI note's speed
+through a Part switch; the bug fixes there too. This image not flashed as such.\
 **Final build:** [`tools/build_varispeed.py`](tools/build_varispeed.py) →
 `out/VARISPEED/OCTATRACK_OS1.40C_VARISPEED`
 
@@ -217,12 +236,17 @@ the engine the track plays through:
 A change of engine takes effect at the track's next trig. The engines run on the DSP. A
 change that would overload a DSP core is refused and shows `MAX DSP: EMU LIMIT`: an `EMUS`
 turn stops at the heaviest engine that fits, an FX type doesn't land, and a track coming
-onto VARI plays `OT`.
+onto VARI plays `OT`. At a pattern change to another Part, the old Part's held notes and the new
+Part's sounds overlap until each track's next trig; if that overlap would overload the core, the
+held notes drop to `OT` on the downbeat and, only if that is not enough, the new Part's engines step
+down (saved at the switch; a cancelled cue changes nothing). Held VARI notes keep their speed
+through the change until their own next trig.
 
 The DSP space comes from **SPRING REVERB**, which leaves both FX lists; a project that still
 uses it loads it as NONE.
 
-**Hardware:** the feature confirmed; this image, with the three bug fixes, not flashed as such.\
+**Hardware:** confirmed (this image's code, flashed with a test OS VERSION: VARISPEED's `QUAN` and its memory,
+a project saved with the earlier version, the load guard, the bug fixes).\
 **Final build:** [`tools/build_varispeed_emus.py`](tools/build_varispeed_emus.py) →
 `out/VARISPEED_EMUS/OCTATRACK_OS1.40C_VARISPEED_EMUS`
 
@@ -246,7 +270,8 @@ sound still ringing, and trig conditions (`1:2`, `PRE`, `FILL`) carry on as if t
 played all along. `[CUE]` + `[TRACK n]` stays stock. It does not combine with CLYPS, which carries
 its own card reloads.
 
-**Hardware:** the feature confirmed; this image, with the three bug fixes, not flashed as such.\
+**Hardware:** the feature confirmed; the bug fixes confirmed (their latest change, the `[BANK]` LEDs, in
+the KYOTI V1.8BC / V1.8C release candidates); this image not flashed as such.\
 **Final build:** [`tools/build_reload_from_project.py`](tools/build_reload_from_project.py) →
 `out/RELOAD_FROM_PROJECT/OCTATRACK_OS1.40C_RELOAD_FROM_PROJECT`
 
@@ -288,17 +313,19 @@ Tap `[PLAY]` again **while the toast is up** to invert it; if PERSONALIZE is ope
 mark follows. Once the toast has gone (1 s), a tap just shows the setting again. The first
 `[REC]` + `[PLAY]` still starts live recording as on stock.
 
-**Hardware:** the feature confirmed; this image, with the three bug fixes, not flashed as such.\
+**Hardware:** the feature confirmed; the bug fixes confirmed (their latest change, the `[BANK]` LEDs, in
+the KYOTI V1.8BC / V1.8C release candidates); this image not flashed as such.\
 **Final build:** [`tools/build_quantize_live_rec_toggle.py`](tools/build_quantize_live_rec_toggle.py) →
 `out/QUANTIZE_LIVE_REC_TOGGLE/OCTATRACK_OS1.40C_QUANTIZE_LIVE_REC_TOGGLE`
 
 ### ERASE_EMPTY_TRIGLESS_LOCKS
 
-A trigless lock — a step with parameter locks but no audible trig — now disappears from
-the trig row once you erase its last lock, instead of staying lit. One placed
+A trigless lock — a step with parameter locks but no audible trig, on an audio or a MIDI
+track — now disappears from the trig row once you erase its last lock, instead of staying lit. One placed
 deliberately with `FUNC` + `TRIG` is left alone.
 
-**Hardware:** the feature confirmed; this image, with the three bug fixes, not flashed as such.\
+**Hardware:** confirmed on audio and MIDI tracks in the KYOTI V1.8BC release candidate (the same code), with
+the bug fixes; this image not flashed as such.\
 **Final build:** [`tools/build_erase_empty_trigless_locks.py`](tools/build_erase_empty_trigless_locks.py) →
 `out/ERASE_EMPTY_TRIGLESS_LOCKS/OCTATRACK_OS1.40C_ERASE_EMPTY_TRIGLESS_LOCKS`
 
@@ -321,7 +348,8 @@ track's channel. Both need AUDIO CC IN / OUT on, as for every audio-track CC. `[
 `[YES]` / `[NO]` arm and disarm recorder one-shot trigs as on stock.
 
 **Hardware:** confirmed in KYOTI V1.6 (`[TRACK]` + `[REC]`, the per-track toggle, the toast).
-MIDI CC 80 not specifically tested. This image, with the three bug fixes, not flashed as such.\
+MIDI CC 80 not specifically tested. The bug fixes confirmed (their latest change, the `[BANK]` LEDs, in the
+KYOTI V1.8BC / V1.8C release candidates); this image not flashed as such.\
 **Final build:** [`tools/build_rec_trig_mute.py`](tools/build_rec_trig_mute.py) →
 `out/REC_TRIG_MUTE/OCTATRACK_OS1.40C_REC_TRIG_MUTE`
 
@@ -331,13 +359,16 @@ Three fixes to stock bugs. Every image here carries all three; this build is the
 
 - **MIDI_PLAYS_FREE_FIX** — a Plays-Free MIDI track with trig quantize *Direct* and
   pattern scale *Per Track* no longer stalls after its first step on a manual trig.
-- **EMPTY_PATTERN_LED_FIX** — a pattern whose only content is parameter locks now lights
-  its grid LED under `[PTN]`, instead of showing as an unused slot.
+- **EMPTY_PATTERN_LED_FIX** — a pattern whose only content is parameter locks — trigless
+  locks with a locked parameter included — lights its LED under `[PTN]` and `[BANK]`, instead
+  of showing as an unused slot; a trigless lock with nothing locked does not.
 - **PART_CHANGE_CARRYOVER_FIX** — after a pattern-triggered Part change, a track leaving
   PICKUP for FLEX no longer keeps playing the old Part's pickup loop, and a switch into a
   PICKUP track no longer marks the Part edited when nothing changed.
 
-**Hardware:** each fix confirmed; this image of the three together not flashed as such.\
+**Hardware:** each fix confirmed (the `[BANK]` trigless-lock LEDs, also with `[BANK]` held and the sequencer
+running, in the KYOTI V1.8BC / V1.8C release candidates and VARISPEED_EMUS); this image of the three together
+not flashed as such.\
 **Final build:** [`tools/build_batch_bugfixes.py`](tools/build_batch_bugfixes.py) →
 `out/BATCH_BUGFIXES/OCTATRACK_OS1.40C_BATCH_BUGFIXES`
 
@@ -363,6 +394,23 @@ sample memory.
 **Hardware:** confirmed (this combined image).\
 **Final build:** [`tools/build_kyoti.py`](tools/build_kyoti.py) `--clyps` →
 `out/KYOTI/OCTATRACK_OS1.40C_KYOTI_V1.8C`
+
+### KYOTI V1.8BC
+
+KYOTI V1.8C with BLACKPYRAMIDS_303. OS VERSION reads `KYOTI1.8BC`. SPRING REVERB **and** PLATE
+REVERB are given up: their DSP space holds the voice and the side-chain; a project saved with either
+loads that FX2 as NONE. Clyps loads (FULL, groups, ORIG, temp and card reloads) that would put a second
+BLKPYRAMD on a core are refused whole, with `ONE 303 PER CORE!`. ERASE_EMPTY_TRIGLESS_LOCKS leaves a
+BLKPYRAMD track's trigless locks alone (there they are ties). Clyps and the voice keep about 10 MB of
+sample memory.
+
+**Hardware:** confirmed (this combined image): the voice on both cores, the FX2 list, SIDE-CHAIN
+keyed from and onto a BLKPYRAMD track, every MUTE MODE on a BLKPYRAMD track, the trigless-lock erase,
+Clyps and DIRECT JUMP with a BLKPYRAMD track, a project round trip, the one-per-core refusals and SRC page
+copy and paste. Its BLACKPYRAMIDS_303's Part and pattern changes are confirmed in the octabam form (the same
+code), not in this image. Loading a project saved with two on a core not tried on the unit.\
+**Final build:** [`tools/build_kyoti.py`](tools/build_kyoti.py) `--clyps-bp` →
+`out/KYOTI/OCTATRACK_OS1.40C_KYOTI_V1.8BC`
 
 ---
 

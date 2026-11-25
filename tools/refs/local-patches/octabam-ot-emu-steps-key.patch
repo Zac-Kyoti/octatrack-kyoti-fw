@@ -1,7 +1,13 @@
-# ot_emu step-list verbs 'key CODE down|up' (one panel key edge, the live FIFO's row encoding)
-# and 'mainlevel N' (SET MAIN LEVEL outside --sequencer). Applies on top of octabam-ot-emu-steps.patch.
-# Session 119 (kyoti-v1): used to reproduce and measure the RELOAD [BANK]+[TRACK] stall.
+# ot_emu step-list verbs 'key CODE down|up' (one panel key edge, the live FIFO's row encoding),
+# 'mainlevel N' (SET MAIN LEVEL outside --sequencer) and 'icount [LO,HI]' (the instruction counter and
+# frame count; with LO,HI and `coverage` on, the instructions executed so far at PCs in [LO, HI)).
+# Applies on top of octabam-ot-emu-steps.patch.
+# Session 119 (kyoti-v1): key/mainlevel, used to reproduce and measure the RELOAD [BANK]+[TRACK] stall.
+# 2026-11-19 (led-fix): icount, for tools/led_bank_stall.py.
 #   git -C refs/octabam apply ../../tools/refs/local-patches/octabam-ot-emu-steps-key.patch
+# Build it PRIVATELY (a copy of tools/emu + tools/harness + modules/tapeecho/cpu.c, vendor/ symlinked,
+# `cmake -S tools/emu/ot_emu -B build -DOT_VENDOR=$PWD/vendor && cmake --build build --target ot_emu`),
+# never in the shared clone while other sessions run its binaries.
 --- a/tools/emu/ot_emu/main.cpp
 +++ b/tools/emu/ot_emu/main.cpp
 @@ -748,6 +748,7 @@
@@ -12,7 +18,7 @@
  				const auto trim = [](std::string t)
  				{
  					while(!t.empty() && std::isspace(static_cast<unsigned char>(t.front()))) t.erase(t.begin());
-@@ -905,6 +906,26 @@
+@@ -905,6 +906,44 @@
  						rtos.setFrame(on);
  						std::printf("step frame  : DSP frame clock %s\n", on ? "ON" : "off");
  					}
@@ -28,6 +34,24 @@
 +						row = edge == "down" ? static_cast<uint8_t>(row | bit) : static_cast<uint8_t>(row & ~bit);
 +						rtos.panelIn({static_cast<uint8_t>(0x20 | (k >> 3)), row});
 +						std::printf("step key    : %#04x %s (panel irq %s)\n", k, edge.c_str(), (rtos.panelImr() & 2) ? "on" : "OFF");
++					}
++					else if(verb == "icount")
++					{
++						// icount [LO,HI] -- the ColdFire instruction counter and the frame count
++						// (a window = the difference of two); with LO,HI and `coverage` on, also the
++						// instructions executed so far at PCs in [LO, HI)
++						uint64_t inRange = 0;
++						const auto c = rest.find(',');
++						if(c != std::string::npos)
++						{
++							const auto lo = resolve(rest.substr(0, c)), hi = resolve(rest.substr(c + 1));
++							for(const auto& [pc, n] : m.profile())
++								if(pc >= lo && pc < hi) inRange += n;
++						}
++						std::printf("step icount : %llu instructions, frame %llu, in range %llu\n",
++							static_cast<unsigned long long>(m.instructions()),
++							static_cast<unsigned long long>(rtos.frameCount()),
++							static_cast<unsigned long long>(inRange));
 +					}
 +					else if(verb == "mainlevel")
 +					{

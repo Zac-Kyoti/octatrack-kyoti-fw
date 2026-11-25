@@ -39101,3 +39101,1249 @@ step 9 (its PLAY phase) while A02 was on step 5, and set its A:B counters from P
 - Deliberately vague: WHEN a card reload's message appears (dc02065 waits for [PTN] release; the session's
   uncommitted change shows it at the press). Renders unchanged (no CL39-47 rule shows in them). Not added: the
   KYOTI V1.8BC "ONE 303 PER CORE!" refusal (BlackPyramids session; open question to the author).
+## 2026-11-18 (`emus-guard`) — VARISPEED_EMUS VEM11 (WIP, NOT flashed): the load guard across a Part switch
+
+The author's decision ("full fix, plus pitch-jump fix") on the emulator repro of the Part-switch gap
+(djk-octabam-pin `out/emus-partswitch-repro/`): stock moves a track to the new Part's live FX ids at
+THAT track's first trig in the new Part (0x4000c40e / 0x4000c41e) and VEM's engine latch moves at the
+same trig, so the old Part's carried tracks and the new Part's triggered ones play mixed. Each Part
+fit; the mix did not (FINAL: mix_max 4,001 for 1 s, mix_never 3,681 for as long as the Part plays).
+Side bug: the frame hook read the Part at PART_B, which UI message 20 moves ~7 ticks (400 frames,
+145 ms) before the apply, so a playing VARI voice left VARI early (engine and speed: a pitch jump).
+
+- **Fix 1, the transition** (`vgx_tick`, called from `vg_tick` after the net; UI task). While a switch
+  is on its way -- the transport runs (`0x800065b8 == 1`, C: 0x400a05aa) and either a cue waits in
+  PEND (`0x800065bf/c0` set, not PLAY `0x800065bd/be`, C: the commit 0x400a44d0) in the working bank
+  for a pattern whose Part (blob + pat x 0x8ed8 + 0x8e57, C: 0x400a4568) is not the current one, or
+  PART_B / the bank has moved ahead of the apply (APPLIED_B/P != DB bank / PART_B) -- price per core
+  `base + sum over its tracks of max(old, new)`: old = the live FX ids (0x80000ec4/ecc) + the engine
+  it runs after the clamp, min(carried -- render state 0x80004898 + 40t, +36 bits 2-3, C: the voice
+  loop 0x4000d386 / 0x4000d536 -- or the live EMUS an old-Part trig may still latch, and the next
+  engine); new = the next Part's FX + engine. Over the budget: the NEXT Part's EMUS to OT in the net's
+  order (SP12 first, then S950, highest track first), skipping a step that does not lower the
+  transition (the old Part's live FX dominate that track), toast. Cued Part (not current): EMUS read
+  from / written to its TSNS slot (rp_prev forgotten), its DB block + SRAM copy (same bank only) + its
+  dirty flags, never a live byte; vg_scan / vg_fix's helpers are not touched (rp_gate_a lands in
+  rp_gate_m's body with the block given). Current Part in the window: vg_scan / vg_step_ot as the net.
+  A cue into another bank is priced in the window (bank + PART_B moved). Nothing kept: it prices on
+  every UI pass while a switch is on its way (a fingerprint of the same inputs costs about as much).
+  With every engine on OT the transition is at most base + 8 x the dearest stock FX: 477 + 8 x 347 =
+  3,253 < 3,350 (core 0), 574 + 2,776 = 3,350 < 3,930 (core 1): every switch can be made to fit.
+- **Fix 2, the clamp** (`vem_frame`): each latch is tagged with the APPLIED word (`vf_tag`); the first
+  carried frame under another APPLIED pair makes the engine min(carried, the new Part's EMUS), once
+  (`.vf_clamp`, db_tsns + emus_idx; emus_mode's identity asserted by the builder). A carried voice whose
+  new Part does not put it on VARI takes the stock path (OT). Keyed on APPLIED: lands on the switch
+  frame (emulator: f5512, the light apply's own frame).
+- **Fix 3, no early jump** (`vem_frame`): `vf_win` (APPLIED vs DB bank / PART_B); in the window the hook
+  does not poll the DB, a candidate keeps its last poll's verdict (`vf_eng`), no clamp.
+- **Placement.** Frame path in the classic cave: unit 5,720 B at 0x400d6500..0x400d7b58 (was 5,796).
+  The guard's UI-task code -- `vg_sig` (moved out of the cave) and the transition, 1,196 B -- is the
+  source's `.vemui` section (`as --defsym VEM_UI_SECTION=1`), linked at the DRAM arena base 0x40a955e0
+  behind tools/dram/'s loader (reference/kb/caves.md §5). The unit image carries the loader;
+  feature_image.py (kyoti-v1 thread, `unit_dram`) strips it, re-checks it, and links the bug fixes'
+  DRAM pieces behind it, one loader. Feature image: pattern_led now in the cave (0x400d7b58),
+  trigscale 0x400d7bf8, partreapply in DRAM (0x40a95a8c); DRAM 1,598 B = 1 arena page (FINAL: 1 page);
+  95 B of the cave left. octabam assembles the file without the symbol: one unit, 6,916 B (manifest
+  reference `7fbf2a3b…`; octabam pin / PR not done -- its CAVE placement may no longer fit).
+- **Gates** (`tools/varispeed_emus_switch_test.py run|check|cost|pack`, private ot_emu = octabam
+  a67a1112 + tools/varispeed_emus_ot_emu.patch + the per-pair stamp, built in out/emu/; card MMTESTDT;
+  every case on the unit AND the feature image, against the FINAL unit / feature image). Model est
+  max / frames over budget / datasheet cycles per sample max, FINAL -> VEM11 (unit = feature):
+  mix_late 3,681 / 2,756 (999.9 ms) / 3,690 -> 3,307 / 0 / 3,510; mix_never 3,681 / 6,086 (2.2 s, run
+  end) / 3,690 -> 3,307 / 0 / 3,510; mix_max 4,001 / 2,756 / 4,027 -> 3,253 / 0 / 3,661 (B's T8, T7 to OT
+  at the cue, toast); mix_max_s2 4,001 / 2,411 / 3,756 -> 3,253 / 0 / 3,394; mix_xbank (mix_max, cue
+  into bank B) 3,627 / 2,756 / 3,847 -> 3,253 / 0 / 3,661 (stepped in the window, 2 frames after
+  PART_B's move). Fit before and after: own_step1, own_late78, carry_fit, carry_fit_step1,
+  carry_s950_ot, carry_sp12_s950, mix_nonvari, ref_clean, own_xbank and the timing variants
+  (cue5100 / cue5120 / cue5500 / midipc / chg4 / stopped). Steps move from PART_B's move (f5113;
+  cue5120 / 5500: f10626) to the cue (f100 / 5100 / 5133 / 5500; chg4 f979 -> f100); stopped
+  unchanged. Every step has its toast in the same UI pass. mix_nonvari: T5 / T6 leave VARI at f5512
+  (FINAL: f5112, 145 ms early). Controls ref_clean / carry_fit_step1: engines and increments of T5-T8
+  identical to FINAL, no step, no toast. The datasheet max 3,661 is DJ EQ x 8 on OT engines -- a stock
+  load (the guard's table prices DJ EQ 347; in situ it costs more, IMPL §10.4).
+- **The clamp changes the sound** where a voice is carried with a dearer engine than the new Part's
+  (carry_fit / carry_s950_ot / carry_sp12_s950 / own_late78 / mix_late / mix_never / mix_max): the
+  held note takes the new engine on the downbeat instead of at its own next trig.
+- **A/B pack** (out/ab_emus_guard/, not published; `pack` verb): 9 comparisons, A = FINAL feature
+  image, B = VEM11, main out T5-T8 (core 0 TX 2/3), 24-bit stereo 44.1 kHz, 1.0 s before the switch to
+  the render's end, B aligned on A to the sample: carry_fit, carry_s950_ot, carry_sp12_s950,
+  own_late78, mix_late, mix_max, mix_nonvari (first difference 0.856 s = A's early jump), controls
+  ref_clean and carry_fit_step1 (bit-identical). MANIFEST.md / manifest.json there.
+- **Existing suites.** varispeed_emus_test.py 44/45 (widget fails exactly as on FINAL: it expects KNOB
+  where the rotary switches draw -- pre-existing); every --build-variants test build builds; DSP
+  boot check PASS both payloads; the DSP payloads are FINAL's bytes. The harness vs the shipped
+  predecessor could not run (its oracle image is not on this machine); instead
+  `tools/varispeed_emus_equiv.py` runs its whole matrix on VEM11 and FINAL VEM10: OTDEMO 35/35
+  identical, MMTESTDT 34/35 (tempo_edge_720: nothing compared, the known harness limit; its voice
+  passes parse identical).
+- **Cost** (ot_emu --coverage, 6,000 frames, 4 x SP12 on T5-T8): UI pass while the transport runs and
+  nothing is on its way 636.3 -> 659.3 instructions (+23: vgx_tick's tests; stopped +5); while a
+  switch is on its way +~840 per pass (141 pricings x 803 + the tests) until the commit. Frame hook
+  body 320.1 -> 392.9 per frame (+73, ~18 per engaged VARI track; whole ColdFire 34,019 -> 34,092,
+  +0.2 %); nothing on a track that is no VARI candidate.
+- **Every other FINAL image unchanged** (feature_image.py without the opt-in: MUTE_MODES, QLR,
+  SIDECHAIN, TRIGLESS, RELOAD, DJK, RTM, VARISPEED, BATCH_BUGFIXES; build_kyoti default / --clyps /
+  --clyps-standalone). BLACKPYRAMIDS_303 not rebuilt.
+- **Build (WIP, NOT flashed):** `KYOTI_ALLOW_WIP=1 KYOTI_VERSTR=140C_VEMG1 python3
+  tools/build_varispeed_emus.py`: out/VARISPEED_EMUS/OCTATRACK_OS1.40C_VARISPEED_EMUS.syx `d782ea56…`
+  (CF .bin `95fd8617…`, mainos `75a8f888…`), OS VERSION `140C_VEMG1`; unit out/mainos_varispeed_emus.bin
+  `066700f9…`. FLASHING §4 "VARISPEED_EMUS VEMG1".
+- **For the author:** (a) the clamp acts where the mix would have fitted too (carry_fit); a clamp only
+  when needed is possible; (b) a cue whose transition does not fit steps (and saves) the cued Part's
+  EMUS at once, even if the cue is cancelled; (c) every track is priced as if it could carry, also
+  one that trigs on the new pattern's first step; (d) a carried VARI voice whose new Part has that
+  track off VARI plays at stock speed from its old live bytes until its trig (FINAL does the same
+  after the apply -- only no longer 145 ms early); (e) plain VARISPEED keeps the early change (left
+  byte-identical); (f) an edit made while voices are still carried after the switch is priced on
+  the settings alone, as before.
+
+## 2026-11-18 cont. (`emus-guard`) — VARISPEED_EMUS VEM11 second round = `140C_VEMG2` (WIP, NOT flashed)
+
+The author listened to the VEMG1 pack (little audible difference) and decided: clamp only when needed; no side
+effects from a cancelled cue; price only real carry and clamp old notes before downgrading the new Part; a held VARI
+note keeps its speed until its own next trig; edits in the 7-tick window stay priced on settings (unchanged).
+VEMG1 (`d782ea56…`) is superseded.
+
+- **Fact found (C, objdump + ot_emu):** stock keeps, per track, the Part its live bytes came from: bank
+  `0x8000182a + t`, part `0x80001832 + t` (= `0x80000110 + t + 0x171a / 0x1722`), written at the track's trig
+  (0x4000bf62 / 0x4000bf6a, after the trig handler's own APPLIED comparison) and for every track by the heavy apply
+  (0x40009396 / 0x4000939e); the light apply (a sequencer switch) does not write it, so a carried track keeps the old
+  Part's pair until its own first trig in the new Part (carry_fit: T5-T8 change at f8268, the step-9 trigs). Reset to
+  0xff by 0x40004768 (the PLAY / load path), rewritten at the next trig. The step handler reads the trig word of step
+  s at track + 0x89a + 2s (0x4009d3ae; condition = bits 6-0 into 0x400a5164); conditions 1-8 Fill .. !1st, 9-29
+  probabilities, 30-64 A:B (labels 0x400b2588).
+- **Frame hook (cave).** `vf_win` now compares that per-track pair with the DB's bank / PART_B: a track is frozen (no
+  DB poll, its last verdict `vf_eng`) from PART_B's move until ITS first trig in the new Part -- so fix 3 and the
+  author's decision 4 are one rule: a held VARI note keeps its engine and speed until its own next trig (into a
+  non-VARI Part too), and a held non-VARI note into a VARI Part changes at its own trig (it was already so in FINAL:
+  rev_vari identical). The VEMG1 tag (`vf_tag`) and its always-on clamp are gone. Pending state in the unit:
+  `vgx_tgt` (the incoming Part, -1 none), `vgx_cl[t]` (a carried note's clamp), `vgx_ovr[t]` (the incoming Part's
+  engine cap). The carry path clamps once on the first carried frame under `vgx_tgt` (3 instructions when none is
+  pending); a trig whose live-bytes pair is `vgx_tgt` latches min(its EMUS, the cap) -- the boundary trigs included,
+  before the Part data says so.
+- **UI task (DRAM, `.vemui`).** `vgx_tick` per pass: a pending decision whose switch has come (APPLIED == vgx_tgt) is
+  COMMITTED: the capped tracks' EMUS -> OT in the Part (TSNS slot, SRAM copy, dirty flags; the live byte only of a
+  track that has already switched), the toast. A switch on its way (as VEMG1: the cue in the working bank, or the
+  window after PART_B / bank moved -- cross-bank cues here, the same commit-at-switch rule): price and publish (masked)
+  -- `vgx_cert` (a note trig on the new pattern's step 1, no trig-type layer, no swing, trig word 0: no condition,
+  probability, micro-timing or retrig; anything else counts as carrying), `vgx_olde` (each carried note's engine: the
+  latched one, or the live EMUS an old-Part trig may still latch), `vgx_est` (sure tracks: new alone; others max(old,
+  new)), stage 1 `vgx_stage` on the carried engines (clamp to OT), stage 2 on the next Part's (cap at OT), each in the
+  net's order, skipping steps that do not lower the estimate. Nothing on its way and a decision pending: dropped (a
+  cancelled or changed cue). Nothing is written before the switch; in the window the existing net still steps a Part
+  that is over on its own (as FINAL: own_step1 / own_late78 toast at f5114 as FINAL). `vg_entered` moved to the UI
+  section too (the cave needed the room for trigscale).
+- **Sizes.** Cave unit 5,692 B (0x400d6500..0x400d7b3c); DRAM unit 1,982 B; feature image: pattern_led 0x400d7b3c,
+  trigscale 0x400d7bdc, partreapply in DRAM, 2,386 B = 1 arena page, 127 B of the cave free. octabam reference (one
+  section) `44ed2c56…`.
+- **Gates** (`varispeed_emus_switch_test.py`, 28 cases, unit AND feature image vs FINAL; ALL PASS). Model est max /
+  frames over, FINAL -> VEMG2: mix_late 3,681 / 2,756 -> 3,307 / 0 (T5 / T6 clamped on the switch frame, the Part
+  unchanged, toast at f5513); mix_never 3,681 / 6,086 -> 3,307 / 0; mix_max 4,001 / 2,756 -> 3,253 / 0 (clamps + T7 / T8
+  capped, committed at f5512); mix_max_s2 4,001 / 2,411 -> 3,253; mix_xbank 3,627 / 2,756 -> 3,253 (decided in the
+  window, committed at the switch); cert_fill 3,841 / 3,486 -> 3,280 / 0; cert_prob 3,574 / 3,486 -> 3,200; cert_micro
+  3,841 / 14 -> 3,280 (the uncertain trig costs a cap for the whole Part: the rule); mix_nonvari 3,253 -> 3,253 (clamp
+  to OT on the switch, VARI speed kept to f8268). Byte-for-byte FINAL (engines, increments, steps, toasts):
+  ref_clean, carry_fit_step1, carry_fit, carry_s950_ot, carry_sp12_s950, own_late78, own_step1 (+ cue5100 / midipc /
+  chg4), cancel_mix_max, change_mix_max, cert_sure; nothing written: those + mix_late. No early change: mix_nonvari,
+  nonvari_fit (speed and engine kept to the own trig), rev_vari; own_xbank differs from FINAL only because FINAL drops
+  every voice to plain OT 400 frames before a cross-bank switch. No step before the switch, every toast with a step
+  or a commit.
+- **Suites.** varispeed_emus_test.py 44/45 (widget, pre-existing); net_part now expects a second toast: after the
+  net's step its transition is still 3,397 > 3,350, so the switch clamps a carried note (the test models it). Every
+  test variant builds. DSP boot check PASS both payloads; payloads FINAL's bytes. Equivalence vs FINAL: OTDEMO 35/35;
+  MMTESTDT 3/35 raw -- the larger DRAM payload ends the emulated load at another frame phase, so the harness's "frame N
+  after the transport start" pokes land 3 frames later relative to the sequencer (traced: the reaction to each poke is
+  1 frame in both images); with the base's pokes shifted +3 frames (`--base-shift 3`) 34/35 (tempo_edge_720 as always).
+- **Cost** (--coverage, 6,000 frames, 4 x SP12): UI pass idle (running, nothing on its way) 636.3 -> 663.2 (+27; VEMG1
+  +23); while a cue is on its way +~1,710 per pass (140 pricings x 1,662 + 50 per pass; VEMG1 ~840: two stages and the
+  certainty scan); frame hook body 320.1 -> 386.6 per frame (+66, ~17 per engaged VARI track; VEMG1 +73).
+- **A/B pack** out/ab_emus_guard2/ (A = FINAL feature image, B = VEMG2, each channel aligned to the sample): mix_late,
+  mix_max, mix_nonvari, nonvari_fit, cert_fill, own_xbank, rev_vari (identical), carry_fit (identical), cancel_mix_max
+  (identical), ref_clean (identical). MANIFEST.md / manifest.json.
+- **Build (WIP, NOT flashed):** `KYOTI_ALLOW_WIP=1 KYOTI_VERSTR=140C_VEMG2 python3 tools/build_varispeed_emus.py`:
+  out/VARISPEED_EMUS/OCTATRACK_OS1.40C_VARISPEED_EMUS.syx `12220cf0…`, CF .bin `1b56f4e7…`, mainos `e2faf75d…`; unit
+  `d23d9e63…`. Every other FINAL image unchanged (VARISPEED c3af514f, KYOTI V1.8 / V1.8C, CLYPS, the other features).
+- **For the author:** a clamp-only decision also raises the toast (at the switch); an uncertain first-step trig is
+  priced as carrying for the whole Part (cert_micro: a cap for a 14-frame carry); the net still steps a Part that is
+  over on its own when PART_B moves (FINAL's timing, after the commit point).
+- **The plain-VARISPEED port (not done):** see the report of this session; in short, the frame-hook half only (vf_win
+  on the per-track pair, .vf_frz, vf_eng: ~90 B, ~15 instructions per polled VARI track per frame) in the shared
+  source's VEM_EMUS = 0 path; re-pins VARISPEED's unit / feature image and KYOTI V1.8 / V1.8C (and V1.8BC on its
+  branch); KYOTI's CAVE has 92 B left beside it, so a UI piece moves zone; octabam's varispeed module reference.
+
+## 2026-11-19 (`vem11-promote`) — VARISPEED_EMUS VEM11 PROMOTED FINAL
+
+- **Hardware (the author):** `140C_VEMG2` (syx 12220cf0…, feature mainos e2faf75d…, unit d23d9e63…) flashed; all 8
+  FLASHING §4 "VARISPEED_EMUS VEMG2" checks pass (the clamp when the overlap does not fit, the step-down committed at the
+  switch, a cancelled cue leaves nothing, certain first-step trigs, no early pitch change incl. the reverse case,
+  another bank, stopped cue / the usual EMUS checks). The A/B pack: the author could barely hear any difference.
+- **Promoted on the author's word** from `212a9cc` (the VEMG2 commits only; the plain-VARISPEED port a373ff4..d867de5
+  stays on `emus-guard`, WIP): `build_varispeed_emus.py` unit dbf8cd68 -> d23d9e63, `feature_image.py`
+  mainos_varispeed_emus.bin 52823ea6 -> e2faf75d (rebuilt without the opt-in: identical), OS VERSION 140C_VEM10 ->
+  140C_VEM11 (wrap only). README: the Part-switch behaviour + Hardware confirmed (this image); BUILD_KYOTI OS VERSION.
+  Every other FINAL rebuilds to its pin. No octabam VARISPEED_EMUS module exists.
+## 2026-11-19 (`emus-guard`) — VARISPEED VRG1 (WIP, NOT flashed): the per-track freeze ported to plain VARISPEED
+
+The author heard little difference in the VEMG2 pack; VEMG2 goes to the hardware test as is. Port of "no early speed
+change" to the plain build.
+
+- **Change (shared source, plain path):** `vf_win` / `.vf_frz` / the `vf_eng` store are no longer inside `.if VEM_EMUS`;
+  the plain build has its own `vf_eng` (8 B). A track whose live-bytes Part (stock's pair 0x8000182a + t / 0x80001832
+  + t) is not the DB's current one is not polled and keeps its last verdict. VARISPEED_EMUS's bytes unchanged
+  (unit d23d9e63, feature e2faf75d, rebuilt). Plain unit 2,896 -> 2,996 B (0x400d6500..); octabam varispeed
+  reference 10db9694 (the manifest's only change). OS VERSION `140C_VRG1` (the requested `140C_VARIG1` is 11
+  characters; the field holds 10).
+- **KYOTI:** patch_varispeed 2,388 -> 2,492 B in CAVE (first, 0x400d6500). CAVE had 92 B left, so `move_for_varispeed()`
+  moves EMPTY_PATTERN_LED_FIX's predicate (UI task, 158 B) to SPRING REVERB's dead descriptor record (after QLR's key
+  handlers; 46 B left there; CAVE 148 B left) -- only in an image that carries VARISPEED and reclaims SPRING. Every
+  invariant reported clean (spans, B1 / B2, reclaim unreferenced, descriptor table). CLYPS standalone 94e41a22
+  unchanged.
+- **Gates (emulator).** Switch cases on the plain unit AND feature image (`check --plain`): ALL PASS. FINAL vs VRG1:
+  mix_nonvari / nonvari_fit -- FINAL: T5's held VARI note to stock speed at f5112 (400 frames, 145 ms before the switch;
+  T7 too); VRG1: T5 at its own trig f8268, T7 at its own trig on the switch f5512. rev_vari -- both at f8268 (identical).
+  own_xbank / mix_xbank -- FINAL: T5 / T7 drop to stock speed at f5112 and back at f5119; VRG1: nothing before the
+  switch. Identical increments: ref_clean, carry_fit, carry_fit_step1, own_step1, own_step1_stopped (a pattern / Part
+  changed while stopped: the first notes after PLAY), cert_sure, cancel_mix_max. The PLAY / load edge: stock resets the
+  pair to 0xff on PLAY (0x40004768, seen just before every run's transport start) and the first trig rewrites it
+  before the voice loop: every track's first note in every case is VARI (e.g. T5 0x3460e60 at f0), identical to FINAL.
+  varispeed_test.py (needs KYOTI_UNIT=1 now: it imports build_sidechain_compressor, whose gate hands off): unit 10/11,
+  FINAL 10/11 (widget, pre-existing); feature image 9/11 = FINAL feature (static flags the bug fixes' bytes: the test
+  predates feature images). Harness matrix VRG1 vs FINAL VARISPEED (tools/varispeed_emus_equiv.py): OTDEMO 35/35,
+  MMTESTDT 34/35 (tempo_edge_720 as always).
+- **KYOTI smokes (A = FINAL from the main checkout, B = VRG1):** V1.8C Clyps UI (diag_clyps_ui --only ABCDY): PASS.
+  V1.8C RS1 (diag_reflock, DJ jumps) and REF-LOCK c1 (16 <-> 7, DJ_MODE 0x40a96550 on: LAND commits): A == B, every
+  field. V1.8 diag_reload_quant (A-I, W, F): VERDICT PASS, 32 checks, its log identical to FINAL's. (Fixtures copied
+  read-only: DJTEST2 from the dj-restart worktree, the FINAL V1.8C Clyps symbols -- unchanged addresses.)
+- **Cost:** frame hook body 285.9 -> 342.2 instructions per frame with 4 VARI tracks (+56, ~14 per polled VARI track);
+  whole ColdFire +49 per frame. A track that is no VARI candidate pays nothing.
+- **A/B pack** out/ab_vari_port/ (A = FINAL VARISPEED feature image, B = VRG1): mix_nonvari, nonvari_fit, own_xbank
+  (first differences at 0.856 s = FINAL's early change), rev_vari, carry_fit, ref_clean (identical).
+- **Builds (WIP, NOT flashed):** VARISPEED `out/VARISPEED/OCTATRACK_OS1.40C_VARISPEED.syx` 2aae3558… (.bin 80870d5d…,
+  mainos f3317663…; unit 19d2aba8…); KYOTI V1.8 `KY18 VRG1` syx 07df9d49… (.bin c2e4255b…, mainos e9189233…); V1.8C
+  `KY18C VRG1` syx eba5cf5d… (.bin bbd286e1…, mainos 983d3f55…).
+- **V1.8BC (kyoti-bp, not touched):** at its merge, move_for_varispeed() puts pattern_led into SPRING too, but SPRING
+  there also holds patch_triglock_bp; if it does not fit, pattern_led (UI task) can go to DRAM (that image has a DRAM
+  arena) or another UI piece moves. Re-run its gates (BP one-per-core) and re-pin.
+
+## 2026-11-19 cont. (`emus-guard`) — VARIG2: QUAN enters VARI at 1/1 (VARISPEED VRG2, VARISPEED_EMUS VEMG3, KYOTI V1.8 / V1.8C VRG2; WIP, NOT flashed)
+
+The author on `KY18C VRG1`: turning SRC SETUP's TSTR to VARI showed QUAN `5/4` instead of `1/1`. The rule ("very
+important"): QUAN is ALWAYS 1/1 when a track goes to VARI, unless that track had another QUAN, left VARI and came back
+(then that value). PTCH comes back unchanged when it leaves.
+
+- **Not a regression.** `tools/varispeed_quan_entry_test.py` (new: 14 cases through the real panel in ot_emu, OTDEMO
+  FLEX + MMTESTDT STATIC) gives the same QUAN failures on FINAL VARISPEED (feature c3af514f), VRG1 (f3317663), KYOTI
+  V1.8C FINAL (9d1a29c9) and `KY18C VRG1` (983d3f55): legacy / forgot / stale / auto / partsw read `5/4` with PTCH +12;
+  VARISPEED_EMUS VEM11 (e2faf75d) the same but `forgot` (its SETUP page's EMUS dial polls the track). The design is
+  REPITCH rev 5's (5be77eb), retained. Not the 2026-10-23 rotary switch (it draws rk_bucket of the stored byte: 64 =
+  1/1 straight up, the same dial in every 1/1 case), not the TSNS / EMUS pair, not VRG1's freeze.
+- **Root cause** (VRG1 source `varispeed_emus.s`): which domain a machine's PTCH slot is in (PTCH or QUAN) lived only
+  in RAM, `rp_prev`, forgotten at every Part apply, bulk write and Part change (`rp_forget`, `rp_sync`) and
+  re-taken from the gate at the next poll ("first sight", rp_swap_m :2607 `bhi .sm_adopt`; the other machine in
+  rp_swap :2517-2520) -- without looking at the bytes. And entering took ANY park of 4 or more as QUAN (:2632-2637).
+  So (a) a gate that comes on before anything polled the track (a TSTR edit, a sample's TIMESTRETCH / tempo under
+  AUTO, a Part whose TSTR is VARI over bytes that never entered) is ADOPTED: the PTCH value is read as QUAN -- +12 =
+  raw 76 -> (76+3)/15 = stop 5 = `5/4`; (b) once such bytes leave VARI the park holds a PTCH value, saved with the
+  Part, and every later entry "remembers" it: `5/4` again, on every return, across sessions -- what the author saw
+  on a track that seemed fresh. A missed poll (stale rp_prev 0 over VARI bytes) re-enters and does the same.
+  The exact hardware trigger is not reproduced: in ot_emu every SRC SETUP open polls the track first (the PLAYBACK
+  dial underneath draws), and SAVE + RELOAD PROJECT, a power cycle (CS1), Part switches running or stopped, PLAY and
+  cues all came out clean. Seen in ot_emu: during RELOAD PROJECT the UI poll adopts the DEFAULT Part (gate 0) and the
+  loaded VARI Part then sits ~650 ms (emulated) before the apply's forget -- any poll there swaps PTCH into QUAN;
+  ot_emu makes none there, the unit's frame hook (FINAL: no freeze) may.
+- **Fix (VARIG2, the shared source; both builds and KYOTI).** The park says the domain:
+  - off VARI it holds nothing (below 4) or the QUAN of the last exit with bit 7 (`0x80 | QUAN`); on VARI it holds
+    PTCH, never below 4 (PTCH -64..-61 is parked as -60; it came back as 0 before);
+  - entering VARI: QUAN = the remembered one (bit 7), else `1/1`. A park an older build left off VARI (4..127, no
+    bit 7: an old QUAN, or the PTCH value the bug put there) is not memory: `1/1` (once per track an older build's
+    remembered QUAN is not kept);
+  - first sight on VARI: `rp_unent` -- a remembered QUAN, or an empty park under a slot that is no QUAN stop
+    (4 + 15k) = the entry is still to come, made now; PTCH parked, or an empty park under a QUAN stop (a VARI page an
+    SRC page paste brought) = on VARI, adopted. Off VARI nothing moves;
+  - leaving over a park with bit 7 (already off VARI) moves nothing;
+  - the other machine's first sight goes through rp_swap_m too (Part bytes only);
+  - VARISPEED_EMUS: the guard's "EMUS still parked" test is `rp_pend` (rp_prev 0, or forgotten over bytes still to
+    enter); `vg_tkey` moved to the UI section (DRAM) for cave room.
+  - Residual: a never-VARI track whose PTCH sits exactly on a stop other than 0 (+-15, +-30, +-45, +-60) edited to
+    VARI while rp_prev is forgotten adopts that stop; a missed poll on a VARI track re-enters (QUAN `1/1`, the parked
+    PTCH lost -- FINAL: `5/4` and lost).
+- **Sizes / placement.** Plain unit 2,996 -> 3,092 B (0x400d6500..0x400d7114); octabam varispeed reference 81989fcd.
+  VARISPEED_EMUS: cave unit ..0x400d7b38 (VEM11 ..0x400d7b3c), DRAM .vemui 1,982 -> 2,172 B (feature: + partreapply,
+  2,574 B, 1 arena page); octabam varispeed-emus reference 249eab1b. Feature images: VARISPEED partreapply 0x400d7114,
+  pattern_led 0x400d72a8, trigscale 0x400d7b00 (as VRG1, behind the larger unit); VARISPEED_EMUS pattern_led
+  0x400d7b38, trigscale 0x400d7bd8 (4 B lower than VEM11), partreapply DRAM 0x40a95e5c. KYOTI: patch_varispeed 2,492 ->
+  2,584 B in CAVE (56 B left), the CAVE pieces behind it +92 B; EMPTY_PATTERN_LED_FIX stays in SPRING at 0x400d5824
+  (V1.8 and V1.8C, as VRG1); build_kyoti.py unchanged.
+- **Gates (emulator).** `varispeed_quan_entry_test.py`: VRG2 feature, VEMG3 feature, `KY18 VRG2`, `KY18C VRG2` 15/15
+  each (ptch0, p12, m5, mem32, legacy, forgot, stale, auto, partsw, st_p12, st_mem32, reload = SAVE + RELOAD PROJECT,
+  power = CS1 power cycle, midi = no other Part byte moves, switch = the same 1/1 dial everywhere, another for 3/2).
+  The old images 6/15 (VEM11 7/15): the QUAN failures above, plus p12 / m5 / st_p12 / switch only because the exit
+  park now carries bit 7 (their PTCH came back right). varispeed_test.py (KYOTI_UNIT=1): unit 10/11, feature 9/11,
+  as VRG1 / FINAL (widget pre-existing; static flags the bug fixes' bytes); the swap test's exit park now 0x80 | 109.
+  varispeed_emus_test.py (VEM_STUB_AT=0x47fd8000): unit 44/45, feature 44/45 (widget pre-existing; ref_fx_alone after
+  rebuilding the lowbudget variant); every --build-variants test build builds. Switch tests: VEM unit + feature
+  (base VEM10) ALL GATES PASS, plain `check --plain` ALL PLAIN GATES PASS; against the VEM11 / VRG1 runs of the same
+  cases the per-frame increments (engines included), trigs and end Part dumps are identical in every case (VEM 30 +
+  28, plain 13 + 12); the plain events too; VEM's UI-task events (net checks that do nothing, PART_B's move, a
+  commit / step / toast) land one UI pass later in some cases, the same decisions. Equivalence matrix
+  (varispeed_emus_equiv.py, base = VRG1 / VEM11 units): OTDEMO 35/35 identical both; MMTESTDT plain 11/35 strict
+  but every 64-pass window delivers the same payloads (only the interleaving of passes moved), VEM 4/35 strict,
+  with `--base-shift 2` every voice's sequence of values identical in all 35 (the larger DRAM payload, +190 B, ends
+  the load at another frame phase, as VEMG2). KYOTI smokes (A = FINAL, B = VRG2): V1.8C REF-LOCK c1 and RS1 A == B
+  every field; diag_clyps_ui ABCDY PASS; V1.8 diag_reload_quant VERDICT PASS (32 checks), its log identical to FINAL's. Every other FINAL image rebuilds to its pin
+  without the opt-in (feature_image.py: MUTE_MODES, QLR, SIDECHAIN, TRIGLESS, RELOAD, DJK, RTM, BATCH_BUGFIXES;
+  build_kyoti --clyps-standalone 94e41a22); BLACKPYRAMIDS_303 not rebuilt.
+- **Builds (WIP, NOT flashed):** VARISPEED `out/VARISPEED/OCTATRACK_OS1.40C_VARISPEED.syx` 4710a2d2… (.bin 0c0efb00…,
+  mainos 4bfdf194…; unit d33f6a81…), OS VERSION `140C_VRG2`; VARISPEED_EMUS
+  `out/VARISPEED_EMUS/OCTATRACK_OS1.40C_VARISPEED_EMUS.syx` c99ff40a… (.bin eef0857c…, mainos 48386a0b…; unit
+  35548133…), `140C_VEMG3`; KYOTI V1.8 `KY18 VRG2` syx 6f436dfe… (.bin 82650569…, mainos 3063ea49…); V1.8C `KY18C VRG2`
+  syx 69b3b9e4… (.bin dc0f4236…, mainos e4ae2d7a…). FLASHING §4 "VARISPEED VRG2" item 7, "VARISPEED_EMUS VEMG3". Commit 2cdc8d1.
+- **V1.8BC (kyoti-bp; FINAL on origin/main 1f43bd3, not touched):** gets VARIG2 with VRG1 at its merge (patch_varispeed
+  +92 B more in CAVE; SPRING / pattern_led as the VRG1 note says); BLACKPYRAMIDS_303's signature 'O','T',1 sits in
+  NEIGHBOR p1 bytes 18..20, byte 18 = STATIC's PTCH park: 'O' = 0x4f reads as an old park (not memory: QUAN 1/1),
+  and a STATIC VARI exit writes 0x80 | QUAN there -- re-run the BP303 gates and check a STATIC VARI track beside an
+  OT-303 track; re-pin.
+## 2026-11-17 (`kyoti-bp`) — KYOTI V1.8BC: KYOTI V1.8C + BLACKPYRAMIDS_303 (WIP test image, NOT flashed)
+
+**The author's decisions (2026-11-17):** V1.8C's content + BLACKPYRAMIDS_303; SPRING REV **and PLATE REV** given up;
+ERASE_EMPTY_TRIGLESS_LOCKS skips BLKPYRAMD tracks; name "KYOTI 1.8BC" -> OS VERSION `KYOTI1.8BC` (10 chars; one
+constant, `BC_VERSTR` in build_kyoti.py), TAG `KYOTI_V1.8BC`. Not in it: RELOAD_FROM_PROJECT, VARISPEED_EMUS.
+
+**Build:** `KYOTI_ALLOW_WIP=1 python3 tools/build_kyoti.py --clyps-bp` (alias `--bc`; refused without the opt-in,
+never sealed: not in FINAL) -> out/KYOTI_WIP/KYOTI_V1.8BC/. The V1.8 / V1.8C / CLYPS FINALs rebuild to their pins
+without the opt-in (8807feee, 9d1a29c9, 94e41a22), as do the BP unit 5b7dfb2f and feature image ca3089ca, the SC
+unit 44465569 / image 4febe2e6, the ERASE unit 83690ffb / image db348f68 and MUTE_MODES' image 857d80d3.
+
+**DSP layout (both payloads, measured off our image):** PLATE REV's P module (594 w) ends where SPRING REV's
+(1,063 w) begins: 1,657 contiguous words; nothing outside reaches PLATE's words but its two dispatch entries
+(X:$215/$235[$14]; a full disassembly scan of every P module, and every X/Y data word).
+| | payload A (core 0, T5-T8) | payload B (core 1, T1-T4) |
+|---|---|---|
+| SIDE-CHAIN (677 w) | P:$1000..$12a5 (straddles PLATE/SPRING's record boundary, mapped word by word) | P:$0dc0..$1065 |
+| BLACKPYRAMIDS_303 voice | P:$12a5..$164d (936 w) | P:$1065..$1409 (932 w) |
+| spare | 9 w | 13 w |
+| DARK REV's helper (moved by the voice's build, as standalone) | P:$1656..$1679 | P:$1416..$1439 |
+| voice X | SPRING's five X records; run 1 at X:$7b04..$7bfb | same |
+| voice Y | $7a5..$feb | same |
+| SIDE-CHAIN Y | keybus $7e00..$7fff, MON $7df0..$7dff; window $33e00 | same; window $3be00 |
+Y/X disjoint. The moved voice = the standalone words up to relocated addresses (55 / 54 instructions; X and Y
+images identical); SC is assembled at its org by its own builder (dsp_asm + dsp_xasm cross-check).
+
+**Builders (placement only; every default = the standalone value):** SC `sc_dsp_org_*`, `sc_dsp_end_*`,
+`sc_donor_ids`; BP `bp_dsp_org_*`, `bp_donor_ids`, `bp_runtime` + `bp_runtime_dram`, `bp_mm_keymask`
+(tools/ot303/dsp_patch.py / hwprobe_image.py take an org; commit 3b7a580, `Thread: ot303`); ERASE
+`patch_triglock_bp` (tools/patch_triglock_bp.s, 122 B in SPRING's reclaimed record: ENC had 40 B left). Both SC and
+BP give up PLATE + SPRING with identical bytes (33, SHARED_OK); PLATE's ColdFire descriptor record stays stock
+(asserted), SPRING's record keeps patch_qlrec + patch_triglock_bp (82 B left).
+
+**DRAM:** the voice's loader only copies + hash-checks (no boot-time work), so its runtime is a unit of KYOTI's one
+DRAM image: DJ 4,012 B @0x40a955e0, BP 39,916 B @0x40a9658c, Clyps 28,576 B @0x40aa0178 (still last; its 10.4 MB
+of buffers follow). 72,504 B raw, 43,744 B packed, loader + payload 43,976 B; 1,719 arena pages (V1.8C: 1,709).
+
+**Found and fixed (WIP, this image only): MUTE MODE DT-T did not mute a BLKPYRAMD track.** The voice starts notes
+from the trigger flag (0x46104d0c, the frame builder's copy of 0x46104d15) before stock binds a voice, so
+MUTE_MODES' trig drop (fresh_bind / dt_trig) missed it (Modwerk #777's FM Synth case). ot_emu (octabam bc144523
+build from out/sc-leak, BOTLI, both tracks muted, main mix): DT-T -9.9 dBFS = unmuted level; OT / OTFX / OTFX-T
+-35.4 (AMP / post-FX cuts). Fix: control.c `KYOTI_MM_GATE` (only when build_kyoti passes MUTE_MODES' KEYMASK) asks
+mm_trig_muted's question (GATE 1/2, muted or unsoloed, less KEYMASK) and drops the note (consumed: queue stays
+paired) and a silenced track's live note. After: DT-T -35.4; muted tracks start 0 DSP notes in OTFX-T / DT-T.
+
+**Gates (all on mainos 7df332c7):**
+- composer: zones, disjoint deltas (SC x BP: 33 identical bytes, SHARED_OK), every byte owned, 160 code spans no
+  branch inside, B1/B2, reclaim, descriptor table, PLATE/SPRING off both choosers + id2e NONE + DSP stub, PLATE's
+  record stock; the FX2 list = stock minus PLATE and SPRING, order and id2pos consistent.
+- BP's verify (tools/kyoti_bc_check_voice.py = verify_ot303 pointed at this image): every line as standalone (ui,
+  flex round trip, park, renderer, line order on both cores, Y images, STG 2, the DRAM unit equal after the run,
+  KYOTI's loader once); PLATE REV = the stub (expected); DARK REV core 1 track 4 3267 vs stock 3252 = V1.8C
+  FINAL's own value (and bp-reclaim's known emulator effect).
+- every offered FX2 effect on both cores (tools/kyoti_bc_check_fx2.py) vs stock: same, but COMPRESSOR +22 (SC's
+  hook; identical to V1.8C FINAL) and PHASER / DARK jitter (V1.8C FINAL jitters the same way).
+- SC: emu_sc_dsp3 / _xcore / emu_sc_sctap at payload B's new org: ALL GOOD. ot_emu SCT1 tone fixture, keyed same
+  core, cross core, MON on core 1 and core 0 (both directions): per-track tone levels equal to V1.8C FINAL, 0.00 dB.
+- ERASE (tools/kyoti_bc_check_erase.py, Unicorn on the image): Flex last lock -> cleared; BLKPYRAMD -> kept; Static
+  with a stale signature -> cleared; other lock left / never-locked param -> kept; registers preserved.
+- DIRECT JUMP REF-LOCK (--cond): 16 <-> 7 standalone (gate1 S1, refs dj-clyps r1_0/r1_2) PASS, 5 segments, no
+  stock switch run; RS1 restart (16 -> 12 -> 12, refs dj-restart f1x/f1y) PASS, 4 segments.
+- Clyps UI (diag_clyps_ui.py --only ABCDY, OT DEMO): PASS (50 checks).
+
+**Cycle budget (estimate, not measured as a whole core):** the voice 591 / 636 emulator cycles a sample (square,
+mean / worst; ~738 on the chip); SIDE-CHAIN always-on ~30 instr (~39 cycles) a sample a core; a keyed COMPRESSOR
+stays cheaper than a DJ EQ, so it never makes a new worst case. Against BLACKPYRAMIDS_303.md §4's heaviest legal
+stack: core 1 square ~140-200 cycles spare, saw ~320-370; core 0 saw ~10-55, square ~-115..-170 (overrun, as
+before plus SC's fixed cost). Lighter stacks fit.
+
+**Not verified:** a Clyps FULL load onto/from a BLKPYRAMD track and a DIRECT JUMP across Parts with a BLKPYRAMD
+track (static only: the 136 B slice and Part bytes carry machine + signature; a FULL load can put a second
+BLKPYRAMD on a core, as stock TRACK PASTE can); SIDE-CHAIN keyed from/onto a BLKPYRAMD track (only tone tracks);
+anything on hardware. FLASHING §4 "KYOTI V1.8BC walk-through" lists the checks.
+
+## 2026-11-17 cont. (`kyoti-bp`) — One BLKPYRAMD per DSP core, on every path (WIP, NOT flashed)
+
+**The author's design (approved 2026-11-17):** refuse up front where the user acts (TRACK PASTE; Clyps' FULL loads in
+V1.8BC), with `ONE 303 PER CORE!` and nothing changing; a safety net on the UI task for every other way a second
+BLKPYRAMD reaches a core; the chooser / SRC SETUP refusals and the DSP's first-claim backstop stay. Evidence that
+started it (research, emulator): two to eight signed tracks on a core never crash, the extras are silent (the DSP's
+first claim wins), each extra costs ~1,000-1,400 CF instructions a frame; the unchecked writers were stock TRACK PASTE,
+a SRC page paste or other machine-byte writer reviving a STALE signature, Clyps FULL loads, and project / bank loads.
+
+**What changed (tools/ot303/cf/control.c "One BLKPYRAMD per DSP core, on every path", machine.s, the builder):**
+- **TRACK PASTE** -- detour at the paste wrapper's entry **0x4002b988** (`7004b0b9460d0ffa`, machine.s
+  `ot_paste_hook` -> `ot_paste_ok`), not at 0x4002b654: VARISPEED owns that one (`vh_trkpaste`) in V1.8BC, and stock's
+  undo calls it too. When the clipboard (0x460c8122, kind 0x460d0ffa = 4) holds a BLKPYRAMD (its slice: machine
+  +0x91e, signature +0x931) and another track on the target's core in the pattern's Part is one: nothing pasted, the
+  undo state cleared as stock's own undo leaves it (0x460c80f4 / 0x460c80f0), the wrapper returns 0 (the paste key's
+  handler 0x4005eb50 then shows no PASTE TRACK), the toast. An UNDO that brings a second one back is left to the net
+  (refusing it there would make the handler paste instead: 0x4002b910 returning 0 falls through to the paste).
+- **The net** (`bp_net`, from `bp_uitail`): the UI task's message-loop tail **0x40062d1c** (`tst.l 0x46c7c72c`):
+  standalone a `jsr bp_uitail` there (the net, then the displaced test; rts keeps its flags for stock's beq.w). Every
+  pass scans the current bank's four Parts (machine byte + signature, a byte or two a track). Per core, two or more
+  signed tracks: the track that alone held that core of that Part at the previous pass stays, else (after a load or a
+  bank change) the lowest-numbered; the others -> `ot_assign(part, t, 0)` (FLEX's stash = the pre-303 values, the
+  knobs parked; both Part copies), the current Part's track republished (0x400972fc(part, t, 1), as SRC paste does at
+  0x40027fbc), the Part marked edited as stock's TRACK PASTE marks it (bank+0x95048 and 0x100b145e bit p as bytes,
+  bank+0x9b332 = 1, 0x100f8598 = 1), RDRAW, the toast once. A **stale** signature (signature, machine not FLEX) is
+  cleared the same way, without a toast (nothing was refused). `ot_validate_part` only notes a Part with two on a core
+  or a stale signature (`bp_pend`, no toast: it runs inside the load); with `bp_pend` the net acts on a state seen on
+  two passes in a row (the load may still be writing) and keeps the lowest-numbered. Idle cost: **525 instructions a
+  pass** (ot_emu watch-pc timestamps, min = median over the timed passes, standalone and V1.8BC alike).
+- **V1.8BC (Clyps):** tools/clyps/patch_clyps.s / clyps_reload.s, all inside `.ifdef BP_CLASH` / `BP_UITAIL`, which
+  only `build_kyoti.py --clyps-bp` defines (build_clyps.py `BP_SYMS` from kyoti_place keys `bp_refuse_load`,
+  `bp_uitail`; pass-1 stand-ins `BP_SIZING`). `cl_bpgate` asks BLACKPYRAMIDS_303's `bp_refuse_load(dst, src[8], mask)`
+  before any FULL load: dst the playing pattern's Part, src[t] the Part t's slice comes from (this load's, via
+  `cl_bpsrc` = cl_fullone's sources: slot (cl_shsrc), ORIG snapshot, SAVEPART, RQ_PART; or a FULL load still cued for
+  t), refused when a core would end with two and one of them comes with this load. Asked at: cl_exec (between its two
+  passes: every target of a trig / [YES], groups included), cl_restore (ORIG SEQ/MCH/FX), cl_restorepat (ORIG
+  PTN+PART), the temp reload (ty_ours), the card's (cl_rqarm: the pattern and the batch of tracks, cl_rqarm1 alone).
+  Refused: nothing loaded or cued, no load flash / TEMP TRK RELOADED / card toast (rq_msg cleared), BP's toast once.
+  Clyps owns 0x40062d1c (cl_uitail): its first instruction is `jsr BP_UITAIL`; build_kyoti.py's SUPERSEDE gets the
+  entry (CLYPS, BLACKPYRAMIDS_303, 0x40062d1c, bp_uitail, BP_UITAIL) and the voice is now built before Clyps
+  (apply_bp). Without the flags Clyps assembles byte for byte as before: V1.8C 9d1a29c9 and CLYPS 94e41a22 rebuild to
+  their pins.
+
+**Builds (WIP, NOT flashed):** standalone `KYOTI_ALLOW_WIP=1 KYOTI_VERSTR=140C_BP1PC python3
+tools/build_blackpyramids_303.py` -> out/BLACKPYRAMIDS_303/ (unit and feature image both WIP now: the unit no longer
+matches 5b7dfb2f, the image no longer ca3089ca); KYOTI V1.8BC `KYOTI_ALLOW_WIP=1 python3 tools/build_kyoti.py
+--clyps-bp`. Hashes in the commit and FLASHING §4.
+
+**Images (WIP, NOT flashed):** standalone unit mainos `21855b85…`; feature image mainos `63c3556b…`, syx `0f3f8994…`,
+.bin `2a326132…` (`140C_BP1PC`); KYOTI V1.8BC mainos `fa5f7143…`, syx `7e4c2ff1…`, .bin `1bf5bd3d…`. Runtime +1,800 B
+(V1.8BC unit 41,716 B).
+
+**Gates (emulator; logs in the worktree's out/bp1pc/):**
+- `tools/ot303/verify_one_per_core.py` (ot_emu, BOTLI, stock routines through call steps), feature image and V1.8BC:
+  ALL GOOD both. paste T1->T3 refused (wrapper 0, the Part byte for byte unchanged, undo cleared, NOTIFY once with our
+  text); T1->T5 pasted (no toast); stale: T2 STATIC by a machine-byte write, T1 made one, T2 FLEX again -> FLEX with
+  its pre-303 values, not a BLKPYRAMD, 1 stale cleared, no toast; load_two (T2 + T3, validator run): T2 kept, T3
+  FLEX with its pre-303 values in both copies, Part edited, 1 toast; held (T2, then T1 arrives): T2 kept, 1 toast;
+  two Part switches between Parts with BLKPYRAMD on T2 / T3: nothing refused or demoted, no toast; idle pass 525
+  instructions. Control on the old FINAL image (ca3089ca): paste -> T1 + T3, stale -> T1 + T2, load -> T2 + T3,
+  all on core 1, no toast.
+- `tools/kyoti_bc_check_onepercore.py` (route A, OT DEMO, real keys): single FULL refused (sequence + slice
+  unchanged, nothing cued, no flash, 1 toast); a `[CUE]` group T2 + T5 refused whole (T5 alone would land), 1
+  toast; T5 alone lands as a BLKPYRAMD; sequence-only unaffected; temp reload refused (no TEMP TRK RELOADED, 1
+  NOTIFY): ALL GOOD. (Route A: `[CUE]` must be pressed before `[FUNC]` -- with `[FUNC]` held it is stock's key.)
+- Regression: every other FINAL rebuilds to its pin without the opt-in (KYOTI V1.8 8807feee, V1.8C 9d1a29c9,
+  CLYPS 94e41a22; the MUTE_MODES, QLR, SC, ERASE, RELOAD, DJK, RTM, VARISPEED, VARISPEED_EMUS, BATCH_BUGFIXES
+  feature images). BP verify (standalone unit, and kyoti_bc_check_voice on V1.8BC): every line as before but the
+  core-1 DARK REV stopwatch on track 4 (deterministic; the old FINAL unit 5b7dfb2f gives the same 3207 below
+  stock's 3248 minimum, so it fails identically there) and, on V1.8BC, PLATE (given up, by design). MUTE matrix:
+  muted tracks start 0 notes in OTFX-T / DT-T (BOTLI loads with T1/T3-T6 muted, 0x3d: the "none muted" DT-T row
+  drops T6 for that reason). SC levels (SCT1, 10 scenarios both cores) vs V1.8C FINAL: 0.00 dB. DJ REF-LOCK 16<->7
+  (c1) and RS1 (n1): every recorded field identical to the V1.8BC run that passed. Clyps UI ABCDY: PASS (50).
+
+**octabam / Modwerk (read-only survey; not changed, the author's call):** neither prevents a second instance except at
+the chooser / SRC SETUP. octabam modules/blackpyramids-303 carries the same control.c: `ot_admit_track` only from the
+commits; its validator never counts; no hook on 0x4002b654 / 0x4002b988 / 0x4008cea0 (VARISPEED's vh_trkpaste only);
+RELOAD's `rl_slA` copies machine + page 1 (the signature) with no admission; HOOKS' MACHINE_ROWS / MC_LIMIT do not
+list BLACKPYRAMIDS. Modwerk (origin/main machine_registry.c; BP only on the blackpyramids / bp-usb branches):
+`admit_track` only on selection (`mw_assign`); `charge()` re-books DSP cycles after loads / Part changes / pastes but
+never calls admit, so a second signed BP on a core is charged when the cycles fit; `mw_validate` masks PROTECT bytes
+only; the "lease" is the controller write lease. In both the DSP's first claim keeps the extra silent.
+
+**Not verified:** anything on hardware; Clyps ORIG TRK FULL / ORIG PTN+PART and the card reloads (gated in source,
+not driven in the emulator: OT DEMO's originals hold no BLKPYRAMD, and the card job was not run); a cued FULL load
+while running (the gate runs at the press; only stopped-transport loads were driven); the net during a real
+LOAD PROJECT from the card (the validator was called directly; whether the UI task can run mid-load on the unit is
+not known -- the two-identical-passes wait is the guard); stock's own undo bringing a second one back (the net's
+holder rule was driven by RAM, not by the undo key); the repair pass's cost (interrupts land inside its timing).
+FLASHING §4: BLACKPYRAMIDS_303 "One per core" and KYOTI V1.8BC item 10.
+
+## 2026-11-18 (`kyoti-bp`) — the one-per-core net made cheap when idle (WIP, NOT flashed)
+
+**The author's request (2026-11-17):** the net ran a full 4-Part scan after every UI message (525 instructions, the
+60 Hz tick included); make the idle pass well under 100 with every path still covered.
+
+**Design (machine.s `bp_uitail`, control.c `bp_fp` / `fp_take` / `net_cause`):** an assembly fast path at the UI loop's
+tail returns at once when everything the net reads is as its last full pass left it: the bank pointer, the wake flag,
+a periodic count (a full pass every 60 passes, about a second at the 60 Hz tick), the UI Part (0x100b14cf) and the
+engine Part (0x80000003), the playing / pending pattern (the long at 0x800065bc = PLAY_BANK, ACT_PAT, PEND_BANK; and
+PEND_PAT 0x800065c0), and the active Part's fingerprint: its 8 machine bytes (two longs) and each track's first two
+signature bytes ('O','T'; four longs, two tracks a long). Any difference -> `bp_net`, the full scan of all four Parts,
+exactly as before (holder rule, FLEX with pre-303 values, stale cleared without a toast, one toast, the two-stable-
+passes rule after loads), which then takes the new fingerprint. The wake flag is set by the writers that can reach a
+Part the fingerprint does not watch: the Part validator (every load), the TRACK PASTE hook, an allowed Clyps FULL load
+(bp_refuse_load, V1.8BC: no Clyps edit needed). Writers of the active Part (SRC page paste, the file browser's
+assigns, an undo, the chooser) change its fingerprint. A non-active Part is scanned when it is cued (PEND_PAT: before
+it plays a step), when it becomes active, after any wake, and once a second regardless. Only a change to a track's
+third signature byte alone in the active Part waits for the periodic pass. `bp_net_why` / `bp_net_fixpart` record
+why a repairing pass ran and which Part the engine played then (gate only).
+
+**Cost (ot_emu watch-pc instruction-count timestamps):**
+| | before | after |
+|---|---|---|
+| idle pass | 525 | **54** (min = median, 738 standalone / 759 V1.8BC passes timed) |
+| full pass | 525 (every pass) | 506-603 in bp_net + 5-7 for the checks before it |
+| worst pass timed | ~91,000 (an interrupt inside) | 8,500 (the repairing pass: ot_assign x2 copies, the republish, the toast; or an interrupt) |
+| a second at 60 passes | 31,500 | ~3,700 (59 idle + 1 full) |
+
+**Gates (out/bp1pc/):** `verify_one_per_core.py` ALL GOOD on both images with two new scenarios: two BLKPYRAMD written
+into Part 2 (not active) and pattern 1 (-> Part 2) cued while running -> repaired at the cue (why 8) while Part 1 still
+played; the same with no cue -> repaired by the periodic pass (why 16), Part 1 playing. Every earlier scenario as
+before. `kyoti_bc_check_onepercore.py` ALL GOOD; Clyps UI ABCDY PASS (50); BP verify, MUTE matrix, SC levels (0.00 dB,
+10 scenarios) as before (verify: only the pre-existing core-1 DARK REV line, and PLATE on V1.8BC); DJ REF-LOCK c1 / RS1 n1:
+every recorded field identical to the passing V1.8BC run; every other FINAL rebuilds to its pin without the opt-in
+(KYOTI V1.8 / V1.8C / CLYPS and the ten feature images: 13 of 13).
+
+**Images (WIP, NOT flashed):** standalone unit mainos `62ac6e44…`; feature image `140C_BP1PC` mainos `dfde2b50…`, syx
+`0e10e65a…`, .bin `c97ff3a3…`; KYOTI V1.8BC mainos `b3df2058…`, syx `48d10402…`, .bin `87e40e6d…`.
+**Not verified:** hardware (the fast path's misses would show only as a late repair: within a second at worst); the
+real UI message rate on the unit (the amortised figure assumes the 60 Hz tick alone).
+
+## 2026-11-19 (`kyoti-bp`) — KYOTI V1.8BC + BLACKPYRAMIDS_303 (one per core, SRC page paste) PROMOTED FINAL
+
+**Hardware (the author's MKI).** First image (V1.8BC mainos `b3df2058…`, syx `48d10402…`): FLASHING §4 V1.8BC items
+1-10 pass; of the BLACKPYRAMIDS_303 checks, run on V1.8BC: B1 (TRACK PASTE T1->T3 refused) and B2 (T1->T5 allowed,
+both play), B3 (stale signature), B5 (Part changes) and B7 (idle feel) pass; B4 (UNDO bringing a second one back) is
+not reachable from the panel: making T1 a BLKPYRAMD selects T1, and back on T3 `[FUNC]` + PASTE is PASTE TRACK again;
+B6 (a project saved with two on a core) skipped (the author's choice, both images). The standalone image was never
+flashed as such: its code is V1.8BC's (one source, other placement).
+- **Seen once, not reproduced:** while setting up A10 by TRACK COPY of T1's BLKPYRAMD and TRACK PASTE onto T2 / T5 of
+  a pattern on another Part, PLAY left step 1 lit and the sequencer did not advance. The author could not repeat it;
+  ot_emu replay (out/kbc/a10_repro.py: the paste into pattern 1 / Part 2 and the cue, the chooser route, B2, a
+  control) stepped normally in every variant. (In that replay, pasting into a pattern not on screen moved the engine
+  Part to 2 and the voice rendered nothing until the cue landed: an artefact of calling the paste for a pattern the
+  UI is not on, which the panel cannot do.) If it comes back: the steps, then a diagnostic image.
+- **Found (B3):** a FLEX SRC page pasted onto a BLKPYRAMD track left it a BLKPYRAMD with FLEX's numbers (VOL 0 ...).
+  A page holds one machine's twelve bytes + the machine (copy core 0x40026314, paste 0x40027e4c, kind 26 at +0x8ed8 in
+  the clipboard 0x460c8122 or the undo buffer 0x460bf218; the [FUNC]+PASTE handler 0x4005df40: UNDO 0x40028f40 first,
+  else the undo save 0x40027d64 and the paste 0x40028fc4). An OT-303 is FLEX in those bytes, its signature in
+  NEIGHBOR's, which a FLEX page never touches. **Fix (control.c ot_pgcopy / ot_pgpaste, machine.s):** the copy core
+  notes whether the copied SRC page is an OT-303's (`bp_pg[2]`, clipboard / undo buffer); the page paste (entry
+  0x40028fc4) and the page UNDO (its `pea 0x460bf218` at 0x40028f94, a jsr that leaves the pea's long) assign before
+  stock writes: onto an OT-303 from any other page -> ot_assign(.., 0) (FLEX back, knobs parked), then the pasted
+  values; an OT-303's page onto another machine -> ot_assign(.., 1), refused with the toast when the target's core
+  has another in that Part (the paste returns 0: the handler clears the undo state, no PASTE toast); an UNDO is never
+  refused (a refusal there makes the handler paste). VARISPEED owns 0x40027e4c (`vh_srcpaste`), hence the callers.
+  Gate `tools/ot303/verify_page_paste.py` (flex_on_bp + UNDO, bp_on_flex other core / own core, static_on_bp): ALL
+  GOOD on both images. The author flashed V1.8BC with it (`25bd7a24…`): as intended.
+
+**Promoted on the author's word**, rebased onto origin/main (0218091, VARISPEED_EMUS VEM11) and rebuilt there: the same
+hashes as the flashed / gated builds. Pins: KYOTI V1.8BC mainos `4c7fb0fe…` (syx `25bd7a24…` = the flashed file, .bin
+`2182062c…`); BLACKPYRAMIDS_303 unit `b3327bd3…` (was 5b7dfb2f), feature image mainos `6a124db1…` (was ca3089ca; OS
+VERSION `140C_BP303`, syx `f7efb1c7…`, .bin `8b2b2df3…`). `build_kyoti.py --clyps-bp` builds without the opt-in into
+out/KYOTI/ (reads its pin as `--clyps` does); the `tools/kyoti_bc_check_*.py` gates read out/KYOTI/.
+
+**Gates (after the page-paste change):** verify_one_per_core ALL GOOD (both images); kyoti_bc_check_onepercore ALL GOOD;
+Clyps UI ABCDY PASS (50); DJ REF-LOCK c1 / RS1 ran; voice check (V1.8BC) and verify_ot303 (unit): as before, only the
+core-1 DARK REV stopwatch line (3267 / 3286 vs stock 3252, the known emulator effect) and PLATE on V1.8BC (given up);
+MUTE matrix as before (muted tracks start 0 notes in OTFX-T / DT-T); SC levels vs V1.8C FINAL 0.00 dB (10 scenarios).
+**Trap:** `diag_clyps_ui.py` reads Clyps' symbols from `CLYPS_SYMS`; out/bp1pc/bc_clyps_syms.txt was the previous
+build's, and the voice runtime growing 1,460 B (41,716 -> 43,176) moved 1,154 of Clyps' 1,364 symbols (Clyps follows it in DRAM): Y FAILED
+and then looped forever in `while state()["cur"] != q: tap(DOWN)`. Regenerate it from the map
+(`kyoti_v1.8bc_map.json` symbols.patch_clyps_dram) after any change to a unit before Clyps.
+
+**Next:** octabam's `blackpyramids-303` gets everything (TRACK PASTE refusal, the net, the SRC page fixes; no Clyps
+there): an octabam test image for the author to flash first, then the pin PR to Sam (octabam PR checklist). Modwerk's
+form stays parked (#1542). Clyps' owner told: tools/clyps/* has the V1.8BC-only BP_CLASH / BP_UITAIL blocks (Clyps and
+V1.8C byte-identical without them).
+
+## 2026-11-19 cont. (2) (`emus-guard`) — VRG3: VARISPEED keeps its state in bytes of its own, beside BLACKPYRAMIDS_303 (VARISPEED VRG3, VARISPEED_EMUS VEMG4, KYOTI V1.8 / V1.8C / V1.8BC; WIP, NOT flashed)
+
+The author's direction after the bc-park probe (out/bcpark in the bc-park-probe worktree): give each feature its own
+bytes (VARISPEED moves), migrate old projects, defend both sides, keep everything else; aim at a promotable build.
+Merged origin/main (KYOTI V1.8BC FINAL) into emus-guard first (0a3162e; build_kyoti.py kept both sides).
+
+**The clash (probe, V1.8BC FINAL):** VARISPEED parked STATIC's PTCH in NEIGHBOR page-1 byte 0 and FLEX's in byte 5
+(VARISPEED_EMUS also page-2 bytes 3 / 5); BLACKPYRAMIDS_303 uses all twelve NEIGHBOR bytes (signature 'O','T',1, the
+FLEX stash, its mark 0x50 and parked knobs). Reachable: S1 FLEX VARI -> BP -> FLEX back TSTR OFF, PTCH lost; S6/S7
+STATIC PTCH +12 -> +16 (0x50 written over the park, also by browsing the BLKPYRAMD row); S2 an ex-BP track enters VARI
+at 5/4; S4b an ATTR TIMESTRETCH edit broke a real BP's signature; S3 / S5 / S4c rarer. Separately VARIG2's off-VARI
+memory (0x80 | QUAN) was zeroed by stock's Part validator on every load.
+
+**Research: where can a value live (stock image, ot_emu; scripts out/bytehome/ in this worktree).**
+- Stock's Part validator 0x40002318 (every load) clamps each machine slot to its descriptor's [min, min + count):
+  every '---' slot has count 128 -> 0..127 kept, >= 128 zeroed (measured on the new bytes: 0..127 kept, 0x80 / 0xc5 /
+  0xff -> 0). The bank read/write 0x4008c4xx..0x4008ceb2 copies the page blocks raw (with its checksum).
+- **Every SETUP-page '---' slot is editable** (THRU p2 0..5, NEIGHBOR p2 0..5, PICKUP p2 0..3): on that machine's SRC
+  SETUP page, and from the SRC SETUP machine chooser with the cursor on that row, on ANY track (that is S7's mechanism,
+  and it also edits VARISPEED_EMUS's old TSNS parks in NEIGHBOR p2). Page-1 '---' slots are not: THRU p1 slots 2 / 5
+  and NEIGHBOR p1 0..5 kept under every encoder on the SRC page, a held trig + encoder, MIDI CC 16..21 on all 16
+  channels (VOL / INAB moved there: the CCs arrived).
+- The slot record's THRU (+2) and NEIGHBOR (+3) bytes (0x2ca + 5t): no slot list, the validator only zeroes a negative
+  one; the slot lookup 0x40031d18 returns 0 for machines 2 / 3; the THRU / NEIGHBOR trig handlers (0x400043f4 /
+  0x4000463c via 0x400d6454) take the slot argument and ignore it.
+- Sweep (out/bytehome/ui_abcd.py): the machine chooser through all five machines with every SRC and SRC SETUP encoder
+  turned on each, chooser browsing with knobs on every row, a THRU and a NEIGHBOR track's pages: those four bytes kept
+  on all eight tracks, both copies. Readers while playing (a unique-PC read watch, a local ot_emu option
+  OT_WATCH_READ_UNIQ in out/emu/octabam, not committed): the validator, the copies, the bank I/O, the Part applies
+  (THRU p1 / p2 into the live lane, which the frame sends to the DSP).
+- Audio: T1 as THRU passing the tones input with a trig, THRU p1 slots 2 / 5, THRU p2 and both slot bytes poked
+  non-zero: the core-0 output bit for bit the same as with zeros (a positive control, THRU VOL 64 -> 100, changes it).
+- The one stock writer: SRC page paste of a THRU page (writes THRU p1 2 / 5 and THRU's slot byte) or a NEIGHBOR page
+  (NEIGHBOR's slot byte). Whole-track copies (TRACK PASTE, PART paste / reload, Clyps' slice, RELOAD's) carry them with
+  the rest of the track.
+
+**The byte home (VRG3), per track t, Part-relative:** VP_ST = 0x2a + 30t + 14 (THRU p1 slot 2), VP_FL = + 17 (THRU p1
+slot 5), VM_ST = 0x2ca + 5t + 2 (THRU's slot byte), VM_FL = + 3 (NEIGHBOR's slot byte). VP_m: the PTCH while machine m
+is on VARI (4..124), else 0 -- its being >= 4 says the bytes are on VARI (so no domain bit is needed). VM_m: off VARI
+the remembered QUAN + 1 (bits 0-3; 0 none -> 1/1), VARISPEED_EMUS's remembered EMUS stop + 1 (bits 4-5), and FLEX's
+bit 6 "BLACKPYRAMIDS_303 took the track on VARI"; on VARI VARISPEED_EMUS's parked TSNS (VARISPEED: 0). Every value <=
+127. The SRC page paste wrapper vh_srcpaste (VARISPEED's since O2) keeps the four bytes across the paste (vh_pgsave /
+vh_pgrest; an UNDO comes through it too) and clears the pasted machine's pair when a STATIC / FLEX page lands (those
+twelve bytes are another track's), unless the track is a BLKPYRAMD after it.
+
+**The swap (rp_swap_m), now deciding by the bytes:** gate on: PTCH parked -> nothing moves (a missed poll no longer
+re-enters); a transition -> the entry; first sight -> VARIG2's rp_unent (a pasted VARI page adopted). Gate off: PTCH
+parked -> the exit, also at first sight (a gate that went off while nothing polled the track); a transition from on over
+nothing kept under a QUAN stop -> the exit with PTCH 0 (VARIG2's pasted-page case); else nothing. Byte moves in
+rp_xfer, offsets in rp_offs.
+
+**Migration (rp_migrate, at first sight; and in vh_bptake before the voice overwrites NEIGHBOR):** NEIGHBOR's bytes
+are an older build's VARISPEED park only when page-1 bytes 1-4 and page-2 bytes 0-2 and 4 are all 0 (VARISPEED never
+wrote them; BLACKPYRAMIDS_303 writes all twelve). Then page-1 byte 0 / 5 is STATIC's / FLEX's old PTCH park: gate on and
+4..127 -> VP (the bytes are on VARI); gate off -> dropped (VARIG2's rule: an old park off VARI is no memory);
+VARISPEED_EMUS also moves page-2 byte 5 / 3 (gate on: the TSNS park; off: the parked EMUS, remembered). The old bytes
+are cleared. With BLACKPYRAMIDS_303's bytes present only STATIC's byte 0 is still determinable: if it is neither 0x50 nor
+the signature it is the park V1.8BC FINAL wrote over the voice's mark -> it moves in and 0x50 goes back (the voice's
+parked knobs count again); FLEX's byte 5 is the voice's then (stash / parked DEC): not read. Residual: a V1.8BC FINAL
+track whose FLEX entered VARI after a BP round trip keeps the PTCH FINAL had (unknowable); a parked-knob block that is
+all zero (PTCH C0, CUT 0, RES 0, ENV 0, WAVE 0, TUNE 0, SLID 0, VOL 0) would read as VARISPEED's.
+
+**Mitigations.** VARISPEED never touches a signed BLKPYRAMD track (FLEX + 'O','T',1) on either machine: rp_bpt in
+rp_gate_m (gate 0: its VOL 4 is no VARI) and in rp_swap_m (nothing moves, rp_prev untouched) -- the frame poll,
+rp_poll_all (the ATTR editor's tail), the widgets and vgx all go through them. BLACKPYRAMIDS_303 (control.c, only
+when build_kyoti passes KYOTI_VARI_TAKE / _BACK = VARISPEED's vh_bptake / vh_bpback, V1.8BC): ot_assign calls take
+before it stashes FLEX (both machines' old park migrated; FLEX off VARI: PTCH back in its slot, QUAN remembered; a TSTR
+of VARI remembered in VM bit 6) and back after FLEX is put back (TSTR VARI again; the next poll enters with the
+remembered QUAN); both forget rp_prev. The voice's park_defaults / stash / stale clear write only NEIGHBOR's and
+FLEX's bytes, none of VARISPEED's. STATIC's bytes are not the voice's: a STATIC VARI track keeps its state through a BP
+round trip as it is.
+
+**Size / placement.** Plain unit 3,092 -> 3,900 B standalone (octabam reference 3aa1d430…); VARISPEED_EMUS cave unit
+5,176 B (was 5,688: UI-task code moved to its DRAM .vemui section, 3,536 B; octabam reference 25de0d63…). The UI-task
+code (the ATTR hooks, the formatters, QUAN's dial / step / qdials, rp_poll_all, the bulk writers' holds, the page-paste
+guard, vh_bptake / vh_bpback) is the source's UI section (`VEM_UI_SECTION`); the frame path stays in the cave
+(varispeed_buildlib.FRAME_PATH, checked for both builds). KYOTI: build_varispeed links that section apart
+(link_split) as a new piece `patch_varispeed_ui` in KYOTI's DRAM payload (before Clyps; V1.8 1,390 B, V1.8BC 1,610 B
+with VEM_BP); the cave keeps 2,004 B (was 2,584) and EMPTY_PATTERN_LED_FIX's predicate goes back to CAVE in every image
+(`move_for_varispeed()` removed): CAVE 476 B left in V1.8 / V1.8C / V1.8BC, SPRING as before VRG1 (204 B / 82 B left).
+This fixes the merged V1.8BC, which no longer built (SPRING could not hold pattern_led beside patch_triglock_bp).
+Arena: V1.8C 1,709 pages (as FINAL), V1.8BC 1,721, V1.8 12. BLACKPYRAMIDS_303's runtime +16 B in V1.8BC (the two
+calls; after the merge below 46,532 -> 46,548 B).
+
+**BLACKPYRAMIDS_303 standalone: unchanged** -- the control.c hooks are compiled only with KYOTI_VARI_TAKE; the
+standalone unit and feature image rebuild to their pins without the opt-in (before the merge below b3327bd3… /
+6a124db1…, after it the re-promoted 1d53ef7f… / b4b55638…). No 140C_BPVR1 was needed.
+
+**Gates (emulator).**
+- QUAN entry (tools/varispeed_quan_entry_test.py, now 18 cases + the switch; new: mem_reload, mem_power, final_vari,
+  final_off -- the last two save on the main checkout's FINAL VARISPEED / VARISPEED_EMUS and load here): 19/19 on
+  140C_VRG3, 140C_VEMG4, KY18 VRG3, KY18C VRG3 (KY18BC VR3: see below).
+- The bc-park scenarios (out/bcpark in this worktree, BC_RUNS=runs_vr3 / runs_vr3b): S1 FLEX VARI -> BP -> FLEX: TSTR
+  VARI, QUAN 1/1, PTCH +12 parked, BEAT +12 (FIXED); S2 / S2r ex-BP -> STATIC -> VARI: 1/1, BEAT gives the original
+  PTCH, BP's CUT 100 back on its return (FIXED); S3 / S3b no stale clear, PTCH +15 / 0 back (FIXED); S4b the real BP's
+  signature intact through the ATTR edits (FIXED); S4c VOL 4: no swap, PTCH knob 40 kept (FIXED); S5 / S5b no phantom
+  (FIXED); S6 / S7 STATIC PTCH +12 back (FIXED); S8 page / track paste cases: as V1.8BC FINAL's paths, the refused
+  BP-onto-VARI paste leaves the VARI track's PTCH +12; S9 3/2 memory beside two BPs; partsw, reload (ex-BP track enters
+  1/1, FIXED), vol4 as above. Migration from V1.8BC FINAL saves (out/bcpark/mig_bc.py): M1 a never-BP STATIC VARI
+  track (QUAN 3/2): VP 76 moved in, BEAT +12, 3/2 remembered; M2 BP -> STATIC -> VARI (FINAL wrote the park over the
+  mark): PTCH +12 back, the mark restored (BP's CUT 100 back on BLKPYRAMD); M3 STATIC VARI beside a real BP: migrated,
+  the BP untouched. In S8 synthetic pokes without a poll the end state is the bytes as poked (no poll ran): harmless.
+- VARISPEED suites: varispeed_test.py (KYOTI_UNIT=1) unit 10/11, VARISPEED_EMUS varispeed_emus_test.py unit 44/45
+  (widget, pre-existing in both, as VRG2 / FINAL); expectations moved to the new bytes (o2rev: the pasted page now
+  clears the old park).
+- Part-switch gates (varispeed_emus_switch_test.py, run unit / feature / vari / vari_feature against the FINAL
+  bases): `check` ALL GATES PASS (VARISPEED_EMUS), `check --plain` ALL PLAIN GATES PASS (VARISPEED).
+- BLACKPYRAMIDS_303 / V1.8BC: verify_one_per_core ALL GOOD, verify_page_paste ALL GOOD, kyoti_bc_check_onepercore ALL
+  GOOD, kyoti_bc_check_erase ALL GOOD, kyoti_bc_check_mute as before (muted tracks start 0 notes in OTFX-T / DT-T),
+  kyoti_bc_check_voice every line as V1.8BC FINAL (only the core-1 DARK REV stopwatch 3267 vs 3252 and PLATE given up;
+  the flex round trip changes no byte outside NEIGHBOR's), kyoti_bc_check_fx2 as FINAL (COMPRESSOR +22, PHASER / DARK
+  jitter).
+- Clyps UI (diag_clyps_ui --only ABCDY, symbols regenerated from the new maps: Clyps moved behind the VARISPEED UI
+  piece) PASS on KY18C VRG3 and KY18BC VR3 (and on the merged V1.8BC).
+- KYOTI smokes, A = FINAL (main checkout; for the merged V1.8BC the re-promoted FINAL 0704647c from the kyoti-bp
+  worktree), B = VRG3 (out/kyoti_smoke3, out/bytehome/merged): DIRECT JUMP REF-LOCK c1 (16 <-> 7) and RS1 (restart)
+  on V1.8C and V1.8BC: A == B every recorded field (also on the merged V1.8BC). RELOAD quant (diag_reload_quant, V1.8,
+  OT DEMO): A and B line for line the same through the 27 checks the runs reached (A-D of A-I, W, F; both runs were
+  still going, slowly, when this was written -- no verdict line yet).
+- Equivalence matrix (varispeed_emus_equiv.py, what every DSP voice pass receives): OTDEMO 35/35 identical, VARISPEED
+  vs FINAL and VARISPEED_EMUS vs FINAL. MMTESTDT strict: VARISPEED 3/35 (vs FINAL and vs VRG2 alike), VARISPEED_EMUS
+  11/35 (vs FINAL and vs VEMG3; --base-shift 1-3: 4/35); timing-free (out/bytehome/eq_collapse.py: per track the
+  sequence of distinct payloads): VARISPEED_EMUS 35/35 the same, VARISPEED 34/35 -- tempo_edge_7200 (project tempo
+  300 BPM) differs in how many 0 / increment alternations precede and follow a stretch at stock rate; T1's Part bytes
+  are written identically by both images in that run (watched): the CF frame workload grew (rp_bpt in every gate
+  read), which moves the pass interleave in ot_emu (CLAUDE.md: sample-exact emulator diffs are not valid evidence
+  when the CF workload differs). Not measured: the frame hook's instruction count (VRG1 measured +56 for 4 VARI
+  tracks; rp_bpt adds ~10-20 per gate read).
+- Every other FINAL image rebuilds to its pin without the opt-in (feature_image.py: MUTE_MODES, QLR, SIDECHAIN,
+  TRIGLESS, RELOAD, DJK, RTM, BLACKPYRAMIDS_303, BATCH_BUGFIXES; build_kyoti --clyps-standalone 94e41a22).
+
+**origin/main 07f47d1 merged (a9743a7)** -- BLACKPYRAMIDS_303 re-promoted in another session (a cued Part switch carries
+the voice, ties across a cued pattern change, GATE from the pattern's Part; new pins unit 1d53ef7f, image b4b55638,
+V1.8BC 0704647c). Its storage (NEIGHBOR bytes, stash, signature, parked knobs, FLEX slots) and ot_assign are unchanged;
+control.c merged without conflict (the VARI_TAKE / VARI_BACK hooks sit inside ot_assign, so every caller -- the chooser,
+SRC SETUP, ot_pgpaste, bp_net's demotions and stale clears -- goes through them). Its renderer now decides BLKPYRAMD by
+the track's live-bytes Part (play_part: stock's pair 0x8000182a / 0x80001832 + t); VARISPEED's rp_bpt reads the Part it
+polls, and its frame poll does not poll a carried track whose pair is not the current Part (VRG1's vf_win), so the two
+cannot act on different Parts' bytes for the same note. Re-run on the merged V1.8BC (out/bytehome/merged): QUAN entry
+19/19; every bc-park scenario and M1-M3 the same track states as before the merge (only the runtime's addresses and the
+net's pass counts moved); verify_part_carry / tie_xfer / first_gate / page_paste / one_per_core ALL GOOD on all three
+forms (V1.8BC, the feature image, the unit -- the latter two are the new FINAL bytes); kyoti_bc_check_erase /
+onepercore ALL GOOD, voice / fx2 / mute as FINAL (above). V1.8 / V1.8C byte-identical to the pre-merge builds; the
+BLACKPYRAMIDS_303 feature image rebuilds to the new pin b4b55638 without the opt-in.
+
+**Builds (WIP, NOT flashed):** VARISPEED `out/VARISPEED/OCTATRACK_OS1.40C_VARISPEED.syx` 38b1f1ed… (.bin 84745b39…,
+mainos 94e4ac0f…; unit mainos 2e365957…), `140C_VRG3`; VARISPEED_EMUS `out/VARISPEED_EMUS/OCTATRACK_OS1.40C_VARISPEED_EMUS.syx`
+951368de… (.bin cc94e463…, mainos 1ed792d9…; unit mainos b54e7246…), `140C_VEMG4`; KYOTI V1.8 `KY18 VRG3` syx 8d64d787…
+(.bin e00607ec…, mainos d79d86e4…); V1.8C `KY18C VRG3` syx 05b431f1… (.bin b00a0f88…, mainos 48455649…); V1.8BC
+`KY18BC VR3` syx 9d519304… (.bin 1b4b2ae9…, mainos 27601be5…; built on a9743a7, the merge of origin/main 07f47d1 with
+BLACKPYRAMIDS_303's Part / pattern change fixes -- before that merge the same code gave afb82323…).
+
+**Merge with `led-fix` (foreseen):** against origin/main, emus-guard's build_kyoti.py now only adds the
+`patch_varispeed_ui` PLAN entry and key, the V1.8BC flags and their pass-2 lookup (VRG1's `move_for_varispeed()` is
+gone again), so led-fix's `move_pattern_led()` + its call in main() should merge without a textual conflict. Semantics:
+its move still applies (pattern_led, 318 B there, from CAVE to DRAM, inserted before Clyps = after
+`patch_varispeed_ui`); CAVE then has ~630 B left. Its docstring's "the classic cave had 92 B left" no longer holds (476 B
+with the 158 B predicate in CAVE). Re-run its matrix and the KYOTI builds after that merge.
+
+**Not verified / the author's call:** anything on hardware; octabam's ledger for the varispeed modules now claims the
+four new bytes (part_window) while rp_migrate may clear an older build's NEIGHBOR park -- beside octabam's
+blackpyramids-303 module that is BP's window (no octabam image built); a FLEX VARI track taken by BP through a path
+that does not run ot_assign (TRACK PASTE of a BP slice, Clyps FULL, a load) carries that slice's own bytes, as before.
+## 2026-11-19 (`led-fix`) — EMPTY_PATTERN_LED_FIX: the `[BANK]` grid lights trigless locks that carry a locked parameter (WIP, NOT flashed)
+
+**The author's spec:** a trigless lock with nothing locked stays off under `[PTN]` and `[BANK]`; a bank holding a pattern
+whose only content is trigless trigs (stock lit it already) or trigless locks that carry a locked parameter lights under
+`[BANK]` (new); `[PTN]` unchanged; no stall or slowdown while `[BANK]` is held (better no feature than that).
+
+**Design as built (`octabam-modules/batch-bugfixes/patch_pattern_led.s`, 158 -> 318 B, position independent).** Every
+call runs stock's test first. The `[PTN]` / chain-view path is Session 119's (any lock byte anywhere, 8-long AND scan).
+A call returning to 0x4000fd8c (bank_has_content) walks the 8 audio + 8 MIDI tracks in pairs, ORing the trigless-lock
+masks stock skips (TRAC+0x10, MTRA+0x10 = blob+0x48e0+t*0x8b0); only a pair with a bit set has its rows read: for each set
+step (ff1 -- stock's own ISA_C opcode, 0x4004098e at every boot -- then bclr), the step's 32 lock bytes (audio
+TRAC+0x59+32*s, MIDI blob+0x4900+t*0x8b0+32*s; one byte per parameter, step-major, as patch_triglock.s's hardware-traced
+erase store shows), any byte != 0xFF -> content. At most 16 rows per call (PL_BUDGET): past it the pattern reads as stock
+reads it. Lock bytes on a step with no mask bit stay dark under `[BANK]` (lit under `[PTN]`, as before) -- kept that way
+on purpose: no panel gesture found makes them (Session 31 made them by hand-editing a file), and finding them needs the
+32 KB scan S119 removed. **MIDI +0x10 = the MIDI trigless-lock layer, now measured:** stock's `[FUNC]`+trig toggle
+0x40040f90 on a MIDI note trig gives +0x08, then +0x10, then +0x08 (the same cycle as audio's at 0x40041336). **Stale MIDI
+bit:** stock's MIDI LIVE erase FUN_40038668(mask, clear_trigs=1, all params) clears +0x00/+0x08 and the step's row but
+NOT +0x10 (audio's FUN_40038874 clears +0x10): the bit stays with a row of 0xFF, so it reads empty by construction
+(whether the trig row then shows a trigless lock on the unit: FLASHING §4 item 7).
+First cut 360 B with a separate per-side routine; a bug found by the gate (the ff1 scratch was d3 = the pattern's offset,
+so the MIDI side read garbage after an audio hit) and a prologue frame-offset slip in the 318 B rewrite were both caught by
+tools/led_trigless_matrix.py before any build left the worktree.
+
+**Gates (emulator, ot_emu):**
+- `tools/led_trigless_matrix.py` (new): 33 cases x `[PTN]` / `[BANK]`, audio + MIDI -- empty TL, TL + p-lock, lock bytes
+  without mask, trigless trig, sample trig, one-shot, recorder trig, swing/slide only, MIDI +0x08/+0x00/+0x18, mask-word
+  boundaries (steps 1/32/33/64, T1/T8, row bytes 0/15/31), a lock value of 0x00, the right row (empty TL on s6 + lock on
+  s10 w/o mask and vice versa), 5 / 15 / 16 empty TLs before a real one (16 = the budget -> dark), a real one first then
+  1,023 empty, 1,024 empty, pattern 16, all 16 patterns TL+lock / empty TL; plus stock's MIDI and audio LIVE erase and the
+  MIDI toggle; FINAL column = Session 119 behaviour, new column = the spec. ALL GOOD on the unit, BATCH_BUGFIXES, KYOTI V1.8
+  and V1.8C (predicate in DRAM there). `--sweep`: all 256 patterns + 16 banks of OT DEMO, kv1_mm_card/kyoti_testMM,
+  sctest6/test6 identical to the FINAL (none holds a trigless-lock-only pattern).
+- `tools/port_pattern_led.py --patched` and route A `tools/emu_pattern_led.py --patched`: ALL GOOD.
+- **Stall gate** `tools/led_bank_stall.py` (new; ot_emu with the `key` + new `icount` step verbs, private build, local patch
+  updated): 0.6 s windows, **transport running** (stopped, the grid paints once and never refreshes -- S119's report had
+  the sequencer playing), ColdFire instructions, unit image, FINAL -> new:
+
+  | bank content | idle | `[BANK]` held FINAL | `[BANK]` held new | calls | cave instr/call |
+  |---|---|---|---|---|---|
+  | OT DEMO | 39.80M | 41.16M | 41.35M (+0.46 %) | 1,921 | 6 -> 104 |
+  | all 256 patterns empty | 39.18M | 39.57M | 39.69M (+0.3 %) | 1,200 | 6 -> 104 |
+  | every pattern: 1 TL + p-lock | 39.18M | 39.57M | 39.27M (fewer calls: banks light at their first pattern) | 1,200 -> 75 | 86 |
+  | every pattern: 1,024 empty TLs (worst) | 40.45M | 41.20M | 42.13M (+2.3 %) | 2,400 | 6 -> 393 |
+
+  For scale: holding `[PTN]` over that worst project costs 42.42M with the FINAL already (the `[PTN]` path: 12,390
+  instructions per empty pattern, unchanged); Session 119's stall was 116.8M vs 44.5M idle. KYOTI V1.8C: demo 42.04M ->
+  42.23M, empty 40.20M -> 40.32M, worst 41.96M -> 42.89M (idle 40.58M / 39.83M / 41.24M).
+
+**Placement.** BATCH_BUGFIXES and 9 feature images: the preferred 0x400d6694 (VARISPEED: relocated to 0x400d71e4, as
+before). **VARISPEED_EMUS:** the FINAL keeps the 158 B fix in the cave; 318 B no longer fits there (271 B is the largest run),
+so it joins the DRAM unit with PART_CHANGE_CARRYOVER_FIX: 2,386 -> 2,706 B, past the 4 KB staging boundary (raw <= 2,592 B
+fits one page from 0x40a955e0): **2 arena pages (12 KB) instead of 1** of the sample pool. (Corrected 2026-11-19 cont.)
+**KYOTI V1.8 / V1.8C / V1.8BC:** the cave had 92 B left and SPRING's reclaim 204 B / 80 B, so `build_kyoti.py`
+`move_pattern_led()` puts the predicate in the DRAM payload (before Clyps, any image with VARISPEED; the standalone CLYPS
+image keeps it in the cave, 5,162 B free). Cave then 252 B left (this also leaves room for the VRG1 port's +104 B; its
+`move_for_varispeed` on `emus-guard` becomes a no-op). Pages: V1.8 11 -> 12 (+6 KB), V1.8C 1,709 and V1.8BC 1,720
+unchanged. Clyps' DRAM unit moves up 320 B (V1.8C 0x40a9658c -> 0x40a966cc; V1.8BC 0x40aa0e34 -> 0x40aa0f74): regenerate
+`CLYPS_SYMS` from the map before `diag_clyps_ui.py` (the 2026-11-19 trap). **V1.8BC trips seal()'s stock-SRAM check by
+coincidence:** 0x40119664 = 0x800076cd lies inside the PACKED DRAM stream; the depacked runtime (76,748 B) holds no word
+in 0x80006924..0x80007873 -- built with KYOTI_ALLOW_STOCK_SRAM=1 for that reason; a promotion would need the same (or a
+re-pack).
+
+**Builds (all WIP, none flashed):**
+
+| image | OS VERSION | mainos sha256 | syx sha256 | FINAL pin it replaces |
+|---|---|---|---|---|
+| unit `out/mainos_empty_pattern_led_fix.bin` | - | `074315c2…` | - | `0e50306d…` |
+| `out/BATCH_BUGFIXES/OCTATRACK_OS1.40C_BATCH_BUGFIXES.syx` | `140C_FIXL1` | `fa374dd8…` | `ff7a81a1…` | `0cf32835…` |
+| `out/KYOTI_WIP/KYOTI_V1.8C_LED1/OCTATRACK_OS1.40C_KYOTI_V1.8C.syx` | `KY18C LED1` | `df27ad31…` | `b3ec014d…` | `9d1a29c9…` |
+| KYOTI V1.8 (default name) | `KYOTI V1.8` | `5e7d93bd…` | `030a32a2…` | `8807feee…` |
+| KYOTI V1.8BC | `KYOTI1.8BC` | `5bc4c87d…` | `a8a224a0…` | `4c7fb0fe…` |
+| CLYPS | | `ac7c622f…` | `1a08e313…` | `94e41a22…` |
+| MUTE_MODES | | `316f01f7…` | `61d9a03b…` | `857d80d3…` |
+| QUANTIZE_LIVE_REC_TOGGLE | | `9b51ad03…` | `dd304411…` | `df4a2498…` |
+| SIDECHAIN_COMPRESSOR | | `2d5a4016…` | `900c2314…` | `4febe2e6…` |
+| ERASE_EMPTY_TRIGLESS_LOCKS | | `a6063880…` | `9ac65b61…` | `db348f68…` |
+| RELOAD_FROM_PROJECT | | `38f2f7de…` | `dbb79a8d…` | `188ec12c…` |
+| DIRECT_JUMP_KYOTI | | `79b422fd…` | `026cec8e…` | `c58591c0…` |
+| REC_TRIG_MUTE | | `f8ee2d55…` | `c54c8796…` | `dac87abd…` |
+| BLACKPYRAMIDS_303 | | `55285c33…` | `95ffa9d7…` | `6a124db1…` |
+| VARISPEED | | `8e3d8b3b…` | `a6e54e31…` | `c3af514f…` |
+| VARISPEED_EMUS | | `31aa8a20…` | `894604fb…` | `e2faf75d…` |
+
+No feature unit changes (only `build_empty_pattern_led_fix.py`'s). Not promoted; README's catalogue wording is in its own
+commit for the promotion. octabam: `manifest.py` PL_PINNED = the 318 B (checked equal to the built cave); octabam's own
+remixes not built here (its float zone may need checking for +160 B). Hardware: FLASHING §4 "EMPTY_PATTERN_LED_FIX
+`[BANK]` trigless locks (WIP, LED1)".
+## 2026-11-19 cont. (`kyoti-bp`) — BLACKPYRAMIDS_303 Part / pattern changes fixed (octabam form OCTABAM40-43); re-promoted with KYOTI V1.8BC
+
+**Found on the author's MKI in the octabam form** (remixes/test/blackpyramids-303 with the one-per-core module, scratch
+clone `out/octabam-bp1pc` at octabam cc7cffc1, the module from this branch): OCTABAM40 (`aac2bd63…`) all pass but (a)
+a quiet pop at a cued Part switch into a Part whose BLKPYRAMD is on another track of the core with no trig on step 1
+(also faintly with no BLKPYRAMD in the new Part; not with the same track in both), and the outgoing pattern's
+last-step note never sounded; OCTABAM41 (`8c1bfc91…`) (a) fixed, all pass, then (b) a note tied to the end of a
+pattern was cut at a change (same Part) to a pattern starting with ties; OCTABAM42 (`fb5ab3cf…`) (b) fixed, then (c)
+the first note after a load or into another Part for the first time was a blip, and the first note into another Part
+was cut short; OCTABAM43 (`92801b0f…`) all pass. All three were in the earlier FINAL too (the same code paths).
+
+**Causes and fixes (tools/ot303/cf/control.c):**
+- (a) The renderer asked the UI Part (0x100b14cf, via part_base) whether a track is an OT-303; stock moves it ~7 ticks
+  before the boundary, so the outgoing track turned FLEX a step early (voice freed mid-note: the pop; its last note
+  lost) and the incoming one took a stray note from the Part load's trig flag a step early. Now `play_part(t)`: the
+  Part the track's sound comes from, stock's per-track bank / Part 0x8000182a / 0x80001832 + t (moved at the track's
+  own first trig in the new pattern, 0xff after PLAY or a load until the next trig: then the UI Part). The idle table
+  feed asks it too. One voice a core while one carries: `play_rank` (2 its trig in the engine's Part 0x80000002 /
+  0x80000003 -- which also moves early, so it decides nothing alone; 1 carrying another Part; 0 none since PLAY), the
+  loser renders FLEX (its stock record frees the voice on the DSP); the winner's first note is held one frame when the
+  carrier is a higher track (`own_prev`, `dfr`: the DSP serves a core's tracks in order). Gate
+  `tools/ot303/verify_part_carry.py` (fwd T2 -> T3, rev T4 -> T2; ot_trace kind 2): the outgoing step 16 taken, the
+  incoming note at its own step 5 and nothing before; on the earlier FINAL step 16 is lost and the incoming note comes
+  a step early. NB this ot_emu renders no BLKPYRAMD audio (only core 0's ESAI out, and not the voice; out/kbc/partpop.py
+  found every variant silent with only BLKPYRAMD tracks unmuted): 2026-11-17's "DT-T -9.9 dBFS" levels were BOTLI's
+  T7/T8 samples, not the voice.
+- (b) A note's gate is worked out when it starts (ot_note, a step ahead), its ties wrapped to its own pattern's first
+  steps. `tie_xfer` (from ot_step, when another pattern's first step follows the last step): a sounding note whose ties
+  reach that last step gets its gate again from the incoming pattern's first steps and is sent as NOTE|SLIDE to the
+  same pitch -- host.asm copies the note words, GL included, for a slide into an open gate and does not retrigger. Not
+  for DIRECT JUMP landings (the author: a jump into a tie keeps the old rule). Gate `tools/ot303/verify_tie_xfer.py`.
+- (c) ot_note read GATE from the live SETUP byte 0x80000810 + 72 t + 0x23, which stock re-stages only at the track's
+  trig (after ot_note runs): the old Part's GATE into a new Part, a load's leftover after a load (the byte at 0: 55
+  samples). GATE now comes from the scheduled pattern's Part; a SETUP knob has no p-lock slot (a step record is
+  PLAYBACK, AMP, LFO, FX1, FX2: reference/kb/file-format.md), so the Part's value is it. Gate
+  `tools/ot303/verify_first_gate.py` (STALE=1: the byte left at 0).
+
+**Gates (all three forms: standalone, OCTABAM43, V1.8BC):** the five BLKPYRAMD gates ALL GOOD; verify_ot303 / V1.8BC's
+voice check as before (only the core-1 DARK REV stopwatch, and PLATE on V1.8BC); Clyps refusals ALL GOOD, Clyps UI
+ABCDY PASS (50; CLYPS_SYMS regenerated from the map each time); MUTE matrix identical; SC levels 0.00 dB; DJ REF-LOCK
+c1 / RS1 every field identical. The runtime grew to 46,268 B (V1.8BC: 1,721 DRAM pages).
+
+**Re-promoted on the author's word** (V1.8BC and the standalone confirmed through OCTABAM43, the same runtime bytes):
+BLACKPYRAMIDS_303 unit `1d53ef7f…` (was b3327bd3), feature image `b4b55638…` (was 6a124db1; 140C_BP303, syx
+`c78679aa…`), KYOTI V1.8BC mainos `0704647c…` (was 4c7fb0fe; syx `32c3f8ce…`, .bin `e3c3acf0…`). Every other FINAL
+rebuilds to its pin. octabam module regenerated (runtime 46,268 B, `7c5f6008…`, 49 detours); the pin PR to Sam next.
+**Open, another session's:** emus-guard (kyoti-m4-09) found VARISPEED and BLACKPYRAMIDS_303 sharing NEIGHBOR bytes in
+V1.8BC (VARISPEED's STATIC / FLEX PTCH parks in bytes 18 / 23); its fix moves VARISPEED's parks and adds guards on both
+sides, built on the earlier BP. This entry changes no NEIGHBOR byte, stash, signature or FLEX slot; its new
+ot_assign callers are the SRC page paste (ot_pgpaste) and the net.
+
+## 2026-11-19 cont. (`led-fix`) — EMPTY_PATTERN_LED_FIX merged with main (07f47d1), every image rebuilt and gated (WIP, NOT flashed)
+
+**The author's call:** the change ships **bundled with the VARISPEED / BLACKPYRAMIDS_303 clash fix (`emus-guard`)**, one
+flash, no image of its own (the LED1 / FIXL1 test images of the entry above were deleted unflashed).
+
+**Merge:** origin/main 07f47d1 (BLACKPYRAMIDS_303 + KYOTI V1.8BC re-promoted: Part carry, ties across, GATE from the
+pattern's Part) merged into `led-fix` (3c0f498), no conflict.
+
+**The only difference is the fix (proof):** a clean detached worktree of origin/main (`out/clean-main`) rebuilt every FINAL
+WITHOUT the opt-in, each matching its pin: the fix unit 0e50306d, BATCH_BUGFIXES 0cf32835, the 11 feature images, KYOTI
+V1.8 8807feee, V1.8C 9d1a29c9, V1.8BC 0704647c, CLYPS 94e41a22, and every unit (no WIP banner, no refusal).
+
+**New mainos (led-fix 3c0f498, opt-in) next to the current pin:**
+
+| image | new mainos sha256 | FINAL pin |
+|---|---|---|
+| fix unit `build_empty_pattern_led_fix.py` | `074315c20d4c1c2073fc9ee324cf31dcd92f6c639a664d661cf88e542ef5e1a5` | `0e50306d…` |
+| BATCH_BUGFIXES | `fa374dd80125aea37d2f2ab858b94af7f618e75b080718dfb4f9f23d9c95c1ca` | `0cf32835…` |
+| MUTE_MODES | `316f01f713cf048f2fdd32464845c7c1493211be95abb76ae5a2e9344064e1b2` | `857d80d3…` |
+| QUANTIZE_LIVE_REC_TOGGLE | `9b51ad03846acd3f3be2d286ce6f33eea948b2e37dd6c037dbe3bdda6466fa57` | `df4a2498…` |
+| SIDECHAIN_COMPRESSOR | `2d5a401692894c50996201db525a177f19bb4f19d4a9f258a79ce52c6db604c2` | `4febe2e6…` |
+| ERASE_EMPTY_TRIGLESS_LOCKS | `a6063880e3de7e9fbfd368fe88add0fa642800217f1b40b7d6655ba6f03885f0` | `db348f68…` |
+| RELOAD_FROM_PROJECT | `38f2f7de9c88561bfd9bd2027d7276819aed085eb9873424d02caf16548ef4b6` | `188ec12c…` |
+| DIRECT_JUMP_KYOTI | `79b422fdb3bcf62c42395c7fab775d95e81113bd64fb6c65ff0ea44e3475f872` | `c58591c0…` |
+| REC_TRIG_MUTE | `f8ee2d55ac6d253699b5c4bc2a35a02c587badc3fb43353d17bfc605f47d1c10` | `dac87abd…` |
+| BLACKPYRAMIDS_303 | `49ec8cee2fe4ab3c0b4c599b052fe64143d561d8daa9f220751472f263cde4c4` | `b4b55638…` |
+| VARISPEED | `8e3d8b3b458db122dc7286bf4ed04ed82e7f51c8662386f07904e18064faf2f7` | `c3af514f…` |
+| VARISPEED_EMUS | `31aa8a204c94d18a473e45572504799101359ddedcdca2d1baa0ce9f082e895c` | `e2faf75d…` |
+| KYOTI V1.8 | `5e7d93bdbcba446df662680c1e8de1cd25937f2b56f868ae8de985fadd89e3d1` | `8807feee…` |
+| KYOTI V1.8C | `df27ad313fec70aaca29a33aa2990b1e3d981ede149b9694ee191bc5c9aa36f7` | `9d1a29c9…` |
+| KYOTI V1.8BC | `89304409e973d8503e7610c94544b675d76d3cd605ee0fcc3c98e749acccf8a1` | `0704647c…` |
+| CLYPS | `ac7c622fed16572440009f2d12c52afaa4525a958acd5e8c7c0168260965afa2` | `94e41a22…` |
+
+The feature units are unchanged (BP unit 1d53ef7f etc.). Only BLACKPYRAMIDS_303 and V1.8BC differ from the pre-merge
+build (main's new BP code); the rest are byte-identical to it. The OS VERSION is applied at the wrap only, so these
+mainos are the promotion pins whatever name a test image carries.
+V1.8BC: DRAM directjump 4012 / bp_runtime 46,532 / pattern_led 318 @0x40aa1b50 / Clyps @0x40aa1c90; 1,721 pages (as the
+FINAL). **The stock-SRAM coincidence is gone** (built without KYOTI_ALLOW_STOCK_SRAM: the new BP runtime changed the
+packed stream). Proposal anyway, for kyoti_status.stock_sram_refs: for an image with a tools/dram append, scan the
+stock-length part and the loader, and scan the DEPACKED runtime (dram.depack of the signature stream) instead of the
+packed bytes -- the packed stream is data, and a packed word is no reference.
+
+**Gates on the merged builds:**
+- `led_trigless_matrix.py`: ALL GOOD on the unit (+ `--sweep`, 3 real projects identical), BATCH_BUGFIXES, KYOTI V1.8,
+  V1.8C, V1.8BC and the BLACKPYRAMIDS_303 feature image. `port_pattern_led.py --patched`, `emu_pattern_led.py --patched`:
+  ALL GOOD.
+- Stall gate, KYOTI V1.8BC (FINAL 0704647c -> new, 0.6 s, `[BANK]` held, transport running): OT DEMO 43.88M -> 44.07M
+  (+0.43 %), all empty 41.91M -> 42.02M, TL+lock everywhere 41.91M -> 41.61M, worst 43.67M -> 44.60M (+2.1 %); idle 42.36 /
+  41.54 / 42.94M. The unit and V1.8C numbers above are unchanged (same images).
+- V1.8BC: `tools/ot303/verify_one_per_core / page_paste / part_carry / tie_xfer / first_gate (+STALE=1)` with the image's
+  own `bp_runtime/ot303_runtime.elf`: ALL GOOD; `kyoti_bc_check_onepercore`, `_erase`, `_mute`: ALL GOOD;
+  `kyoti_bc_check_fx2` and `_voice`: FAIL exactly as the FINAL 0704647c does (PHASER, DARK REV core 1, COMPRESSOR
+  stopwatch columns; PLATE given up) -- the same DIFFERS lines, only the max column jitters.
+- V1.8C: Clyps UI `--only ABCDY` (CLYPS_SYMS regenerated from kyoti_v1.8c_map.json; Clyps at 0x40a966cc now): PASS (50).
+  DJ REF-LOCK c1 (16<->7) + n1 (RS1, `out/l2/dj_reflock.sh`, fixture DJTEST2) on FINAL 9d1a29c9 and new: every recorded
+  field identical (only the image path differs).
+- V1.8: `diag_reload_quant.py` (RELOAD's symbols from kyoti_v1.8_map.json as an absolute-symbol .o): VERDICT PASS, 32/32.
+- VARISPEED_EMUS switch suite (`varispeed_emus_switch_test.py run/check --img feature --img base_feature`, base = the FINAL
+  feature image e2faf75d): ALL GATES PASS; the per-case estimate maxima equal the FINAL's, datasheet-cycle maxima within 0.2.
+
+**octabam (local draft only, nothing pushed or opened):** scratch clone `out/octabam-led` (main 9985b4f8), branch
+`batch-bugfixes-led-pin`, one local commit with placeholders `<PIN>` / `<BUILD>` / `<HARDWARE LINE>`: the submodule moved to
+led-fix, manifest docstring + a new Evidence record, module README (318 B, the `[BANK]` path), usage page ("Pattern
+LEDs"), THIRD_PARTY row (BATCH_BUGFIXES only; ERASE stays 77f132f), README regenerated by `make docs`; `make verify-docs`
+115 modules / 151 remixes / 0 problems. `make bus` for all 16 remixes that carry BATCH_BUGFIXES (octabam, octabam-bus,
+test/batch-bugfixes, kyoti-fixes, mods, direct-jump-kyoti, kyoti-mute-jump, hooks-core, trackpatterns-core,
+stock-meter-a/b, window-ctl/mod, dl-probe(-any), ext-probe): all build at the new pin, the fix at the same address as at
+77f132f in each, 128 B less ROM cave left (smallest: hooks-core 632 B; octabam 1,040, octabam-bus 1,208). PR body draft:
+`out/octabam-led-pr-body.md` (style of #1146). The real pin PR waits for our promotion push.
+
+**Merging with `emus-guard`:** files both branches touch: FLASHING.md, NOTES.md, START_HERE.md, tools/build_kyoti.py.
+A trial `git merge-tree` of led-fix with emus-guard a9743a7 conflicts only in START_HERE §6 (two new top bullets);
+build_kyoti.py auto-merges. `move_pattern_led()` is self-contained (one function + one call after VERSTR). emus-guard no
+longer has `move_for_varispeed`; it puts `patch_varispeed_ui` in PLAN["DRAM"] before Clyps. Combined DRAM order:
+..., bp_runtime, patch_varispeed_ui, patch_pattern_led, patch_clyps_dram (mine inserts before Clyps after the static
+list). If VRG3's move frees enough CAVE, `move_pattern_led` could become fit-driven (move only when CAVE lacks 318 B);
+as is it always moves in images with VARISPEED, which is deterministic and needs no change.
+## 2026-11-19 (`release-1119`) — RELEASE CANDIDATE RC1: VRG3 + the `[BANK]` trigless-lock LED change in one release (WIP, NOT flashed, NOT promoted)
+
+Branch `release-1119` = origin/main 07f47d1 + `emus-guard` (bc026cf: VARISPEED VRG1 / VARIG2 / VRG3, VARISPEED_EMUS VEMG4) +
+`led-fix` (e6af6dc: EMPTY_PATTERN_LED_FIX 318 B; 228f4b8 its docs). Source-level: `git diff emus-guard` is exactly
+led-fix's files, `git diff led-fix` exactly emus-guard's; both merges textual-conflict-free. Nothing pushed or promoted.
+
+**Two fixes the merge needed (a809933, `Thread: kyoti-v1`).**
+- `feature_image.py`: VARISPEED_EMUS no longer built -- with VEMG4's smaller cave unit (5,176 B) the largest-first
+  placement put the 318 B predicate in the cave and left patch_trigscale (cave-only, step handler) no run. Now, only
+  when that order fails, the placement is retried with trigscale first (the UI-task pieces may go to DRAM); every
+  image that placed before keeps its addresses (all nine other feature images = led-fix's bytes). VARISPEED_EMUS RC1:
+  trigscale 0x400d7b00 (preferred), partreapply 0x400d7938 (cave), pattern_led DRAM 0x40a963b0 (2 arena pages, as on
+  led-fix), cave 411 B left.
+- `kyoti_status.py` stock-SRAM check: `stock_sram_refs()` now skips each packed DRAM blob (found through the loader's
+  own payload table: blob address + length) and scans the runtime it depacks to, reporting hits at their DRAM address.
+  The V1.8BC coincidence (0x800076cd in the packed stream on led-fix) is gone in RC1 anyway (the stream changed), but
+  it could recur in any image with a DRAM payload; and the runtime was not checked at all before (packing hid it).
+  `tools/kyoti_status_sram_test.py`: a hand-made GKA3 stream holding 80 00 70 cd whose runtime does not (old scan
+  hits, new does not), a runtime holding 0x80006a40 (reported at 0x40a957e0), an unlisted 'OCTAGKA3' (not a payload);
+  PASS; every RC1 and FINAL KYOTI image: clean under both scans. Promotion needs no KYOTI_ALLOW_STOCK_SRAM.
+- `build_kyoti.py`: docstring only -- after the merge CAVE has 636 B left with the predicate in DRAM (it would fit in
+  CAVE again); kept in DRAM, the layout every gate ran on.
+
+**Images (WIP; OS VERSIONs as briefed, but `140C_VEMRC1` / `140C_FIXRC1` are 11 characters, over the ELEK field's
+10: built as `140CVEMRC1` / `140CFIXRC1`). Copies of the flashable files in `out/rc1/`.**
+
+| image | OS VERSION | mainos | syx | .bin | FINAL pin |
+|---|---|---|---|---|---|
+| KYOTI V1.8BC | `KY18BC RC1` | `142c4610…` | `0a8e18c7…` | `92ce297e…` | `0704647c…` |
+| KYOTI V1.8C | `KY18C RC1` | `5e9c177c…` | `281b10fa…` | `467a4af9…` | `9d1a29c9…` |
+| KYOTI V1.8 | `KY18 RC1` | `a8c06c2f…` | `4edb7163…` | `311a876c…` | `8807feee…` |
+| VARISPEED_EMUS | `140CVEMRC1` | `f3b08c79…` | `bbb2c863…` | `19d94da6…` | `e2faf75d…` |
+| VARISPEED | `140C_VRRC1` | `fe4e7f50…` | `f752032d…` | `cac2b5a7…` | `c3af514f…` |
+| BATCH_BUGFIXES | `140CFIXRC1` | `fa374dd8…` | `283a1d29…` | `dbfb1d36…` | `0cf32835…` |
+| CLYPS | `CLYPS V1.0` | `ac7c622f…` | `1a08e313…` | `4bac4dfe…` | `94e41a22…` |
+| MUTE_MODES / QLR / SC / TRIGLESS / RELOAD / DJK / RTM / BP303 feature images | defaults | `316f01f7…` / `9b51ad03…` / `2d5a4016…` / `a6063880…` / `38f2f7de…` / `79b422fd…` / `f8ee2d55…` / `49ec8cee…` | = led-fix's | = led-fix's | `857d80d3…` / `df4a2498…` / `4febe2e6…` / `db348f68…` / `188ec12c…` / `c58591c0…` / `dac87abd…` / `b4b55638…` |
+| units | | VARISPEED `2e365957…`, VARISPEED_EMUS `b54e7246…` (= emus-guard's), LED `074315c2…` (= led-fix's); the other eight = their pins (BP `1d53ef7f…`) | | | |
+
+**Proof the merge added nothing (out/rc1/relcmp.py: piece by piece from the maps, DRAM runtimes depacked; a differing
+word whose two values point at the same piece + offset, or the same map symbol, is a relocation).**
+- LED-only images (the eight feature images above, BATCH_BUGFIXES, CLYPS, the LED unit): mainos byte-identical to
+  led-fix's builds (syx / .bin too, except BATCH's renamed OS VERSION). VARISPEED / VARISPEED_EMUS units = emus-guard's.
+- KYOTI V1.8 / V1.8C / V1.8BC vs emus-guard's VRG3 builds: every piece identical except patch_pattern_led (158 B CAVE ->
+  318 B DRAM, led-fix's bytes) and the CAVE pieces behind its old slot (patch_mutemode, rtm_mask, the personalize
+  arrays: identical modulo relocation); Clyps' DRAM unit identical modulo its own +0x140 shift (V1.8C / V1.8BC);
+  outside the pieces only relocations (the 0x4009a464 detour, rtm_mask users). vs led-fix's builds: patch_pattern_led
+  identical, the difference is VRG3's (patch_varispeed 2,388 -> 2,004 B, patch_varispeed_ui new in DRAM; 20 ROM sites =
+  VARISPEED symbols moved into the UI piece; V1.8BC also bp_runtime +16 B = the VARI_TAKE / BACK calls and its arena
+  geometry, one page more). Unexplained bytes: 0 in all six comparisons.
+- VARISPEED / VARISPEED_EMUS feature images: outside the three fixes + their detours every byte = the RC1 unit (=
+  emus-guard's); the fixes = led-fix's (pattern_led identical, partreapply identical modulo relocation, trigscale
+  identical). VARISPEED: same addresses as emus-guard's, only pattern_led 158 -> 318; VARISPEED_EMUS: pattern_led to
+  DRAM, trigscale 0x400d7b6c -> 0x400d7b00 (the placement retry above).
+
+**Gates (emulator; RC1 unless named).**
+- QUAN entry (`varispeed_quan_entry_test.py`, 19 cases): 19/19 on VRRC1, VEMRC1, KY18, KY18C, KY18BC.
+- `varispeed_test.py` (KYOTI_UNIT=1) 10/11, `varispeed_emus_test.py` 43/45 -- the same failures as emus-guard's runs
+  (widget; ref_fx_alone), pre-existing. Switch suite (unit / feature / vari / vari_feature vs the FINAL bases): `check`
+  ALL GATES PASS, `check --plain` ALL PLAIN GATES PASS.
+- bc-park scenarios on KY18BC (live_sc, step_sc, step_sc2, partsw, reload, vol4mm, mig_bc): every output line identical
+  to emus-guard's merged V1.8BC run.
+- BLACKPYRAMIDS_303: verify_part_carry / tie_xfer / first_gate / page_paste / one_per_core ALL GOOD on KY18BC and the
+  BP feature image; kyoti_bc_check_erase / onepercore ALL GOOD; mute identical; voice and fx2 exit FAIL as on FINAL --
+  the same lines (core-1 DARK REV 3267 vs 3252, PLATE given up, PHASER / COMPRESSOR), stopwatches within 1-5 cycles.
+- LED: `led_trigless_matrix.py --sweep` ALL GOOD on FIXRC1, KY18C, KY18BC, KY18 (each vs its FINAL; sweep of OT DEMO,
+  kyoti_testMM, test6 identical to FINAL). Stall gate `[BANK]` held, transport running, 0.6 s, FINAL -> RC1: V1.8C demo
+  42.04M -> 42.23M, empty 40.20M -> 40.32M, tl_lock 40.20M -> 39.90M, worst (1,024 empty TLs) 41.96M -> 42.89M (+2.2 %);
+  V1.8BC 43.88M -> 44.07M, 41.91M -> 42.02M, 41.91M -> 41.61M, 43.67M -> 44.60M (+2.1 %); cave/call 6 -> 104 / 86 / 393,
+  the numbers led-fix measured.
+- KYOTI smokes: Clyps UI ABCDY PASS (50 checks) on KY18C and KY18BC (CLYPS_SYMS from each map: Clyps 0x40a96c3c /
+  0x40aa22ec); DIRECT JUMP REF-LOCK c1 + RS1, A = FINAL V1.8C, B = KY18C RC1: every recorded field identical.
+- RELOAD quant (`diag_reload_quant.py`, OT DEMO), A = FINAL V1.8, B = KY18 RC1: **VERDICT PASS, 32/32 on both, line for
+  line identical** (D's landing-tick instruction count included). **Not a stall:** timestamped, no silence over ~12
+  min; per phase B 8.4, C 8.3, D 11.7, E 8, G 7, H 7, I 7 + 10, W 5.7, F 7.5 min; 82-88 min a run with ~12 other
+  emulators running. `sample` of a run: one third in unicorn, two thirds in Python driving it 32 instructions at a time
+  (attach(step_quantum=32)) plus the per-instruction code hooks. emus-guard's kyoti_smoke3 runs stopped writing at W
+  within 20 s of each other when that session ended (killed, not stuck); led-fix's own run passed 32/32 in ~99 min.
+- **Plain-VARISPEED MMTESTDT equivalence** (`varispeed_emus_equiv.py`, VRRC1 vs FINAL feature): 3/35 strict, timing-free
+  (eq_collapse) 35/36 -- tempo_edge_7200 again; OTDEMO 35/35. Decided: **emulator frame phase, not behaviour.** In that
+  scenario core 1 T1 alternates 0 / 0x5e480 per pass, then plays 0x400000 (stock rate) for ~1,930 passes; after it
+  FINAL steadies to 0x5e480 every pass, VRRC1 keeps alternating. out/rc1/tee_shift.py re-runs it with every poke shifted
+  by k = 0..7 frames: **FINAL alternates too at k = 3** (stretch from pass 2491 x1929, alternating) -- the very pattern
+  VRRC1 shows at k = 0 (pass 2491 x1929); VRRC1 is constant at k = 1-4, 6, 7 and alternates at 0 and 5; the RC1 unit
+  behaves exactly as VRRC1, the FINAL unit as the FINAL feature. VRRC1 is FINAL shifted by ~2-3 frames of poke phase
+  (its load ends at another frame phase), and the tail is a phase property both images have. A FINAL unit with a no-op
+  copy of rp_bpt in every gate read (out/rc1/eqx, never shipped) moves 24/35 scenarios strictly but keeps every payload
+  sequence (36/36) -- a CF workload change alone shifts the interleave, as CLAUDE.md says.
+
+**Hardware (the author's call):** FLASHING §4 "RELEASE CANDIDATE RC1" -- flash 1 `KY18BC RC1` (full: VRG3, BLKPYRAMD
+beside VARI, migration from a FINAL save, the LED matrix, `[BANK]` held, V1.8BC smoke), 2 `KY18C RC1` (smoke), 3
+`140CVEMRC1` (VARISPEED_EMUS + the moved fixes), optional 4 `140C_VRRC1`. KY18 RC1 and 140CFIXRC1 need no flash (RELOAD
+emulator PASS; the LED bytes are the same 318 B everywhere). Promotion (on the author's word only) re-pins VARISPEED /
+VARISPEED_EMUS (unit + feature), EMPTY_PATTERN_LED_FIX's unit, every feature image and BATCH_BUGFIXES, KYOTI V1.8 /
+V1.8C / V1.8BC and CLYPS -- the mainos values in the table.
+
+## 2026-11-20 (`release-1119`, BLACKPYRAMIDS_303) — a BLKPYRAMD chosen on a FLEX track played FLEX's live values (silent); fixed in ot_assign (WIP, NOT flashed)
+
+**Hardware (KY18BC RC1, the author's MKI, 2026-11-20):** every RC1 item of flashes 1 and 2 passed except two: ERASE on MIDI
+tracks (never covered; separate entry) and "BLKPYRAMD often not sounding when chosen from the machine chooser; switching
+to NEIGHBOR / THRU and back once or twice wakes it".
+
+**Cause (ot_emu_8d0ad6f4, BOTLI, transport running; not introduced by RC1 -- FINAL V1.8BC 0704647c and the standalone
+feature image give identical numbers).** A BLKPYRAMD track is stored as FLEX, so FLEX -> BLKPYRAMD is FLEX -> FLEX to
+stock: the commit (0x4007981c -> 0x400972fc(part, t, old)) re-stages a track's live machine bytes with the seed
+0x40001f18 only for PICKUP (0x400973da); otherwise only at the track's next trig when its stored machine changed, or on a
+Part apply (PLAY / load / Part change: per-track pair 0x8000182a / 0x80001832 = 0xff). The renderer reads the live bytes
+(page 1 from the frame lane, base words 0x80000a50+64t; SETUP via knob_now 0x80000830+72t), so the voice played FLEX's:
+VOL = FLEX's TSTR byte (OFF -> 0 = silence, OT_SC[0] = 0; AUTO..VARI -> 1-4, ~-20 dB), CUT = FLEX's STRT (often 0).
+A switch away and back with no trig between changes nothing (still FLEX); with a trig between it is a real machine change
+-> re-staged -> "wakes". Same cause the other way: BLKPYRAMD -> FLEX left FLEX on the voice's live numbers. From STATIC /
+THRU / NEIGHBOR / PICKUP it worked; the BP gates seed the bytes before PLAY, so none caught it.
+
+**Fix (tools/ot303/cf/control.c ot_assign, +13 lines):** when a commit changed the machine of the current Part
+(part == part_base()), call stock's seed 0x40001f18(bank 0x100b14ce, part, t) if the stored machine is FLEX, and set
+the track's pair 0x8000182a+t / 0x80001832+t to 0xff (its next trig re-stages from the Part whatever the machine ends
+up -- covers BP -> NEIGHBOR -> BP with no trig between, which the seed alone did not). Every ot_assign caller is a
+UI-task path (both commits, the page paste, bp_net); stock calls the seed from the UI task too (0x400973da, 0x40096d9a).
+Side effect, as stock's own commit paths: the track's p-lock values read the Part's until its next trig.
+
+**Emulator (same harness, chooser commit replayed as stock does it):** FLEX -> BP T7 (core 0): FINAL / RC1 level 0 for all
+12 notes, fixed 2,502,964 from the first frame; STATIC -> FLEX -> BP T2 (core 1): VOL 3 / 261,552 -> full; STATIC -> BP
+works in all three; BP -> NEIGHBOR -> BP with and without a trig between: fixed works throughout; BP -> FLEX: FLEX's own
+values at once. verify_part_carry, verify_tie_xfer, verify_first_gate (+STALE=1), verify_page_paste,
+verify_one_per_core: ALL GOOD on the fixed image. Measured: live bytes, the control record's level word, DSP hq_start
+arrivals, OWN / LIVE / stage words -- this emulator renders no BLKPYRAMD audio. Scratch image (RC1 + this fix only):
+out/bpsilent/fixB/ (KY18BC BPF, mainos 9012455a…); not to be flashed, RC2 replaces it. The standalone
+BLACKPYRAMIDS_303 and the octabam module carry the same control.c: both need it (octabam #1195 stays draft until
+re-pinned to it).
+
+**Follow-up (2026-11-20, raised by the BlackPyramids session):** (1) 5511929's pair reset inside a cued Part switch's carry
+window (UI Part moved ~7 ticks before the boundary, the track still carrying the old Part's note) ended the carry early:
+out/bpsilent/c1.py (verify_part_carry `fwd` layout, a net repair -- stale signature / a second BLKPYRAMD -- or a chooser
+commit on the incoming Part at frame 13640): T2 rendered FLEX (level 0) for 20-40 frames and, in the second / chooser
+cases, the seed wrote Part 2's FLEX values under the carried note. Fixed: no seed and no pair reset while
+play_part(t) != part_base() (the track's first trig in the new Part re-stages it anyway); all three window scenarios
+reproduce RC1 row for row, e3.py's original cases (FLEX -> BP, quick BP -> NEIGHBOR -> BP, BP -> FLEX, STATIC) still full
+level. (2) bp_net's ot_assign then TRK_REFRESH (0x400972fc): one seed, then the refresh (which seeds only on its PICKUP arm
+0x400973da) -- staged once, correct order; RC1 left the demoted track stale until its next trig. Five verify_* gates ALL
+GOOD. Scratch image out/bpsilent/fixC/ (KY18BC BPC, mainos 6ef2b86f…), not to be flashed; RC2 replaces it.
+
+## 2026-11-20 (`release-1119`) — ERASE_EMPTY_TRIGLESS_LOCKS on MIDI tracks; RELEASE CANDIDATE RC2 (WIP, NOT flashed, NOT promoted)
+
+The author, on KY18C / KY18BC RC1: on a MIDI track, erasing the last p-lock of a trigless lock leaves the step lit.
+ERASE only ever hooked the AUDIO worker. Spec = the audio feature's, on MIDI.
+
+**Cause (our disassembly).** FUN_40041af4 (opcode 8's LIVE branch) tail-calls FUN_40038668 instead of FUN_40038874 when
+0x80000012 != 0, with the same (trackmask, clear_trigs, param_mask). Its per-param erase store 0x400387b8
+`moveb %d1,%a0@(0x4900) ; addl %d4,%d0` (then the mirror store 0x400387c8) has the audio site's 6-byte shape; the row-empty
+verdict clears only 0x46c7d2e4[step] (the MIDI lock bitmap), never MTRA+0x10. Registers there: a0 = blob + pat*0x8ed8 +
+trk*0x8b0 + step*32 + PARAM (param already added), d1 = 0xff, d2 = param, d3 = trk*0x8b0, d4 = step*32, d6 = step,
+d7 = track. No branch lands in 0x400387ba..bd (the loop's branches: 0x40038794 -> 0x400387e4, 0x400387ea -> 0x4003878c);
+the builder's assert_no_branch_into now runs on both sites. Its only caller is 0x40041b4a.
+- MIDI layers: +0x00 note, +0x08 trigless trig, +0x10 trigless lock (the [FUNC]+trig toggle 0x40040f90 cycles
+  note -> +0x08 -> +0x10 -> +0x08), +0x18 swing (FUN_4009abdc fills it 0xAA..), +0x20 slide (filled 0; the 0x40027xxx
+  page loaders pair MIDI +0x18 / +0x20 with audio +0x40 / +0x48). The trig row: FUN_40034bd4's MIDI branch
+  (0x40034d2a..) paints +0x00 red, else +0x08 green, else +0x10 green dim; ot_emu --watch-read logged its read of MTRA+0x16
+  at 0x40034d92 in GRID REC. VETO on MIDI = +0x00, +0x08, +0x20; swing is not one (it is on every second step by default).
+- The mirror: 0x1001614e is a byte copy of the working bank (ot_emu after the OT DEMO load: 0 of 73,728 bytes differ),
+  so mirror(X) = X - [0x46c82456] + 0x1001614e. MTRA+0x10's is 0x1001aa2e (+patoff +trk*0x8b0): written with +0x48e0 by
+  the toggle (0x40041264 / 0x40041282) and 0x4003dca6 / 0x400426aa; stock's MIDI clear writes aa1e / aa26, the row aa4e.
+- GRID REC: no per-param erase reaches either worker (FUN_40042158's MIDI writers 0x40042500.. only write locks; the
+  other 0x4900 0xFF stores are whole-row clears 0x400397b4 / 0x40040db4 and the chord-note edit 0x4004f124..). As the
+  audio side, the fix covers the LIVE erase ([NO]+knob, and [NO]+trig = clear_trigs, where stock audio already clears
+  +0x10 and stock MIDI left a stale bit: with the fix a TL with a lock goes, an empty one stays as stock leaves it).
+
+**Change.** patch_triglock.s: one shared rule (`tl_core`: old value != 0xFF, every other row byte 0xFF, no veto layer,
++0x10 set -> clear it, its mirror, the dirty flags, NOTIFY) behind two entries: `cave` (AUDIO, offset 0, so
+patch_triglock_bp's `jmp CAVE` and every placement are unchanged) and `cave_midi`. The audio entry keeps its veto set
+(+0x00/+0x08/+0x18/+0x20/+0x28/+0x30); the per-track mirror arithmetic became the mirror rule above (same address).
+296 -> 240 B, position-independent (identical at 0x400d7200 / 7500 / 6f00 / 0x400c45b0). The builder adds the second
+detour (jsr cave_midi, stock bytes asserted) and refuses a manifest REFERENCE that is not the source linked at 0x400d7200.
+manifest.py: one Linked unit + two jsr Detours (REFERENCE 0x400d7200 / 0fa04f4d…). V1.8BC: the MIDI detour never goes
+through patch_triglock_bp (BLKPYRAMD is an audio-track machine). KYOTI placement: ENC 296 -> 240 B (40 -> 96 B left), CAVE
+636 B left, SPRING 204 B (V1.8 / V1.8C) / 82 B (V1.8BC), all as RC1 otherwise.
+
+**Emulator (`tools/erase_trigless_test.py`, ot_emu + `key`, OT DEMO).** T2 selected by its track key, GRID REC by [REC];
+each case resets pattern A01 with FUN_4009abdc (mirror copied), makes the trigless lock with stock's toggle (note bit ->
+toggle x2), pokes lock bytes / other layers (blob + mirror), erases through FUN_40041af4 with stock's gate words
+(0x460d1a94 / 0x460d1a98, or 0x460d1a90 / 0x460d1a9c) and the playhead 0x800064e0[t (+8)], then reads masks, mirror byte,
+row, lock bitmap and -- after the track key repaints -- the step's two LED bits (0x460ba98c) and brightness (0x400b9714).
+Per side (MIDI, AUDIO): one lock erased (steps 4 and 3 = swing step) -> dark; two locks -> lit, then dark; empty TL
+([FUNC]+trig), a never-locked param erased -> lit; a 2-param mask holding the one lock -> dark; note + lock, note + TL bit +
+lock, trigless trig + lock, trigless trig + TL bit + lock -> untouched; MIDI slide / AUDIO one-shot and recorder + TL ->
+kept; neighbours (T3 same step, T2 next step) kept; the erase-the-trigs gesture -> dark; T1 / T8 at steps 33 / 41 / 64
+with params 0 / 15 / 31 (mask bytes and row edges). Results: stock = the bug on both sides (MIDI and audio TLs stay lit,
+mirror and row as the author saw); FINAL ERASE unit 83690ffb… and RC1 V1.8BC = fixed on audio, the bug on MIDI (the
+author's report, reproduced); new unit, ERASE feature, KY18 / KY18C / KY18BC RC2 = every case as specified. ~2 min for
+six images. kyoti_bc_check_erase (BLKPYRAMD skip) ALL GOOD on RC2 V1.8BC.
+Not shown by the emulator: the panel LEDs themselves (it reads the framebuffer the panel is driven from) and the physical
+[NO]+knob gesture (entered at FUN_40041af4 with the words it sets, the path ARTLTEST8 traced on the unit).
+
+**RC2 images** (private build worktree out/rc2/wt = 278b05e + this change, because out/KYOTI here is read by another
+session as RC1; it reproduced RC1 V1.8BC byte for byte first). Copies in out/rc2/ (SHA256SUMS).
+
+| image | OS VERSION | mainos | syx | .bin |
+|---|---|---|---|---|
+| KYOTI V1.8BC | `KY18BC RC2` | `4624b602…` | `12f33b35…` | `7155a854…` |
+| KYOTI V1.8C | `KY18C RC2` | `9df3beb3…` | `fc8588a5…` | `333a9ac3…` |
+| KYOTI V1.8 | `KY18 RC2` | `02e30123…` | `07ac9bca…` | `f4392a43…` |
+| ERASE_EMPTY_TRIGLESS_LOCKS | `140C_ERRC2` | `0f9f1f6f…` | `6025364b…` | `6d677154…` |
+| BLACKPYRAMIDS_303 | `140C_BPRC2` | `f6327fc9…` | `66e6f0ae…` | `8d8acdc5…` |
+| ERASE unit | | `3d60c731…` | | |
+
+Proof: KY18 / KY18C RC2 vs RC1 and the ERASE feature vs RC1's: 279 bytes differ, all in ERASE's zone (ENC
+0x400c45b0..0x400c4700 / 0x400d7200..) and the 6 MIDI-site bytes; the ENC piece = the source linked there. KY18BC RC2 vs a
+pristine 278b05e build (6ef2b86f…, = the BP session's fixC): the same 279 bytes, nothing else. FINAL pins unchanged.
+`feature_image.py --only` ignores KYOTI_VERSTR (only a builder's own run honours it): the ERASE / BP feature images were
+built by their builders. BP gates on RC2 V1.8BC (its mainos + bp_runtime elf): verify_part_carry, verify_tie_xfer, verify_first_gate (and
+STALE=1), verify_page_paste, verify_one_per_core ALL GOOD (idle pass median 54 instructions). Hardware: nothing flashed;
+the MIDI side needs the unit (FLASHING §4 RC2 list to be written by the release session).
+
+## 2026-11-20 cont. (`release-1119`, BLACKPYRAMIDS_303) — a blip of the FLEX sample when a track stops being a BLKPYRAMD (WIP, NOT flashed)
+
+**Hardware (KY18BC RC2, the author's MKI, sequencer running):** switching a track with a sample between FLEX / STATIC and
+BLKPYRAMD in the chooser, and also NEIGHBOR <-> BLKPYRAMD, played a bit of the FLEX / STATIC sample at the switch, often a
+very short fast loop (beat-repeat-like). Every other RC2 item passed.
+
+**Cause (pre-existing: FINAL V1.8BC 0704647c, RC1, RC2 identical).** A BLKPYRAMD rides on a stock FLEX voice: stock binds it
+at every trig, with the voice's knobs in FLEX's live slots (STRT = CUT 44, LEN = RES 64, RATE = ENV, RTRG = DEC 72, RTIM =
+ACC 100), and ot_render never hands it to stock's sample renderer 0x40004008. When the track stops being a BLKPYRAMD,
+the frame ISR's renderer pointer for it (0x400d61d0 + 4t) stays on ot_render until the track's next trig, and ot_render
+then handed that hidden FLEX voice to stock: it played the FLEX slot's sample until the trig, whatever the new machine
+(NEIGHBOR / THRU / STATIC start only at that trig) -- in FINAL / RC1 with the voice's numbers (the short fast loop), in RC2
+with FLEX's own (5511929's seed). ot_emu, trigs every 4 steps, the switch at frame 8000: 822-823 stock-render frames
+(~300 ms) to the next trig, BP -> STATIC, BP -> NEIGHBOR, FLEX -> BP -> NEIGHBOR, on all three images.
+
+**Fix (control.c ot_render, +26 / -1):** a per-track was_ot flag, set while the track renders as a BLKPYRAMD; once it is no
+longer signed and the frame has no trig flag (0x46104d0c + t, bit 4) it renders stock's idle record (0x400047f0's,
+written in place -- that entry is ot_idle_hook) instead of calling 0x40004008; the trig clears the flag and stock's new
+voice plays. A yielding track (carry loser) still renders FLEX, so its record frees the DSP voice at once. Counter
+ot_quiet_frames. ot_emu: 0 hidden-voice frames in every case (822 quiet frames), FLEX plays again from the next trig;
+the DSP claim hand-off unchanged (blip/h1.py, RC2 = fix); the chooser-silence cases (e3.py incl. bank B) and the
+carry-window cases (c1.py) as on 278b05e; the five verify_* gates ALL GOOD. Measured on the ColdFire side (stock-render
+calls per frame); this ot_emu sounds neither the BOTLI samples nor (in most builds) the voice. Evidence:
+out/bpsilent/blip/, gatesE/.
+
+**Follow-up (2026-11-20, raised by the BlackPyramids session's review of 0c465ee):** the yields() branch still called
+FLEX_RENDER -- the same hidden voice under the carrier of a cued Part switch once the incoming track's first trig had the
+voice, up to a whole pattern without an early trig. Now a yielding track that rendered as a BLKPYRAMD writes the idle
+record too (was_ot kept; its own trig moves its pair and the non-signed branch takes it). host.asm: sg_sig takes a record
+as the voice's only if word 0 & $ffff = $3303 and word 2 = $0909; anything else goes to sg_stock, which frees OWN / LIVE
+for the owner -- render_idle's header frees the voice at once, as a FLEX record did. ot_emu (blip/cv.py, verify_part_carry
+fwd / rev, carrier without a trig in the new pattern): hidden-voice frames 1,617 -> 0; the incoming note in the same frame
+(fwd 15883, rev 15884 with the one-frame hold), OWN / LIVE and the DSP record numbers identical to fixE. Five verify_*
+gates, e3 (incl. bank B), c1, h1 as before; kyoti_bc_check_erase 5/5 on the fixE image. Edge cases (b2.py nbfl): BP ->
+NEIGHBOR -> FLEX after NEIGHBOR's trig renders FLEX from its first trig in the same frame as RC2 (a fresh voice's first
+frame carries its trig flag, which clears was_ot); Part changes / loads likewise.
+
+## 2026-11-20 (`promote-1120`) — VARISPEED, VARISPEED_EMUS, ERASE_EMPTY_TRIGLESS_LOCKS (MIDI), EMPTY_PATTERN_LED_FIX (`[BANK]`) and every feature image with the fixes PROMOTED FINAL; BLACKPYRAMIDS_303 / CLYPS / KYOTI wait for RC3
+
+**The author's instruction (2026-11-20):** promote ERASE_EMPTY_TRIGLESS_LOCKS, the EMPTY_PATTERN_LED_FIX change, VARISPEED
+and VARISPEED_EMUS, push to main, rebuild every image that carries the bug-fix package; BLACKPYRAMIDS_303, CLYPS and KYOTI
+V1.8 / V1.8C / V1.8BC wait until RC3 is flashed. Branch `promote-1120` from `release-1119` b4750a7 (origin/main was still
+07f47d1, so no rebase); the Clyps work the release session adds on `release-1119` after b4750a7 is not in it.
+
+**Procedure.** Every promoted builder run with `KYOTI_ALLOW_WIP=1` (each builder's own OS VERSION, sequentially), each
+mainos / unit compared with the RC values (out/rc1/table_full.txt, out/rc2/SHA256SUMS in the release worktree): all
+equal. Pinned in `tools/kyoti_status.py`; every builder then run again WITHOUT the opt-in: all seal ("image matches the
+promoted FINAL build"), units included (MIDI_PLAYS_FREE_FIX and PART_CHANGE_CARRYOVER_FIX unchanged, still their pins).
+`tools/kyoti_status_sram_test.py` on the ten images: PASS, every image clean under both scans.
+
+| builder | unit (pinned under the builder) | feature image mainos (`feature_image.py`) | syx | .bin | OS VERSION | backed by |
+|---|---|---|---|---|---|---|
+| `build_varispeed.py` | `2e365957f13495c5c6aa8d21e9c75b8954b41104efa7968302140d8ee8b73d54` | `fe4e7f50fb6386e1ee717b54896f615fd946c74e7b9f1d2a061098c729388566` | `1212ab6b…` | `e4168f92…` | `140C_VARI1` | KY18BC / KY18C RC1, 140CVEMRC1 (same code); 140C_VRRC1 not flashed |
+| `build_varispeed_emus.py` | `b54e72464dfb5f3ffbefae98e93198c6c1f76ef8237484e44e06967ee22532bc` | `f3b08c791b888f1683f13a57b14f7f44f3f331d79f383b588a161803bf1a4123` | `feef2e43…` | `b6fbac32…` | `140C_VEM11` | 140CVEMRC1 (this mainos), every item |
+| `build_erase_empty_trigless_locks.py` | `3d60c73153771bbab8920bc0be0a31bbd72286eca5e7293c2859d1436fc4b740` | `0f9f1f6f1b34b87ecf7f5fba74c23af2b734932540d968b1095554dc8eb61d4a` | `97ca9bf8…` | `799ed901…` | `140C_TL` | KY18BC RC2 (MIDI + audio); 140C_ERRC2 not flashed |
+| `build_empty_pattern_led_fix.py` (unit) / `build_batch_bugfixes.py` | `074315c20d4c1c2073fc9ee324cf31dcd92f6c639a664d661cf88e542ef5e1a5` | `fa374dd80125aea37d2f2ab858b94af7f618e75b080718dfb4f9f23d9c95c1ca` | `60c25319…` | `25c28ea5…` | `140C_FIXES` | KY18BC / KY18C RC1, 140CVEMRC1 (LED matrix, `[BANK]` held) |
+| `build_mute_modes.py` | `7d48737d…` (unchanged) | `316f01f713cf048f2fdd32464845c7c1493211be95abb76ae5a2e9344064e1b2` | `61d9a03b…` | `89d1a41e…` | `140C_MM` | fixes: as BATCH |
+| `build_quantize_live_rec_toggle.py` | `2012abd8…` (unchanged) | `9b51ad03846acd3f3be2d286ce6f33eea948b2e37dd6c037dbe3bdda6466fa57` | `dd304411…` | `501489bf…` | `140C_QLR` | fixes: as BATCH |
+| `build_sidechain_compressor.py` | `44465569…` (unchanged) | `2d5a401692894c50996201db525a177f19bb4f19d4a9f258a79ce52c6db604c2` | `900c2314…` | `850ebef2…` | `140C_SC` | fixes: as BATCH |
+| `build_reload_from_project.py` | `fc25a994…` (unchanged) | `38f2f7de9c88561bfd9bd2027d7276819aed085eb9873424d02caf16548ef4b6` | `dbb79a8d…` | `4a16aa56…` | `140C_RL` | fixes: as BATCH |
+| `build_direct_jump_kyoti.py` | `7b48fdd6…` (unchanged) | `79b422fdb3bcf62c42395c7fab775d95e81113bd64fb6c65ff0ea44e3475f872` | `026cec8e…` | `7eead9ed…` | `140C_KDJ7` | fixes: as BATCH |
+| `build_rec_trig_mute.py` | `60e97fb3…` (unchanged) | `f8ee2d55ac6d253699b5c4bc2a35a02c587badc3fb43353d17bfc605f47d1c10` | `c54c8796…` | `0d9e88b8…` | `140C_RTM` | fixes: as BATCH |
+
+The old pins these replace: units VARISPEED `ce4f7696…`, VARISPEED_EMUS `d23d9e63…`, ERASE `83690ffb…`, LED `0e50306d…`;
+images (same order) `c3af514f…`, `e2faf75d…`, `db348f68…`, `0cf32835…`, `857d80d3…`, `df4a2498…`, `4febe2e6…`,
+`188ec12c…`, `c58591c0…`, `dac87abd…`. The mainos are the RC builds' byte for byte (the OS VERSION is applied at the
+wrap), so the syx files differ from the RC copies only in that string.
+
+**Not promoted (the author: after RC3 is flashed):** BLACKPYRAMIDS_303 (unit `1d53ef7f…`, image `b4b55638…`), CLYPS
+(`94e41a22…`), KYOTI V1.8 (`8807feee…`), V1.8C (`9d1a29c9…`), V1.8BC (`0704647c…`): pins untouched (a comment in
+kyoti_status.py says why). Main's sources for them now differ (BLKPYRAMD chooser / blip fixes 5511929 / 278b05e /
+0c465ee / b4750a7, and the VRG3 / LED / ERASE bytes in the composed images; RC2's BP unit is `ae7c5dae…`), so their
+builders refuse without `KYOTI_ALLOW_WIP=1` until RC3 is promoted; the 2026-11-19 finals rebuild at 07f47d1.
+
+Docs: README (ERASE on MIDI tracks; the LED entry was af7d5f3's; Hardware lines of the ten images), BUILD_KYOTI (the
+opt-in note), FLASHING §4 (promotion note), START_HERE §6. octabam pin PRs: next entry.
+
+## 2026-11-20 cont. (`promote-1120`) — octabam pin PRs for the promotion: #1200 (batch-bugfixes), #1201 (erase), #1202 (varispeed)
+
+**Our side first.** 2cd3109 (docs only, pushed): the three octabam module folders' hardware lines (ERASE's MIDI side was
+"not yet on hardware"; the 318 B LED predicate; VARISPEED VRG3's bytes, QUAN entry and proof_note). build_varispeed /
+_varispeed_emus / _erase / _batch_bugfixes rebuilt and sealed without the opt-in after it. Every PR pins 2cd3109.
+
+**Scratch clone** `out/octabam-pr` (+ worktrees `out/octabam-erase`, `out/octabam-varispeed`), base 382a478b, its own
+`scripts/setup.sh` vendor (the shared ~/Documents/octabam/vendor dsp56300 is 8ccdd843, older than main's pin 8b731966:
+emu-get failed `setIoExtension` against it; not touched). Local environment notes: main's uv.lock has no numpy
+although pyproject's emu extra lists it (WAVE CF's tests fail on import) -- `uv pip install numpy` into the clone's
+.venv, lock untouched; `make emu-unicorn` (private .venv) for WAVE CF's EMAC test. Said so in #1201 / #1202.
+
+| PR | module | gates on 382a478b |
+|---|---|---|
+| sambanks/octabam#1200 | batch-bugfixes 77f132f -> 2cd3109 (the draft from led-fix's out/octabam-led, placeholders filled) | make bus x18 remixes (318 B, smallest cave left test/hooks-core 632 B), make docs, verify-docs 115/151/0, mkdocs --strict 0 warnings, make reach RUN=1 KEEP=1 every gate passed (13 shards); CI green |
+| sambanks/octabam#1201 | erase-empty-trigless-locks 77f132f -> 2cd3109 (CavePatch -> Linked `tl` 240 B + two jsr, MIDI site 0x400387b8 used by no other module) | make bus x15 (matches the reference at 0x400d7200, both jsr placed), docs, verify-docs, mkdocs, make reach every gate passed (65 shards, 21 SKIP for no project fixture) |
+| sambanks/octabam#1202 | varispeed 9b2e35a -> 2cd3109 (VRG3: four claimed bytes, QUAN entry, usage page) | make bus x4 (vari_cf matches the reference, 3,900 B), docs, verify-docs, mkdocs, make reach every gate passed (65 shards) |
+
+**vh_bptake / vh_bpback (VARI_TAKE / VARI_BACK) left out of #1202:** octabam's `vari_cf` must equal the standalone
+VARISPEED unit (its `reference`; build_varispeed.py refuses a wrapper that assembles differently), and `VEM_BP`
+changes that unit; carrying them needs a design choice (a second unit or a setting, and how BLACKPYRAMIDS_303's
+runtime finds the two addresses). The body says so and asks to keep #1195's VARISPEED conflict until that follow-up.
+None of the three octabam forms has been flashed. Not touched: #1195 (the BlackPyramids session's), Modwerk.

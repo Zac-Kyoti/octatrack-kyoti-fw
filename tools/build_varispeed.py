@@ -71,6 +71,16 @@ SWITCH = (("VEM_EMUS", 0),)
 UIS_AT = kyoti_place.at("uis_sw9_at", None)
 if UIS_AT is not None:
     SWITCH += (("UIS_SW9_AT", UIS_AT),)
+# VRG3 (KYOTI only): the UI-task code (the ATTR hooks, the formatters, QUAN's dial and step, the bulk
+# writers' holds, the SRC page paste's guard) is the source's UI section, a piece of its own
+# (patch_varispeed_ui: KYOTI's DRAM payload, linked at the address build_kyoti.py allocates; a stand-in
+# while it sizes), so the proven cave keeps only the frame path. vem_bp: KYOTI V1.8BC carries
+# BLACKPYRAMIDS_303, whose ot_assign calls vh_bptake / vh_bpback.
+UI_AT = kyoti_place.at("patch_varispeed_ui", 0x40a95000) if UIS_AT is not None else None
+UI_DRAM = bool(kyoti_place.at("patch_varispeed_ui_dram", True))
+UI_BIN = WORK / "vem_ui.bin"
+if kyoti_place.at("vem_bp", False):
+    SWITCH += (("VEM_BP", 1),)
 # VARISPEED_EMUS's own symbols: none may be in this unit (nothing emulated, no guard)
 EMUS_ONLY = ("emus_widget", "emus_fmt", "emus_p2step", "emus_open", "emus_idx", "emus_stops",
              "vg_tick", "vg_fix", "vg_scan", "vg_sig", "vh_fx1", "vh_fx2", "vg_note",
@@ -84,11 +94,41 @@ def main():
     img = bytearray(stock)
 
     print("=== ColdFire: varispeed_emus.s, VEM_EMUS = 0 (VARISPEED) ===")
-    blob, syms, end = L.build_unit(SRC, WORK, SWITCH)
+    ui = None
+    if UI_AT is None:
+        blob, syms, end = L.build_unit(SRC, WORK, SWITCH)
+    else:
+        blob, ui, syms = L.link_split(SRC, WORK, "5407", L.CAVE, UI_AT, "5407", SWITCH)
+        b2, u2, s2 = L.link_split(SRC, WORK, "54455", L.CAVE, UI_AT, "54455", SWITCH)
+        if (blob, ui, syms) != (b2, u2, s2):
+            sys.exit("the units link to different bytes for -mcpu=5407 and 54455 -- refusing")
+        end = L.CAVE + len(blob)
+        if syms["vem_end"] != end or end > L.CAVE_END:
+            sys.exit(f"the cave unit 0x{L.CAVE:08x}..0x{end:08x} (vem_end 0x{syms['vem_end']:08x}) is wrong")
+        for k in L.FRAME_PATH:
+            if k in syms and not L.CAVE <= syms[k] < end:
+                sys.exit(f"{k} (frame path) is not in the cave unit")
+        for name, b in (("cave", blob), ("UI", ui)):
+            for i in range(0, len(b) - 3):
+                v = int.from_bytes(b[i:i + 4], "big")
+                if L.SCRATCH[0] <= v < L.SCRATCH[1]:
+                    sys.exit(f"the {name} unit references 0x{v:08x} (the unreliable scratch block) at +0x{i:x}")
+        (WORK / "vem_5407.bin").write_bytes(blob)       # the cave unit (build_kyoti.py reads both)
+        UI_BIN.write_bytes(ui)
+        shutil.copy2(WORK / "vem_5407.elf", WORK / "vem_ui.elf")
+        print(f"  cave unit {len(blob)} B @ 0x{L.CAVE:08x}..0x{end:08x}; UI section {len(ui)} B @ 0x{UI_AT:08x}"
+              f"{' (DRAM: carried by the combined image, not written here)' if UI_DRAM else ''}; 5407 == 54455")
     left = [s for s in EMUS_ONLY if s in syms]
     if left:
         sys.exit(f"the VARISPEED unit carries VARISPEED_EMUS symbols {left} -- the switch failed")
-    written = L.splice(img, blob, syms, L.CORE_DETOURS, L.CORE_POKES, L.CORE_CONTEXT, L.CORE_RETURNS)
+    written = L.splice(img, blob, syms, L.CORE_DETOURS, L.CORE_POKES, L.CORE_CONTEXT, L.CORE_RETURNS,
+                       ui=(UI_AT, ui) if ui is not None else None)
+    if ui is not None and not UI_DRAM:
+        uo = UI_AT - L.BASE
+        if not (0 <= uo and uo + len(ui) <= len(img)) or any(img[uo:uo + len(ui)]):
+            sys.exit(f"patch_varispeed_ui at 0x{UI_AT:08x} is not free ROM in this image")
+        img[uo:uo + len(ui)] = ui
+        written.update(range(uo, uo + len(ui)))
 
     # Nothing else: every byte that differs from stock is the unit's, a detour's or a poke's.
     # So the DSP payloads, SPRING REVERB and both FX choosers are stock.

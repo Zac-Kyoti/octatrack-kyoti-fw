@@ -17,6 +17,7 @@
         .global ot_live_req_hook, ot_live_midi_hook, ot_live_chrom_hook, ot_live_rel_hook, ot_oneshot_hook
         .global ot_rec_chrom_hook, ot_rec_midi_hook, ot_idle_hook
         .global ot_plock_hook
+        .global ot_paste_hook, bp_uitail, ot_reject_name, ot_pgcopy_hook, ot_pgpaste_hook, ot_pgundo_hook
         .global ot_led_hook, ot_slices_hook, ot_slots_hook, ot_oct_hook, ot_chrom_key_hook, ot_chrom_limit_hook, ot_chrom_img_hook, ot_page_key_hook
 
         .equ    OT_ROW, 5
@@ -544,6 +545,141 @@ ot_glyph:
         jmp     (0x4004013c).l
 1:      pea     ot_glyph3
         jmp     (0x4004013c).l
+
+| One BLKPYRAMD per DSP core (control.c, "One BLKPYRAMD per DSP core, on every path"). TRACK PASTE: stock's paste
+| wrapper 0x4002b988(pattern, track) -- the paste key's handler calls it (0x4005eb50) after saving the undo copy;
+| it pastes the clipboard 0x460c8122 with 0x4002b654 when the clipboard holds an audio track -- asks
+| control.c ot_paste_ok first. Refused: nothing pasted (the toast is ot_paste_ok's), the undo state cleared as
+| stock's own undo leaves it (0x460c80f4 / 0x460c80f0), 0 returned: the handler then shows no PASTE TRACK.
+| (Its entry, not 0x4002b654's: VARISPEED owns that one, and stock's undo calls it too -- an undo that brings a
+| second one back is the net's.) Replays the 8 displaced bytes.
+ot_paste_hook:
+        move.l  8(%sp),-(%sp)           | the track
+        move.l  8(%sp),-(%sp)           | the pattern
+        pea     (0x460c8122).l          | the clipboard
+        jsr     ot_paste_ok
+        lea     12(%sp),%sp
+        tst.l   %d0
+        bne.s   1f
+        clr.l   (0x460c80f4).l
+        clr.l   (0x460c80f0).l
+        rts                             | d0 = 0: nothing pasted
+1:      moveq   #4,%d0
+        cmp.l   (0x460d0ffa).l,%d0
+        jmp     (0x4002b990).l          | its beq follows on these flags
+
+| SRC page copy / paste (control.c ot_pgcopy / ot_pgpaste). The page copy 0x40026314(buffer, part, track, page,
+| midi): what the page is copied from, then the displaced lea/movem.
+ot_pgcopy_hook:
+        move.l  20(%sp),-(%sp)          | midi
+        move.l  20(%sp),-(%sp)          | page
+        move.l  20(%sp),-(%sp)          | track
+        move.l  20(%sp),-(%sp)          | part
+        move.l  20(%sp),-(%sp)          | the buffer
+        jsr     ot_pgcopy
+        lea     20(%sp),%sp
+        lea     -24(%sp),%sp
+        movem.l %d2-%d5/%a2-%a3,(%sp)
+        jmp     (0x4002631c).l
+| The page paste 0x40028fc4(part, track, page, midi), from the clipboard: d0 = 0 refused (nothing pasted), else
+| the displaced two pushes and on.
+ot_pgpaste_hook:
+        move.l  16(%sp),-(%sp)          | midi
+        move.l  16(%sp),-(%sp)          | page
+        move.l  16(%sp),-(%sp)          | track
+        move.l  16(%sp),-(%sp)          | part
+        pea     (0x460c8122).l          | the clipboard
+        jsr     ot_pgpaste
+        lea     20(%sp),%sp
+        tst.l   %d0
+        bne.s   1f
+        rts
+1:      move.l  16(%sp),-(%sp)
+        move.l  16(%sp),-(%sp)
+        jmp     (0x40028fcc).l
+| The page UNDO 0x40028f40, at its `pea 0x460bf218` (0x40028f94, before the jsr 0x40027e4c with part, track, page,
+| midi already pushed): restore the machine the page was saved from, then leave the pea's long on the stack.
+ot_pgundo_hook:
+        move.l  16(%sp),-(%sp)          | midi
+        move.l  16(%sp),-(%sp)          | page
+        move.l  16(%sp),-(%sp)          | track
+        move.l  16(%sp),-(%sp)          | part
+        pea     (0x460bf218).l          | the undo buffer
+        jsr     ot_pgpaste
+        lea     20(%sp),%sp
+        move.l  (%sp)+,%a1
+        pea     (0x460bf218).l
+        jmp     (%a1)
+
+| The UI task's message loop, common tail 0x40062d1c (`tst.l 0x46c7c72c`, then stock's beq.w on its flags): the
+| standalone image's jsr from there; KYOTI V1.8BC's Clyps owns the site (cl_uitail) and calls this first. The fast
+| path (control.c bp_fp): back at once -- the displaced test, rts keeps its flags for the beq.w -- when the bank,
+| the flag, the periodic count, the UI and engine Parts, the playing / pending pattern and the active Part's
+| machine bytes and signature words are as the net's last full pass left them; else that full pass (bp_net).
+| About 55 instructions idle. d0/d1/a0/a1 are free here (VARISPEED_EMUS's vg_tick uses the same site so; Clyps
+| calls it at cl_uitail's entry): used without saving.
+        .equ    BP_FP_CNT, 4
+        .equ    BP_FP_WAKE, 52
+bp_uitail:
+        lea     (bp_fp).l,%a1
+        move.l  (BANK_PTR).l,%d0
+        beq.w   bp_ut_idle                      | no bank yet
+        cmp.l   (%a1),%d0
+        bne.w   bp_ut_full                      | another bank
+        tst.l   BP_FP_WAKE(%a1)
+        bne.w   bp_ut_full                      | a load, a paste, a Clyps load
+        subq.l  #1,BP_FP_CNT(%a1)
+        beq.w   bp_ut_full                      | the periodic full pass
+        mvz.b   (0x100b14cf).l,%d0
+        cmp.l   8(%a1),%d0
+        bne.w   bp_ut_full                      | the UI's Part
+        mvz.b   (0x80000003).l,%d0
+        cmp.l   12(%a1),%d0
+        bne.w   bp_ut_full                      | the engine's Part
+        move.l  (0x800065bc).l,%d0
+        cmp.l   16(%a1),%d0
+        bne.w   bp_ut_full                      | PLAY_BANK, ACT_PAT, PEND_BANK
+        mvz.b   (0x800065c0).l,%d0
+        cmp.l   20(%a1),%d0
+        bne.w   bp_ut_full                      | PEND_PAT: a cued change, before it lands
+        movea.l 24(%a1),%a0             | the active Part: its machine bytes, two longs
+        move.w  0x22(%a0),%d0
+        swap    %d0
+        move.w  0x24(%a0),%d0
+        cmp.l   28(%a1),%d0
+        bne.w   bp_ut_full
+        move.w  0x26(%a0),%d0
+        swap    %d0
+        move.w  0x28(%a0),%d0
+        cmp.l   32(%a1),%d0
+        bne.w   bp_ut_full
+        move.w  60(%a0),%d0             | ... the signature words ('O','T'), two tracks a long
+        swap    %d0
+        move.w  90(%a0),%d0
+        cmp.l   36(%a1),%d0
+        bne.w   bp_ut_full
+        move.w  120(%a0),%d0
+        swap    %d0
+        move.w  150(%a0),%d0
+        cmp.l   40(%a1),%d0
+        bne.w   bp_ut_full
+        move.w  180(%a0),%d0
+        swap    %d0
+        move.w  210(%a0),%d0
+        cmp.l   44(%a1),%d0
+        bne.w   bp_ut_full
+        move.w  240(%a0),%d0
+        swap    %d0
+        move.w  270(%a0),%d0
+        cmp.l   48(%a1),%d0
+        bne.w   bp_ut_full
+bp_ut_idle:
+        tst.l   (0x46c7c72c).l
+        rts
+bp_ut_full:
+        jsr     bp_net
+        tst.l   (0x46c7c72c).l
+        rts
 
 ot_name:                                | MT17: the machine's display name (BlackPyramids_303; 9 characters fit
         .asciz  "BLKPYRAMD"             | the chooser, SRC SETUP, the track box and PLAYBACK>name, ot_emu)

@@ -2,7 +2,7 @@
 
 A stock bug fix. A **trigless lock** — a step holding parameter locks but no audible
 trig — used to stay lit on the trig row forever once you erased its last remaining
-lock, even though the step was now inert. It now disappears.
+lock, even though the step was now inert. It now disappears, on audio and MIDI tracks.
 
 A deliberately empty trigless lock placed with `FUNC` + `TRIG` is left alone.
 
@@ -10,7 +10,7 @@ A deliberately empty trigless lock placed with `FUNC` + `TRIG` is left alone.
 
 | file | what it is |
 |---|---|
-| `manifest.py` | the octabam module declaration — one cave, one `jsr` hook |
+| `manifest.py` | the octabam module declaration — one linked unit, two `jsr` hooks |
 | `patch_triglock.s` | the m68k source; the only truth for the cave's bytes |
 
 Standalone image: `tools/build_erase_empty_trigless_locks.py`. It deliberately does **not** bump the
@@ -22,28 +22,36 @@ version string — one bug fix, stock-transparent.
 `FUN_40041af4`. It was identified by tracing the gesture on real hardware, not by
 static guesswork. It already works out that the step's p-lock row has gone empty
 and clears the track's bit from the per-step bitmap — but it never clears the
-trig-type-layer flag `TRAC+0x10`, which is what keeps the LED lit. This module adds
-only that clear.
+trig-type-layer flag `TRAC+0x10`, which is what keeps the LED lit. On a MIDI track
+`FUN_40041af4` calls the twin `FUN_40038668`, which leaves `MTRA+0x10` set the same way.
+This module adds only that clear, with one rule for both.
 
 | site | displaces | kind |
 |---|---|---|
-| `0x40038a5c` | `moveb %d1,%a0@(0x59,%d2:l)` + `addl %d4,%d0` | `jsr`; the cave replays both, then `rts` onto `0x40038afe` |
+| `0x40038a5c` | `moveb %d1,%a0@(0x59,%d2:l)` + `addl %d4,%d0` | `jsr cave` (AUDIO); it replays both, then `rts` |
+| `0x400387b8` | `moveb %d1,%a0@(0x4900)` + `addl %d4,%d0` | `jsr cave_midi` (MIDI); it replays both, then `rts` |
 
 **Why that site and not the obvious one.** An earlier attempt detoured `0x40038af8`,
 whose second instruction is the enclosing loop's `addql #1,%d7` — and `0x40038afc`
 is a branch target from two places, so a six-byte splice would have been jumped
 into halfway. The standalone builder keeps an `assert_no_branch_into` check for
-exactly this; here the site is pinned by its stock bytes.
+exactly this, on both sites; here they are pinned by their stock bytes.
 
-The cave is **position-independent** (verified byte-identical linked at `0x400d7500`
-and `0x400d6f00`), so it may land wherever the allocator puts it.
+The unit is **position-independent** (verified byte-identical linked at `0x400d7200`,
+`0x400d7500`, `0x400d6f00` and `0x400c45b0`), so it may land wherever the allocator puts it.
 
 ## Measured
 
-Hardware-confirmed on the author's Octatrack **MKI** — the gesture was traced on
-the unit, which is how the real worker was found. Nothing tested on an MKII.
+Audio: hardware-confirmed on the author's Octatrack **MKI** — the gesture was traced on
+the unit, which is how the real worker was found. Both sides, these 240 bytes: confirmed on
+the author's MKI on 20 Nov 2026 in a KYOTI V1.8BC release candidate (`KY18BC RC2`): on a
+MIDI track, erasing the only lock of a trigless lock darkens the step, with two locks only
+the second erase does, an empty `FUNC` + `TRIG` one stays, and a note or trigless trig with
+a lock keeps its trig; the same on an audio track; a BLKPYRAMD track left alone. The
+standalone image was not flashed as such. Emulator: `tools/erase_trigless_test.py`.
+Nothing tested on an MKII.
 
-296 bytes, sha256 `5656b2da0a61719a…` linked at `0x400d7200`.
+240 bytes, sha256 `0fa04f4dad79809c…` linked at `0x400d7200`.
 
 ## Licence
 

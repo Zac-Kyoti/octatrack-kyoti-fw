@@ -9,7 +9,9 @@ octave. RATE still applies. On AUTO, a sample whose TIMESTRETCH (audio editor �
 plays the same way. A sample or project tempo outside 30–300 BPM plays as TSTR OFF.
 
 On a VARI track PTCH becomes **QUAN**, the ratio p/q: `1/2 2/3 3/4 4/5 1/1 5/4 4/3 3/2 2/1`.
-Leaving VARI gives PTCH back its value. TSNS stays TSNS. The DSP is stock: SPRING REVERB
+Entering VARI, QUAN starts at `1/1`, unless the track had another QUAN when it last left VARI
+(remembered per track and machine, and saved with the Part). Leaving VARI gives PTCH back its
+value. A VARI note held over a Part switch keeps its speed until its own next trig. TSNS stays TSNS. The DSP is stock: SPRING REVERB
 stays, and there is no load guard.
 
 **Before going back to stock firmware**, set every VARI back to OFF, AUTO, NORM or BEAT and save. TSTR VARI is saved in the Part and ATTR TIMESTRETCH VARI in the sample's `.ot` file, both as the raw value 4; stock 1.40C stores it unchecked and plays it as NORMAL timestretch, and its TSTR formatter (bound off by one) may show junk text. (`reference/kb/file-format.md`, the `.ot` attribute file.)
@@ -44,7 +46,9 @@ no STORE and keeps its own detour on CLEAR (`vh_partclear`).
 
 STATIC's and FLEX's TSTR count goes 4 → 5, using stock's 5-position select and this unit's
 formatter. PTCH gets a new widget and encoder step. The PTCH/QUAN swap keeps each machine's
-PTCH in NEIGHBOR's unused `---` bytes of the same track (claimed in the Part window).
+PTCH, and the QUAN it remembers off VARI, in four bytes of the same track that stock never
+edits or shows: THRU page 1 slots 2 and 5, and THRU's and NEIGHBOR's slot bytes (claimed in
+the Part window). An older build's park in NEIGHBOR's `---` bytes is moved in at first sight.
 
 PLACE: DRAM (default) or CAVE (where the standalone image puts it). The ledger refuses this
 module beside VARISPEED_EMUS or anything else that writes the TSTR words or the same sites.
@@ -52,3 +56,7 @@ module beside VARISPEED_EMUS or anything else that writes the TSTR words or the 
 ## On the unit
 
 The author's MKI, 15 Oct 2026: the VARI1 build (standalone `140C_VARI1` or its Bugbuild `BUG_VARI`).
+This version (VRG3), 20 Nov 2026: in KYOTI V1.8BC / V1.8C release candidates and in VARISPEED_EMUS
+(the same source): QUAN on entering VARI and across a save, a project saved with an earlier build,
+a held VARI note's speed through a Part switch, a BLKPYRAMD beside VARI. The standalone image was
+not flashed as such.

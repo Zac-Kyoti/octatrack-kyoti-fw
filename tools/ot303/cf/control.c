@@ -54,6 +54,7 @@ static volatile uint8_t *part_base(void) {
     return (volatile uint8_t *)(uintptr_t)(U32(BANK) + PART_OFF + (U8(PART_IDX) & 3) * PART_STRIDE);
 }
 /* One voice per DSP core: refuse a second OT-303 among tracks 1-4 or 5-8. */
+static const volatile uint8_t *play_part(unsigned t);   /* the Part a track's sound comes from (ot_render) */
 unsigned ot_admit_track(const volatile uint8_t *part, unsigned track) {
     if (track >= 8) return 0;
     for (unsigned t = track & 4; t < (track & 4) + 4; ++t)
@@ -266,16 +267,33 @@ unsigned ot_setup_edit_row(unsigned t) {
     }
     return NEIGHBOR;
 }
+/* KYOTI V1.8BC carries VARISPEED too (build_kyoti.py passes its two entries; unset, as standalone, none of this is
+ * compiled). VARISPEED keeps a track's PTCH / QUAN in four bytes of its own (VRG3) and never touches an OT-303 track;
+ * the two meet in FLEX's bytes, which the voice stashes. Before the voice takes a track, VARISPEED takes FLEX off VARI
+ * (PTCH back in its slot, QUAN remembered) and remembers a TSTR of VARI, which the stash's two TSTR bits cannot hold;
+ * after FLEX is put back, VARISPEED sets TSTR to VARI again when it was (its next poll enters VARI with the QUAN it
+ * remembered). Called per Part copy: (the Part as here, track). */
+#ifdef KYOTI_VARI_TAKE
+#define VARI_TAKE(p, t) ((void (*)(volatile uint8_t *, unsigned))KYOTI_VARI_TAKE)(p, t)
+#define VARI_BACK(p, t) ((void (*)(volatile uint8_t *, unsigned))KYOTI_VARI_BACK)(p, t)
+#else
+#define VARI_TAKE(p, t) ((void)0)
+#define VARI_BACK(p, t) ((void)0)
+#endif
 /* machine.s's commits: sign = 1 makes track t of this Part an OT-303 (FLEX stashed, its parked knobs
  * or the defaults seeded), 0 makes it something else (FLEX put back, its knobs parked); both copies (the
  * Part and its SRAM mirror); nothing changes when the track already is / is not one. */
+#define TRK_SEED 0x40001f18u        /* stock's track seed (bank, part, track): the track's live bytes from the Part */
 void ot_assign(volatile uint8_t *part, unsigned t, unsigned sign) {
     volatile uint8_t *copies[2] = {part, part - (U32(BANK) + PART_OFF) + SRAM_PART};
+    unsigned changed = 0;
     for (unsigned c = 0; c < 2; ++c) {
         volatile uint8_t *p = copies[c], *s = p + SIG + 30 * t;
         unsigned is = s[0] == 'O' && s[1] == 'T' && s[2] == 1;
         uint8_t v[12];
+        if ((sign && !is) || (!sign && is)) changed = 1;
         if (sign && !is) {
+            VARI_TAKE(p, t);
             for (unsigned k = 0; k < 12; ++k) v[k] = (uint8_t)parked_value(p, t, k);
             flex_stash(p, t);
             for (unsigned k = 0; k < 12; ++k) *knob(p, t, k) = v[k];
@@ -285,8 +303,23 @@ void ot_assign(volatile uint8_t *part, unsigned t, unsigned sign) {
             flex_restore(p, t);
             for (unsigned k = 0; k <= OT_VOL; ++k) *parked(p, t, k) = v[k];
             s[0] = PARK_MARK;
+            VARI_BACK(p, t);
         }
     }
+    /* Stock re-stages a track's live machine bytes (page 1 at 0x80000810 + 72 t with its base words, SETUP at + 0x20)
+     * only when its stored machine changes (at the track's next trig) or a Part is applied (PLAY, a load, a Part
+     * change). FLEX <-> OT-303 is FLEX -> FLEX to stock: nothing was re-staged, the voice played FLEX's live values
+     * (VOL = FLEX's TSTR byte: silent) and a FLEX track kept the OT-303's. Stock's own seed, as its commits call it
+     * from the UI task (0x400973da, 0x40096d9a); every ot_assign caller is a UI-task path. */
+    /* Not while the track still carries another Part's sound (a cued Part switch: the UI Part moves ~7 ticks before
+     * the boundary, the track's pair keeps the old Part until its first trig there, play_part): forgetting the pair
+     * would end the carry early (the voice freed mid-note) and the seed would put the incoming Part's values under
+     * the carried note. Its first trig in this Part re-stages it anyway (pair != the trig's Part). */
+    if (!changed || part != part_base() || play_part(t) != part_base()) return;
+    if (part[0x22 + t] == 1) ((void (*)(unsigned, unsigned, unsigned))TRK_SEED)(U8(0x100b14ceu), U8(PART_IDX), t);
+    /* and whatever the machine byte becomes after this commit, the track's next trig re-stages it from the Part: its
+     * live-bytes pair forgotten, as PLAY and a load leave it (BP -> NEIGHBOR -> BP with no trig between kept FLEX's) */
+    U8(0x8000182au + t) = 0xff; U8(0x80001832u + t) = 0xff;
 }
 /* The main page names the current track's sample: the track box (0x4004c1c0, the UI's current track
  * 0x100b14cc) and the screen's label builder (0x4003d552, the current track 0x80000000) both call the
@@ -309,12 +342,243 @@ const uint32_t ot_glyph3[5] = {3, 4, 1, (uint32_t)(uintptr_t)ot_glyph3_ink, (uin
 unsigned ot_track_is(unsigned t) {
     return signed_track(part_base(), t);
 }
+/* ---- One BLKPYRAMD per DSP core, on every path (the author, 2026-11-17) ----------------------------------
+ * The chooser and SRC SETUP refuse a second one on a core (ot_admit_track, machine.s's commits). The other ways in:
+ *   TRACK PASTE      stock's paste wrapper 0x4002b988 (machine.s ot_paste_hook): refused whole (ot_paste_ok).
+ *   Clyps' FULL loads (KYOTI V1.8BC only: tools/clyps/patch_clyps.s cl_bpgate): refused whole (bp_refuse_load).
+ *   anything else    a project or bank load (ot_validate_part notes it), an undo of a paste, a stock writer that
+ *                    sets only the machine byte under a STALE signature (a signature on a track that is no longer
+ *                    FLEX: SRC page paste 0x40027e4c, the file browser's assigns 0x40093e9c..): the net (bp_net),
+ *                    on the UI task after every UI message. Per core of each of the current bank's four Parts, two
+ *                    or more signed tracks: the one that held the core at the net's previous pass stays (after a
+ *                    load or a bank change: the lowest-numbered), every other one goes back to FLEX with its pre-303
+ *                    settings (ot_assign(part, t, 0): FLEX's stash, the knobs parked), the Part marked edited as
+ *                    stock's TRACK PASTE does, the current Part's track republished (0x400972fc, as SRC paste), the
+ *                    toast. A stale signature is cleared the same way (no toast: nothing was refused). An idle pass
+ *                    is machine.s's fast path (bp_fp below): a full pass only when something can have changed.
+ * Every toast here comes from the UI task (a key handler or the loop's tail), never the frame path (CLAUDE.md). */
+#define NOTIFY 0x4005a2b8u          /* stock's toast (text, duration), legal from the UI task */
+#define TOAST_DUR 0x30u
+#define CLIP 0x460c8122u            /* stock's track clipboard: the pattern track (0x91a B), then the Part slice */
+#define CLIP_KIND 0x460d0ffau       /* 4: the clipboard holds an audio track */
+#define PAT_STRIDE 0x8ed8u
+#define EDITED 0x95048u             /* bank + : the Parts' edited bits (a byte); 0x100b145e its other copy */
+#define EDITED2 0x100b145eu
+#define BANK_DIRTY 0x9b332u         /* bank + : a long, 1 = the bank changed; 0x100f8598 its other copy */
+#define BANK_DIRTY2 0x100f8598u
+#define RDRAW 0x46c7c72cu           /* the UI tail redraws the screen when non-zero */
+#define TRK_REFRESH 0x400972fcu     /* (part, track, 1): the track's machine republished (SRC paste, 0x40027fbc) */
+extern const char ot_reject_name[];
+/* for the firmware checks: toasts shown, loads / pastes refused, net passes, tracks demoted, stale signatures cleared */
+uint32_t bp_toasts = 0, bp_refusals = 0, bp_net_passes = 0, bp_net_demoted = 0, bp_net_stale = 0;
+uint32_t bp_pend = 0;               /* ot_validate_part saw a Part with two on a core or a stale signature (a load) */
+/* The net's fast path (2026-11-17, the author: cheap when idle, every path still covered). machine.s bp_uitail runs
+ * after every UI message and returns at once when nothing the net reads can have changed since its last full pass:
+ * the same bank, no flag, the periodic count not run out, the same UI Part (0x100b14cf) and engine Part (0x80000003),
+ * the same playing / pending pattern (the long at 0x800065bc: PLAY_BANK, ACT_PAT, PEND_BANK; and PEND_PAT
+ * 0x800065c0: a cued pattern change wakes the net BEFORE it lands), and the active Part's eight machine bytes and
+ * the first two signature bytes of each track as they were. Else bp_net: the full scan of all four Parts, as before.
+ * bp_fp is that state, read by machine.s at fixed offsets (BP_FP_* there):
+ *   0 bank  1 count  2 UI Part  3 engine Part  4 pattern long  5 PEND_PAT  6 the active Part
+ *   7-8 its machine bytes as two longs (0x22.. 0x29)  9-12 the signature words, two tracks a long  13 the flag
+ * The flag (bp_wake) is set by every writer that can reach a Part the fingerprint does not watch: a load (the Part
+ * validator), an allowed TRACK PASTE, an allowed Clyps FULL load (KYOTI V1.8BC: bp_refuse_load). Writers of the
+ * active Part (SRC page paste, the file browser's assigns, an undo, the chooser) change its fingerprint. The count
+ * (NET_EVERY passes, about a second at the UI's 60 Hz tick) runs a full pass anyway: a writer nobody knows of, to a
+ * Part that is not active, is caught within it -- and in any case when that Part becomes active (its index or the
+ * pattern changes), before it plays a step. */
+#define NET_EVERY 60u
+uint32_t bp_fp[14] = {0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1};
+#define bp_wake bp_fp[13]
+uint32_t bp_net_full = 0, bp_net_why = 0, bp_net_fixpart = 0xff;   /* full passes; why the repairing ones ran; and
+                                                       the engine Part when the last one repaired (the gate's check) */
+static void fp_take(uint32_t bank) {
+    unsigned cur = U8(PART_IDX);
+    const volatile uint16_t *w = (const volatile uint16_t *)(uintptr_t)(bank + PART_OFF + (cur & 3u) * PART_STRIDE);
+    bp_fp[0] = bank; bp_fp[1] = NET_EVERY; bp_fp[2] = cur; bp_fp[3] = U8(0x80000003u);
+    bp_fp[4] = U32(0x800065bcu); bp_fp[5] = U8(0x800065c0u); bp_fp[6] = (uint32_t)(uintptr_t)w;
+    bp_fp[7] = (uint32_t)w[0x22 / 2] << 16 | w[0x24 / 2];
+    bp_fp[8] = (uint32_t)w[0x26 / 2] << 16 | w[0x28 / 2];
+    for (unsigned i = 0; i < 4; ++i) bp_fp[9 + i] = (uint32_t)w[(SIG + 60 * i) / 2] << 16 | w[(SIG + 30 + 60 * i) / 2];
+    bp_wake = 0;
+}
+/* why this pass is not the fast one (the bits of bp_net_why) */
+static unsigned net_cause(uint32_t bank) {
+    if (bp_wake) return 1;
+    if (bank != bp_fp[0]) return 2;
+    if (!bp_fp[1]) return 16;
+    if (U8(PART_IDX) != bp_fp[2] || U8(0x80000003u) != bp_fp[3]) return 4;
+    if (U32(0x800065bcu) != bp_fp[4] || U8(0x800065c0u) != bp_fp[5]) return 8;
+    return 32;                                           /* the active Part's fingerprint */
+}
+static void bp_toast(void) {
+    ++bp_toasts;
+    ((void (*)(const char *, unsigned))NOTIFY)(ot_reject_name, TOAST_DUR);
+}
+static unsigned has_sig(const volatile uint8_t *part, unsigned t) {
+    const volatile uint8_t *s = part + SIG + 30 * t;
+    return s[0] == 'O' && s[1] == 'T' && s[2] == 1;
+}
+static unsigned two(unsigned m) { return (m & (m - 1)) != 0; }
+static unsigned lowest(unsigned m) { unsigned t = 0; while (t < 7 && !(m >> t & 1u)) ++t; return t; }
+/* TRACK PASTE: machine.s ot_paste_hook, at the paste wrapper's entry (0x4002b988(pattern, track), the [FUNC]+[STOP]
+ * handler's: it pastes the clipboard into that track of the pattern and its Part when the clipboard holds an audio
+ * track). 0 = refused: the clipboard's track is a BLKPYRAMD and another track on the target's core in the pattern's
+ * Part is one (the toast here). The track keeps what it had. */
+unsigned ot_paste_ok(const volatile uint8_t *clip, unsigned pattern, unsigned t) {
+    bp_wake = 1;                                         /* a paste writes a Part: the net's next pass is a full one */
+    if (U32(CLIP_KIND) != 4 || t >= 8 || pattern >= 16) return 1;
+    const volatile uint8_t *s = clip + 0x91a;            /* FX1, FX2, the levels (2), the machine, page 1 */
+    if (!(s[4] == 1 && s[5 + 18] == 'O' && s[5 + 19] == 'T' && s[5 + 20] == 1)) return 1;
+    uint32_t bank = U32(BANK);
+    const volatile uint8_t *part = (const volatile uint8_t *)(uintptr_t)(bank + PART_OFF
+        + (U8(bank + pattern * PAT_STRIDE + 0x8e57) & 3u) * PART_STRIDE);
+    if (ot_admit_track(part, t)) return 1;
+    ++bp_refusals;
+    bp_toast();
+    return 0;
+}
+/* SRC page copy / paste (the author, 2026-11-18, B3): a page holds one machine's twelve bytes and that machine
+ * (0x40026314 copies them into the clipboard 0x460c8122 or the undo buffer 0x460bf218, kind 26 at +0x8ed8 for SRC;
+ * 0x40027e4c writes them back with the machine byte). An OT-303 is FLEX in those bytes, so a FLEX page pasted onto
+ * one left it an OT-303 with FLEX's numbers (VOL 0 ...), and an OT-303's page pasted elsewhere made a FLEX with the
+ * OT-303's. Now the page carries what it was copied from (bp_pg[]: machine.s ot_pgcopy_hook) and a paste turns the
+ * track into that: onto an OT-303 from any other page, the track leaves the OT-303 first (FLEX's values back, the
+ * knobs parked) and then takes the pasted values; an OT-303's page onto another machine makes it an OT-303 with the
+ * copied knobs, refused with the toast when another track on its core in that Part is one (ot_pgpaste_hook: the
+ * page paste 0x40028fc4 returns 0, as stock's when nothing is pasted; the key handler then clears the undo state).
+ * An UNDO of a page paste (0x40028f40, machine.s ot_pgundo_hook) restores the same way, never refused (a refusal
+ * there makes the key handler paste instead); the track stays FLEX if its core has another one then. */
+#define UNDO_BUF 0x460bf218u
+#define PG_KIND 0x8ed8u
+uint8_t bp_pg[2] = {0, 0};                               /* the clipboard's / the undo buffer's SRC page is an OT-303's */
+void ot_pgcopy(uint32_t buf, unsigned part, unsigned t, unsigned page, unsigned midi) {
+    unsigned v = 0;
+    if (!page && !midi && part < 4 && U32(BANK))
+        v = signed_track((const volatile uint8_t *)(uintptr_t)(U32(BANK) + PART_OFF + part * PART_STRIDE), t);
+    if (buf == CLIP) bp_pg[0] = (uint8_t)v;
+    else if (buf == UNDO_BUF) bp_pg[1] = (uint8_t)v;
+}
+unsigned ot_pgpaste(uint32_t buf, unsigned part, unsigned t, unsigned page, unsigned midi) {
+    uint32_t bank = U32(BANK);
+    if (page || midi || part >= 4 || t >= 8 || !bank || U32(buf + PG_KIND) != 26) return 1;
+    volatile uint8_t *p = (volatile uint8_t *)(uintptr_t)(bank + PART_OFF + part * PART_STRIDE);
+    unsigned src = bp_pg[buf == UNDO_BUF], is = signed_track(p, t);
+    if (src && !is) {
+        if (!ot_admit_track(p, t)) {
+            if (buf == UNDO_BUF) return 1;
+            ++bp_refusals;
+            bp_toast();
+            return 0;
+        }
+        ot_assign(p, t, 1);
+    } else if (!src && is)
+        ot_assign(p, t, 0);
+    else
+        return 1;
+    bp_wake = 1;
+    return 1;
+}
+/* KYOTI V1.8BC: Clyps' FULL loads (patch_clyps.s cl_bpgate, before anything is loaded or cued). dst = the Part the
+ * loads land in; src[t] = the Part track t's slice will come from (this load's, or a FULL load still cued for t),
+ * 0 = t keeps its own; mask = the tracks of this load. 1 = refused (the toast here): after it a core would hold two
+ * BLKPYRAMD tracks, one of them brought by this load. */
+unsigned bp_refuse_load(const volatile uint8_t *dst, const uint32_t *src, unsigned mask) {
+    unsigned fin = 0, inc = 0;
+    for (unsigned t = 0; t < 8; ++t) {
+        const volatile uint8_t *p = src[t] ? (const volatile uint8_t *)(uintptr_t)src[t] : dst;
+        if (signed_track(p, t)) {
+            fin |= 1u << t;
+            if (src[t] && (mask >> t & 1u)) inc |= 1u << t;
+        }
+    }
+    if (!((inc & 0x0fu) && two(fin & 0x0fu)) && !((inc & 0xf0u) && two(fin & 0xf0u))) { bp_wake = 1; return 0; }
+    ++bp_refusals;
+    bp_toast();
+    return 1;
+}
+/* the net's state: the track (1-8) that alone held each core of each Part at the last pass (0: none), for this bank */
+static uint8_t net_hold[4][2] = {{0, 0}, {0, 0}, {0, 0}, {0, 0}};
+static uint32_t net_bank = 0, net_sig = 0;
+void bp_net(void) {                                     /* machine.s bp_uitail's slow path: a full pass */
+    uint32_t bank = U32(BANK);
+    if (!bank) return;                                   /* no bank yet (early boot) */
+    ++bp_net_passes; ++bp_net_full;
+    unsigned why = net_cause(bank);
+    uint8_t sgn[4], stl[4];
+    unsigned work = 0;
+    uint32_t sig = bank;
+    for (unsigned p = 0; p < 4; ++p) {                   /* the scan: a byte or two a track */
+        const volatile uint8_t *part = (const volatile uint8_t *)(uintptr_t)(bank + PART_OFF + p * PART_STRIDE);
+        unsigned m = 0, st = 0;
+        for (unsigned t = 0; t < 8; ++t)
+            if (part[SIG + 30 * t] == 'O' && has_sig(part, t)) {
+                if (part[0x22 + t] == 1) m |= 1u << t;
+                else st |= 1u << t;
+            }
+        sgn[p] = (uint8_t)m; stl[p] = (uint8_t)st;
+        work |= st | (two(m & 0x0fu) || two(m & 0xf0u));
+        sig = sig * 33u + (m | st << 8);
+    }
+    if (bank != net_bank) {                              /* another bank: nothing held there yet */
+        for (unsigned p = 0; p < 4; ++p) net_hold[p][0] = net_hold[p][1] = 0;
+        net_bank = bank;
+    }
+    if (bp_pend) {                                       /* a load: act on a state seen twice in a row (the load may */
+        if (sig != net_sig) { net_sig = sig; bp_wake = 1; return; }   /* still be writing), keeping the lowest-numbered;
+                                                       the next pass is a full one again */
+        bp_pend = 0;
+        for (unsigned p = 0; p < 4; ++p) net_hold[p][0] = net_hold[p][1] = 0;
+    }
+    net_sig = sig;
+    if (work) {
+        unsigned demoted = 0, cur = U8(PART_IDX) & 3u;
+        for (unsigned p = 0; p < 4; ++p) {
+            volatile uint8_t *part = (volatile uint8_t *)(uintptr_t)(bank + PART_OFF + p * PART_STRIDE);
+            unsigned fixed = 0;
+            for (unsigned c = 0; c < 2; ++c) {
+                unsigned cm = c ? 0x0fu : 0xf0u, m = sgn[p] & cm;   /* c = 1: core 1 (T1-4), c = 0: core 0 (T5-8) */
+                if (!two(m)) continue;
+                unsigned h = net_hold[p][c], keep = h && (m >> (h - 1) & 1u) ? h - 1 : lowest(m);
+                for (unsigned t = 0; t < 8; ++t)
+                    if ((m >> t & 1u) && t != keep) {
+                        ot_assign(part, t, 0);
+                        if (p == cur) ((void (*)(unsigned, unsigned, unsigned))TRK_REFRESH)(p, t, 1);
+                        ++bp_net_demoted; ++demoted; fixed = 1;
+                    }
+                sgn[p] = (uint8_t)((sgn[p] & ~cm) | 1u << keep);
+            }
+            for (unsigned t = 0; t < 8; ++t)
+                if (stl[p] >> t & 1u) { ot_assign(part, t, 0); ++bp_net_stale; fixed = 1; }
+            if (fixed) {                                 /* as stock's TRACK PASTE marks its Part (0x4002b8b6..) */
+                U8(bank + EDITED) |= (uint8_t)(1u << p);
+                U8(EDITED2) |= (uint8_t)(1u << p);
+                U32(bank + BANK_DIRTY) = 1;
+                U32(BANK_DIRTY2) = 1;
+            }
+        }
+        U32(RDRAW) = 1;
+        if (demoted) bp_toast();
+        bp_net_why |= why; bp_net_fixpart = U8(0x80000003u);
+    }
+    for (unsigned p = 0; p < 4; ++p)                     /* who holds each core now */
+        for (unsigned c = 0; c < 2; ++c) {
+            unsigned m = sgn[p] & (c ? 0x0fu : 0xf0u);
+            net_hold[p][c] = (uint8_t)(m && !two(m) ? lowest(m) + 1 : 0);
+        }
+    fp_take(bank);                                       /* the state the fast path compares against */
+}
 /* The stock validator sees FLEX defaults for every OT-303 track; the twelve bytes come back after.
- * Every other Part byte is checked by stock's real validator (machine.s skips our own detour). */
+ * Every other Part byte is checked by stock's real validator (machine.s skips our own detour). A Part with two
+ * BLKPYRAMD tracks on a core, or a stale signature, is only noted here (bp_pend: this runs inside the load; the net
+ * repairs it on the UI task). */
 extern int ot_stock_validate(void *part);
 int ot_validate_part(uint8_t *part) {
     uint8_t saved[8][12]; unsigned mask = 0;
     const volatile uint8_t *stock = (const volatile uint8_t *)0x400d320cu;
+    bp_wake = 1;                                         /* a load: the net's next pass is a full one */
+    for (unsigned t = 0; t < 8; ++t)
+        if (has_sig(part, t) && part[0x22 + t] != 1) bp_pend = 1;
     for (unsigned t = 0; t < 8; ++t) if (signed_track(part, t)) {
         mask |= 1u << t;
         for (unsigned k = 0; k < 12; ++k) {
@@ -322,6 +586,7 @@ int ot_validate_part(uint8_t *part) {
             saved[t][k] = part[at]; part[at] = stock[k];
         }
     }
+    if (two(mask & 0x0fu) || two(mask & 0xf0u)) bp_pend = 1;
     int result = ot_stock_validate(part);
     for (unsigned t = 0; t < 8; ++t) if (mask & (1u << t))
         for (unsigned k = 0; k < 12; ++k) {
@@ -352,9 +617,9 @@ int ot_validate_part(uint8_t *part) {
  * long at +0, bit s - 32),
  * the length and scale of the pattern (+0x8e53/+0x8e54) or, in PER TRACK mode (+0x8e55), the
  * track's (+0x50/+0x51); ticks per step 0x400aba50[scale], tempo 0x80001814 = BPM x 24. */
-struct ot_qn { uint32_t gl; uint8_t step, slide, call, acc; };
+struct ot_qn { uint32_t gl, sl; uint8_t step, slide, call, acc, len, toend, gate; };
 #define QN 4u
-static struct ot_qn q[8][QN] = {{{0, 0, 0, 0, 0}}};
+static struct ot_qn q[8][QN] = {{{0, 0, 0, 0, 0, 0, 0, 0, 0}}};
 static uint8_t qn[8] = {0}, qcall[8] = {0}, qlast[8] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff}, qlen[8] = {0};
 static uint32_t qctx[8] = {0};          /* the step being scheduled: 1 << 24 | bank << 16 | pattern << 8 | step */
 static struct ot_voice voice[8] = {{{0}, 0, {0}, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}};
@@ -428,8 +693,40 @@ static unsigned step_len(uintptr_t base, uintptr_t trk, uint32_t *sl) {
     *sl = U8(0x400aba50u + 4 * sc + 3) * 2646000u / t24;
     return len;
 }
+/* Ties across a pattern change (the author on OCTABAM41, 2026-11-19: a note tied to the end of a pattern was cut at a
+ * cued change although the next pattern starts with ties). A note's gate is worked out when it starts, its ties
+ * counted on to the end of its pattern and wrapped to that pattern's own first steps: right while the pattern loops,
+ * not when another pattern follows. When the step handler schedules another pattern's first step after the last
+ * step (a step ahead), the gate of a note whose ties reach that last step is worked out again from the incoming
+ * pattern's first steps -- longer through its ties, or ending in the last step where the outgoing pattern's own first
+ * steps had made it run on -- and sent as a slide to the same pitch, which moves an open gate's end without a
+ * retrigger (host.asm: a slide into an open gate takes the note words, GL included, and no restart). Not for a
+ * DIRECT JUMP landing (the author: a jump into a tie keeps the old rule). */
+static uint32_t nt_frame[8] = {0}, nt_sl[8] = {0}, gate_end[8] = {0};
+static uint8_t nt_step[8] = {0}, nt_len[8] = {0}, nt_toend[8] = {0}, nt_ptch[8] = {0}, nt_gate[8] = {0};
+static int32_t xt_rem[8] = {0};
+static uint32_t xt_frame[8] = {0};
+static uint8_t xt_have[8] = {0};
+uint32_t ot_tie_xfers = 0, ot_tie_sent = 0;
+static void tie_xfer(unsigned track, const volatile uint8_t *part, uintptr_t trk, unsigned len, uint32_t sl) {
+    if (!nt_toend[track]) return;
+    int32_t old_rem = (int32_t)(gate_end[track] - ot_frames) * 16;
+    if (old_rem < 48 || old_rem > 0x3fffffff) return;          /* the gate closing now (or held live) */
+    int32_t b = (int32_t)(nt_frame[track] - ot_frames) * 16 + (int32_t)((nt_len[track] - nt_step[track]) * nt_sl[track]);
+    if (b < 0 || b > 2 * (int32_t)nt_sl[track]) return;      /* not in the outgoing pattern's last step */
+    unsigned k = 0;
+    while (k < len && !step_bit(trk, 0x00, k) && (step_bit(trk, 0x08, k) | step_bit(trk, 0x10, k))) ++k;
+    unsigned hold = k < len && step_bit(trk, 0x00, k) && step_bit(trk, 0x48, k);
+    unsigned g = *knob((volatile uint8_t *)part, track, OT_GATE);
+    int32_t nr = !k ? b - (int32_t)nt_sl[track] + (int32_t)ot_gate_samples(nt_gate[track], nt_sl[track])
+               : hold ? b + (int32_t)((k + 1) * sl) : b + (int32_t)((k - 1) * sl + ot_gate_samples(g, sl));
+    if (nr > old_rem - 16 && nr < old_rem + 16) return;
+    xt_rem[track] = nr; xt_frame[track] = ot_frames; xt_have[track] = 1;
+    ++ot_tie_xfers;
+}
 void ot_step(unsigned track, unsigned bank, unsigned pattern, unsigned s) {
     if (track >= 8) return;
+    uint32_t prev = qctx[track];
     qctx[track] = 0;
     if (bank >= 16 || pattern >= 16 || s >= 64) return;
     uintptr_t base = pattern_at(bank, pattern), trk = base + track * 0x91au;
@@ -440,6 +737,8 @@ void ot_step(unsigned track, unsigned bank, unsigned pattern, unsigned s) {
     uint32_t sl;
     unsigned len = step_len(base, trk, &sl);
     unsigned last = qlast[track], same = s == last;
+    if (prev && !same && s == 0 && last + 1u == qlen[track] && (prev >> 8 & 0xffffu) != (bank << 8 | pattern))
+        tie_xfer(track, part, trk, len, sl);                 /* another pattern follows the last step */
     if (!same && !(s == last + 1u || (s == 0 && last + 1u == qlen[track]))) { if (qn[track]) ++ot_qclears; qn[track] = 0; }
     qlast[track] = (uint8_t)s; qlen[track] = (uint8_t)len;
     if (!same) {
@@ -465,10 +764,17 @@ void ot_note(unsigned track) {
         ++count;
     }
     unsigned hold = i < len && step_bit(trk, 0x00, n) && step_bit(trk, 0x48, n);
-    uint32_t gl = hold ? (count + 1) * sl : (count - 1) * sl + ot_gate_samples(knob_now(track, OT_GATE), sl);
+    /* GATE from the Part of the pattern being scheduled (OCTABAM42 on the unit, 2026-11-19: the first note after a
+     * load, or the first into another Part, took the live byte 0x80000810 + 72 t + 0x23, which stock re-stages only at
+     * the track's trig -- a step after this runs -- so it played the old Part's GATE, or a load's leftover: a blip).
+     * A SETUP knob has no p-lock slot (a step record is PLAYBACK, AMP, LFO, FX1, FX2), so the Part's value is it. */
+    unsigned gate = *knob((volatile uint8_t *)(uintptr_t)(0x400e21e0u + bank * 0x9b340u + PART_OFF
+                                                         + (U8(base + 0x8e57) & 3u) * PART_STRIDE), track, OT_GATE);
+    uint32_t gl = hold ? (count + 1) * sl : (count - 1) * sl + ot_gate_samples(gate, sl);
     gl = gl < 1 ? 1 : gl > 0x7ffffeu ? 0x7ffffeu : gl;
     unsigned acc = U8(trk + 0x59 + 32u * s + OT_ACC);      /* MT27: the step's ACC p-lock (0xff: none) */
-    struct ot_qn e = {gl, (uint8_t)s, (uint8_t)step_bit(trk, 0x48, s), qcall[track], (uint8_t)(acc > 127 ? 0 : acc)};
+    struct ot_qn e = {gl, sl, (uint8_t)s, (uint8_t)step_bit(trk, 0x48, s), qcall[track], (uint8_t)(acc > 127 ? 0 : acc),
+                      (uint8_t)len, (uint8_t)(s + count >= len), (uint8_t)gate};   /* toend: its ties reach the last step */
     unsigned k = qn[track];
     if (k && q[track][k - 1].step == s && q[track][k - 1].call == qcall[track]) q[track][k - 1] = e;   /* the same call again */
     else {
@@ -541,7 +847,7 @@ int ot_live_midi(unsigned t, unsigned note, unsigned vel) {
  * (MT21 on the unit: the first two were missed). 1: render it (machine.s ot_idle_hook). */
 int ot_idle_feed(unsigned t, unsigned end) {
     if (end != 16 || t >= 8 || (dsp_ready(0) && dsp_ready(4))) return 0;
-    return !dsp_ready(t) && signed_track(part_base(), t);
+    return !dsp_ready(t) && signed_track(play_part(t), t);
 }
 /* the frame builder found a release (0x40) in the track's mailbox (0x4000b4f6) */
 void ot_live_release(unsigned t) {
@@ -603,6 +909,24 @@ void ot_oneshot(unsigned t) {
     ot_note(t);
 }
 
+#ifdef KYOTI_MM_GATE
+/* KYOTI V1.8BC only (tools/build_kyoti.py --clyps-bp passes -DKYOTI_MM_GATE and MUTE_MODES' KEYMASK address;
+ * every other build compiles none of this). MUTE_MODES drops a silenced track's new trigs in OTFX-T and DT-T at
+ * stock's voice binds (fresh_bind, dt_trig), but this voice starts its notes from the trigger flag, before a
+ * voice is bound, so in DT-T a muted track kept playing (ot_emu, BOTLI: T6 muted in DT-T at the unmuted level).
+ * The same question MUTE_MODES' Modwerk form answers for FM Synth (mm_trig_muted, Modwerk #777): GATE
+ * 0x800000dc is OTFX-T (1) or DT-T (2), and the track is muted, or something is soloed and it is not; a
+ * SIDE-CHAIN key track (KEYMASK) keeps its trigs, as there. */
+uint32_t ot_mm_drops = 0;
+static unsigned mm_drops(unsigned t) {
+    uint32_t g = U32(0x800000dcu), ms = U32(0x80000008u);
+    if (g != 1u && g != 2u) return 0;
+    unsigned sil = (ms >> 8) & 0xffu;
+    if (ms & 0xffu) sil |= ~ms & 0xffu;
+    return (sil & ~(unsigned)U8(KYOTI_MM_KEYMASK)) >> t & 1u;
+}
+#endif
+
 /* the trig's note: the oldest queued, or none */
 static unsigned take(unsigned track, struct ot_qn *out) {
     unsigned k = qn[track];
@@ -620,9 +944,79 @@ static unsigned take(unsigned track, struct ot_qn *out) {
  * continuous words from the knobs (page 1 live: p-locks, LFOs, scenes; then SETUP), at a trig the
  * note (its queued gate and slide), and the next chunk of the voice's tables. (Stock w0 is the high half of a source
  * count, 0; w2 the high half of a bounded ring position, never $0909: octabam REVIEW.md.) */
+/* The Part a track's sound comes from (OCTABAM40 on the unit, 2026-11-19: a cued Part switch dropped the outgoing
+ * voice mid-note with a quiet pop, and the outgoing pattern's last-step note never sounded). Stock moves the UI Part
+ * (0x100b14cf) about 7 ticks before the boundary, but each track keeps playing its old Part's sound until its own
+ * first trig in the new pattern: the frame builder keeps that Part per track, bank 0x8000182a + t and Part
+ * 0x80001832 + t, written at the track's trig (0x4000bf62 / 0x4000bf6a) and by a full Part apply, 0xff after PLAY
+ * or a load until the next trig. The renderer asks that Part whether the track is an OT-303, as every stock machine
+ * carries its sound; 0xff: the UI Part. So an outgoing OT-303 rings over the boundary like a carried FLEX sample and
+ * plays its last step, and an incoming one takes the voice at its own first trig. */
+static const volatile uint8_t *play_part(unsigned t) {
+    unsigned b = U8(0x8000182au + t), p = U8(0x80001832u + t);
+    if (b >= 16 || p >= 4) return part_base();
+    return (const volatile uint8_t *)(uintptr_t)(0x400e21e0u + b * 0x9b340u + PART_OFF + p * PART_STRIDE);
+}
+/* One voice a core: while a track still carries the voice from the old Part, another track on its core can be an
+ * OT-303 too. Who keeps the voice, by what each track plays: 2 its own trig in the engine's Part (0x80000002 /
+ * 0x80000003) has come -- the incoming track, from its first trig; 1 it plays another Part -- the outgoing track,
+ * carrying; 0 no trig since PLAY or a load (0xff), which the UI Part's early move alone makes an OT-303 (the engine
+ * Part moves early too, so it decides nothing alone). A tie: the lower track. The other renders as FLEX (its stock
+ * record frees the voice on the DSP). */
+static unsigned play_rank(unsigned t) {
+    unsigned b = U8(0x8000182au + t), p = U8(0x80001832u + t);
+    if (b >= 16 || p >= 4) return 0;
+    return b == U8(0x80000002u) && p == U8(0x80000003u) ? 2u : 1u;
+}
+static unsigned yields(unsigned t) {
+    unsigned r = play_rank(t);
+    for (unsigned u = t & 4; u < (t & 4) + 4; ++u) {
+        if (u == t || !signed_track(play_part(u), u)) continue;
+        unsigned ru = play_rank(u);
+        if (ru > r || (ru == r && u < t)) return 1;
+    }
+    return 0;
+}
+/* The DSP serves a core's tracks in order: when the track that held the voice in the last frame is a higher one, it
+ * frees the voice only after this track's record, so this track's first note is held one frame (16 samples). */
+static uint8_t own_cur[2] = {8, 8}, own_prev[2] = {8, 8};
+struct ot_dfr { uint32_t gl; uint8_t ev, acc, have; };
+static struct ot_dfr dfr[8] = {{0, 0, 0, 0}};
+uint32_t ot_handovers = 0, ot_yields = 0;
+/* An OT-303 rides on a stock FLEX voice: stock binds it at every trig (with the OT-303's knobs in FLEX's live slots: STRT
+ * = CUT, LEN = RES, RTRG = DEC, RTIM = ACC ...) and this renderer never hands it to stock's. When the track stops being an
+ * OT-303 (the chooser, SRC SETUP, a page paste, the net), stock still renders that voice until the track's next trig --
+ * as FLEX, also under NEIGHBOR / THRU / STATIC, whose voice only starts at that trig: the RC2 report's blip, a bit of the
+ * FLEX sample, often a short fast loop. So a track that rendered as an OT-303 renders stock's idle record (0x400047f0's,
+ * written here: its entry is ot_idle_hook) until its next trig flag, and while it yields the voice (below). */
+static uint8_t was_ot[8] = {0};
+uint32_t ot_quiet_frames = 0;
+static int render_idle(unsigned start, unsigned end) {
+    volatile uint32_t *c = (volatile uint32_t *)(uintptr_t)U32(0x80001c80u);
+    int32_t n = (int32_t)end - (int32_t)start;
+    c[0] = (uint32_t)n; c[1] = 0; c[2] = 0x04000000u; c[3] = 0; c += 4;
+    for (int32_t i = 0; i < n; ++i) { c[0] = 0; c[1] = 0; c += 2; }
+    U32(0x80001c80u) = (uint32_t)(uintptr_t)c;
+    return 0;
+}
 int ot_render(unsigned track, unsigned ping, unsigned start, unsigned end) {
-    if (track >= 8 || !signed_track(part_base(), track))
+    const volatile uint8_t *pp = track < 8 ? play_part(track) : 0;
+    if (track >= 8 || !signed_track(pp, track)) {
+        if (track < 8 && was_ot[track]) {
+            if (!(U8(0x46104d0cu + track) & 16)) { if (end == 16) ++ot_quiet_frames; return render_idle(start, end); }
+            was_ot[track] = 0;                           /* its trig: stock's new voice */
+        }
         return ((int (*)(unsigned, unsigned, unsigned, unsigned))FLEX_RENDER)(track, ping, start, end);
+    }
+    if (yields(track) && (++ot_yields, 1)) {
+        /* the same hidden voice under a track that yields (the carrier of a cued Part switch once the incoming track's
+         * first trig has the voice): quiet too -- the idle record is no OT-303 record either, so the DSP frees the
+         * voice at it as at a FLEX one (host.asm sg_sig / sg_stock); a yielding track's own trig moves its pair, and
+         * the branch above takes it then */
+        if (was_ot[track]) { if (end == 16) ++ot_quiet_frames; return render_idle(start, end); }
+        return ((int (*)(unsigned, unsigned, unsigned, unsigned))FLEX_RENDER)(track, ping, start, end);
+    }
+    was_ot[track] = 1;
     ++ot_render_calls;
     volatile uint32_t *cursor = (volatile uint32_t *)(uintptr_t)U32(0x80001c80u);
     volatile uint16_t *fp = (volatile uint16_t *)(uintptr_t)U32(0x800062a8u);
@@ -632,19 +1026,27 @@ int ot_render(unsigned track, unsigned ping, unsigned start, unsigned end) {
         /* MT32: one count a frame. The packer renders the tracks in order, so a frame starts where the track
          * number does not rise; before, every OT-303 track counted, and with two the frame windows below
          * (a voice's estimated end, MT20 / MT21's, the live note's TTL) ran at half length */
-        if (track <= fr_last) ++ot_frames;
+        if (track <= fr_last) {
+            ++ot_frames;
+            own_prev[0] = own_cur[0]; own_prev[1] = own_cur[1]; own_cur[0] = own_cur[1] = 8;
+        }
         fr_last = track;
+        unsigned core = track >= 4, held = own_prev[core] < 8 && own_prev[core] > track;
+        own_cur[core] = (uint8_t)track;
         uint8_t p[12];
         for (unsigned k = 0; k < 12; ++k) p[k] = k < 6 ? (uint8_t)(fp[k] >> 8) : (uint8_t)knob_now(track, k);
         /* the packer's fixed slot, not this call's cursor (the first call can still be stock FLEX) */
         volatile uint32_t *record = (volatile uint32_t *)(uintptr_t)(0x80001c90u + (ping & 1) * 0xa80u + 336u * track);
         unsigned ev = 0; uint32_t gl = 0;
         unsigned flag = U8(0x46104d0cu + track);
+#ifdef KYOTI_MM_GATE
+        unsigned drop = mm_drops(track);
+#endif
         /* MT27: the ACC knob is the accent SCALE: its value in the Part (the knob writes it; a p-lock or an
          * LFO never does -- the live byte and the base word show a step's lock while it plays). A sequencer
          * note is accented only by its step's ACC p-lock, at lock x scale / 127; a live note by MIDI
          * velocity (at the scale) or by a lock the preview carries in fp; anything else is not. */
-        volatile uint8_t *pb = part_base();
+        volatile uint8_t *pb = (volatile uint8_t *)pp;
         unsigned acc_scale = *knob(pb, track, OT_ACC);
         acc_scale = acc_scale > 127u ? 127u : acc_scale;
         unsigned acc_lane = p[OT_ACC];
@@ -655,7 +1057,11 @@ int ot_render(unsigned track, unsigned ping, unsigned start, unsigned end) {
             live[track].armed = 1;                           /* its START came; the DSP's tables have not */
             struct ot_qn e;
             if (!(flag & 0x20)) (void)take(track, &e);
-        } else if (live[track].pending && (live[track].armed || (flag & 16)) && dsp_ready(track)) {
+        } else if (live[track].pending && (live[track].armed || (flag & 16)) && dsp_ready(track)
+#ifdef KYOTI_MM_GATE
+                   && !drop                                  /* a silenced track's live note lapses unplayed */
+#endif
+                   ) {
             /* a live note: the knobs (with the preview's or the chromatic key's locks in fp), held */
             struct ot_qn e;
             if ((flag & 16) && !(flag & 0x20)) (void)take(track, &e);   /* a sequencer START merged into this frame */
@@ -680,10 +1086,17 @@ int ot_render(unsigned track, unsigned ping, unsigned start, unsigned end) {
              * a second). Notes played live (track keys, MIDI) do not sound yet. */
             struct ot_qn e;
             unsigned qd = qn[track];
+#ifdef KYOTI_MM_GATE
+            if (drop) {
+                if (take(track, &e)) ++ot_mm_drops;          /* consumed unplayed: trigs and notes stay paired */
+            } else
+#endif
             if (take(track, &e)) {
                 ++ot_trigs;
                 ev = OT_EV_NOTE | (e.slide ? OT_EV_SLIDE : 0);
                 gl = e.gl;
+                nt_frame[track] = ot_frames; nt_step[track] = e.step; nt_len[track] = e.len; nt_sl[track] = e.sl;
+                nt_toend[track] = e.toend; nt_ptch[track] = p[OT_PTCH]; nt_gate[track] = e.gate; xt_have[track] = 0;
                 p[OT_ACC] = (uint8_t)acc_amount(e.acc, acc_scale);
                 live[track].sounding = 0;                    /* a sequencer note takes the voice */
                 trace(2, track, e.step, (unsigned)U8(0x46104d0cu + track) << 8 | qd);
@@ -692,7 +1105,25 @@ int ot_render(unsigned track, unsigned ping, unsigned start, unsigned end) {
                 trace(2, track, 0xff, (unsigned)U8(0x46104d0cu + track) << 8 | qd);
             }
         }
-        if (ev & OT_EV_NOTE) acc_now[track] = p[OT_ACC];  /* the sounding note's accent (its release) */
+        if (!ev && xt_have[track]) {                     /* a tie's gate across a pattern change (tie_xfer) */
+            int32_t r = xt_rem[track] - (int32_t)(ot_frames - xt_frame[track]) * 16;
+            xt_have[track] = 0;
+            if (r < 16) ev = OT_EV_OFF;
+            else { ev = OT_EV_NOTE | OT_EV_SLIDE; gl = r > 0x7ffffe ? 0x7ffffeu : (uint32_t)r; p[OT_PTCH] = nt_ptch[track]; }
+            ++ot_tie_sent;
+        }
+        if (held && (ev & OT_EV_NOTE)) {                 /* the voice is still the higher track's: next frame */
+            dfr[track].ev = (uint8_t)ev; dfr[track].gl = gl; dfr[track].acc = p[OT_ACC]; dfr[track].have = 1;
+            ev = 0; gl = 0;
+            ++ot_handovers;
+        } else if (!held && !ev && dfr[track].have) {
+            ev = dfr[track].ev; gl = dfr[track].gl; p[OT_ACC] = dfr[track].acc;
+        }
+        if (!held) dfr[track].have = 0;
+        if (ev & OT_EV_NOTE) {
+            acc_now[track] = p[OT_ACC];                   /* the sounding note's accent (its release) */
+            gate_end[track] = gl >= OT_GL_HELD ? ot_frames + 0x40000000u : ot_frames + gl / 16u;
+        } else if (ev & OT_EV_OFF) gate_end[track] = ot_frames;
         if (ev) { ot_evptch[ot_evn & 31] = p[OT_PTCH]; ot_evacc[ot_evn & 31] = p[OT_ACC]; ot_evlog[ot_evn++ & 31] = track << 28 | ev << 24 | (gl & 0xffffffu); }
         volatile uint16_t *amp = (volatile uint16_t *)(uintptr_t)(0x80000110u + 0x200u * (ping & 1u) + 64u * track);
         if ((amp[0x1e] & 0x10u) && (int32_t)(snd_until[track] - ot_frames) > 0) {
