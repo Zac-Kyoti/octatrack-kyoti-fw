@@ -163,7 +163,7 @@ highlighted, changed (x), its sequence loaded from A05. (4) Slot 3, named BASS1,
     pattern's sequence; the highlight stands for it. Each pattern keeps its own box for each track: leave a pattern
     and come back, and its box is where you left it. ORIG, a temp reload or a card reload of that track removes
     that pattern's box; a card reload of the whole pattern removes all its boxes;
-  - **arrows**: your aim (§6). They never blink;
+  - **arrows**: your aim (§6);
   - **a blinking slot**: while a load or a pattern change waits to land, that slot's text (name, summary or `---`)
     blinks; its number and x stay steady. You see the active track's cue and any pending pattern change; each
     track keeps its own cue. A cue in another bank blinks when you page there;
