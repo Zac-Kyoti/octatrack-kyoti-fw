@@ -107,6 +107,8 @@ def main(argv):
     CL45 = "cl_hovtick" in syms      # an execution on their slot hides them though nothing lands; a header lasts a
                                      # toast's time; TEMP TRKS (the user, 2026-11-23)
     CL46 = "cd_thide" in syms        # no cue frames: a cued slot's text blinks (the author, 2026-11-23)
+    CL47b = "cl_hrel" in syms        # (CL47, the user on CLB15) a chord's toast and header both at the press, both
+                                     # ended by the chord's release; a lone key's: their time
     CL47 = "cl_bxt" in syms          # the chord hides nothing; the highlight alone lights solid red; a select box per
                                      # track and pattern (the user, 2026-11-24)
     out = pathlib.Path(a.out)
@@ -563,6 +565,15 @@ def main(argv):
                                        want_, arw["n"]))
         u.hook_add(er.eb.UC_HOOK_CODE, on_boxed, begin=syms["cd_boxed"], end=syms["cd_boxed"])
 
+    def relgone(label):                 # CL47b: right after a chord's release -- the header ended, its toast closing
+        settle(34)                      # (one UI tick: the release's own tail runs in the sys task)
+        hv_, tt_ = rd(syms["cl_hov"], 1), rd(0x460D1E6C, 4)
+        settle(34)
+        ex_ = EXH - ({CURRP} if rd(0x46C7DD3E, 4) else set())    # ([PTN] still held: its own CURR PTN header)
+        qcheck(hv_ == 0 and tt_ <= 1 and rd(0x460D1E70, 4) == 0 and not (ex_ & set(hdr)),
+               f"{label}: the chord let go: the header ended at once (cl_hov {hv_}), the toast closed (countdown {tt_}, "
+               f"window {rd(0x460D1E70, 4):#x} two UI ticks later); header now {list(hdr)}")
+
     def grid():                         # the trig LEDs as painted now: R / G / Y / . per slot
         main_call(0x4007E998, 0)
         b_ = bytes(u.mem_read(0x460BA98C, 17))
@@ -909,13 +920,19 @@ def main(argv):
                        f"#{i} {opx}: the chord held: the view stays on {chr(65 + vb_)} (playing {chr(65 + pb_)}), its grid = "
                        f"bank {chr(65 + vb_)}'s pattern view {want_} ({g_})")
                 hc_ = list(hdr)
+                nt0_ = len(toasts)
                 key(k_, 1); key(k_, 0)
-                hx_ = list(hdr)
-                key(0x2F, 0); key(0x2E, 0)
+                hx_, hvx_, ntx_ = list(hdr), rd(syms["cl_hov"], 1), len(toasts)
+                key(0x2F, 0)
+                if CL47b:                     # CL47b: one toast at the trig, PRJ PTN bound to it; [BANK] let go ends both
+                    qcheck(ntx_ == nt0_ + 1 and hvx_ == 6, f"#{i} {opx}: the toast at the trig ({ntx_ - nt0_}), "
+                           f"PRJ PTN (cl_hov {hvx_}) while the chord is held")
+                    relgone(f"#{i} {opx}")
+                key(0x2E, 0)
                 if CL45:                      # CL45 (the user): the chord's header "PTN LOAD: ORIG PTN" (was ORIG PTN+PRT);
                     lw_ = 3 + fw(0x400C246A, "PTN LOAD:") + 4   # the reload's "PTN LOAD: PRJ PTN"
                     qcheck(hc_[:2] == ["PTN LOAD:", "ORIG PTN"] and hx_[:2] == ["PTN LOAD:", "PRJ PTN"]
-                           and rd(syms["cl_hov"], 1) == 6,
+                           and rd(syms["cl_hov"], 1) == (0 if CL47b else 6),
                            f"#{i} {opx}: the chord's header {hc_} ({fw(0x400C246A, 'ORIG PTN')} px, box to x "
                            f"{lw_ + fw(0x400C246A, 'ORIG PTN') + 1}); after the trig {hx_} ({fw(0x400C246A, 'PRJ PTN')} px, "
                            f"box to x {lw_ + fw(0x400C246A, 'PRJ PTN') + 1})")
@@ -1024,13 +1041,24 @@ def main(argv):
         if op == "Ru":                        # CL42: [PTN] + the active TRACK on an UNEDITED track: the card's copy is
             t_ = rd(0x80000000, 1)            # what plays -- the job runs, nothing lands, no toast (cl_cueload's same
             g0, nl0, nt0 = rd(syms["rq_gen"], 1), len(lands), len(toasts)   # test; cl_rqarm1 "nothing to land")
-            key(0x2E, 1); key(0x10 + t_, 1); key(0x10 + t_, 0); key(0x2E, 0)
+            key(0x2E, 1); key(0x10 + t_, 1); key(0x10 + t_, 0)
+            if CL47b:                         # CL47b: the toast and the bound header at the press, [PTN] still held
+                settle(34)
+                hb_ = list(hdr)
+                qcheck(len(toasts) == nt0 + 1 and rd(0x460D1E70, 4) != 0 and rd(syms["cl_hovb"], 1) == 1
+                       and hb_[:3] == [f"T{t_ + 1} " if t_ < 8 else f"M{t_ - 7} ", "LOAD:", "PROJ TRK SEQ"],
+                       f"#{i} Ru: [PTN] held: one toast up at the press ({len(toasts) - nt0}), the header bound to it "
+                       f"(hovb {rd(syms['cl_hovb'], 1)}): {hb_}")
+            hpre_ = list(hdr)
+            key(0x2E, 0)
+            if CL47b:
+                relgone(f"#{i} Ru")
             fl_, fc_, pc_ = rd(syms["cl_flk"], 1), rd(syms["cl_fcode"], 2), (rd(0x800065BD, 1) << 8) | rd(ACT, 1)
             if CL44:                          # CL44 (the user): the execute flash on the pattern you are on, nothing differing
                 qcheck(fl_ > 0 and fc_ == pc_ and rd(syms["cl_ftgt"], 1) == 0,
                        f"#{i} Ru: the execute flash on the pattern's slot {pc_:#06x} ({fl_} ticks on {fc_:#06x})")
             if CL44b:                         # CL44b: "Tn LOAD: PROJ TRK SEQ" while it flashes
-                h_ = list(hdr)
+                h_ = hpre_ if CL47b else list(hdr)
                 qcheck(h_[:3] == [f"T{t_ + 1} " if t_ < 8 else f"M{t_ - 7} ", "LOAD:", "PROJ TRK SEQ"],
                        f"#{i} Ru: the header {h_}")
             g = 0
@@ -1067,13 +1095,18 @@ def main(argv):
             key(mk_, 1)
             if hold_:                         # held 600 ms (SET_KEY takes press / release only; stock's [PTN]
                 settle(600)                   # hold event only sets the tap flag 0x460d1ab2, 0x4005a0cc)
-            key(0x10 + t_, 1); key(0x10 + t_, 0); key(mk_, 0)
+            key(0x10 + t_, 1); key(0x10 + t_, 0)
+            hpre_, ntp_ = list(hdr), len(toasts)
+            key(mk_, 0)
+            if CL47b:                         # CL47b: its toast at the press; the modifier's release ends both
+                qcheck(ntp_ == nt0 + 1, f"#{i} {opx}: its toast at the press ({ntp_ - nt0} before the release)")
+                relgone(f"#{i} {opx}")
             if CL44:                          # CL44 (the user): the execute flash on the pattern you are on
                 fl_, fc_ = rd(syms["cl_flk"], 1), rd(syms["cl_fcode"], 2)
                 qcheck(fl_ > 0 and fc_ == (pb_ << 8) | pp_,
                        f"#{i} {opx}: the execute flash on the pattern's slot ({fl_} ticks on {fc_:#06x})")
             if CL44b:                         # CL44b: "Tn LOAD: PROJ TRK SEQ / FULL" while it flashes
-                h_ = list(hdr)
+                h_ = hpre_ if CL47b else list(hdr)
                 qcheck(h_[:3] == [f"T{t_ + 1} " if t_ < 8 else f"M{t_ - 7} ", "LOAD:",
                                   "PROJ TRK FULL" if full_ else "PROJ TRK SEQ"], f"#{i} {opx}: the header {h_}")
             g = 0
@@ -1110,8 +1143,12 @@ def main(argv):
                     key(k2, 1)
                 key(0x31 if op[:2] == "TS" else 0x32, 1); key(0x31 if op[:2] == "TS" else 0x32, 0)
             fl_, fc_, h_ = rd(syms["cl_flk"], 1), rd(syms["cl_fcode"], 2), list(hdr)
+            tw0_ = rd(0x460D1E70, 4)
             for k2 in ([0x2E] if op == "PF" else tk_):
                 key(k2, 0)
+            if CL47b and op != "PF":          # CL47b: the toast was up with the TRACK key(s) held; their release ends both
+                qcheck(tw0_ != 0, f"#{i} {op}: its toast up while the TRACK key is held")
+                relgone(f"#{i} {op}")
             settle(600)
             qcheck(fl_ > 0 and fc_ == pc_, f"#{i} {op}: the execute flash on the pattern you are on {pc_:#06x} "
                    f"({fl_} ticks on {fc_:#06x}); {len(toasts) - nt0} toast(s)")
@@ -1201,6 +1238,11 @@ def main(argv):
         if op[:2] == "HD":                    # CL45 (the user): the execution header lasts as long as the toast shows (HD),
             mode_ = op[2:]                    # or stock's toast time without one (HDn: TOAST_DUR UI ticks), or ends at
             k0_, b0_, h0_ = rd(syms["cl_hovk"], 1), rd(syms["cl_hovb"], 1), list(hdr)   # once (HD0: a toast replaced it)
+            if CL47b and mode_ != "0" and rd(syms["cl_hov"], 1) == 0:   # CL47b: its chord let go ended it already
+                settle(68)
+                qcheck(rd(0x460D1E70, 4) == 0 and not (EXH & set(hdr)), f"#{i} {op}: ended by its chord's release "
+                       f"(CL47b): no header, no toast (window {rd(0x460D1E70, 4):#x}); {list(hdr)}")
+                continue
             seq_ = []
             for g in range(200):
                 rt.run(ms=34)
@@ -1278,14 +1320,17 @@ def main(argv):
             pc_ = (rd(0x800065BD, 1) << 8) | rd(ACT, 1)
             key(k_, 1); key(k_, 0)
             fl_, fc_ = rd(syms["cl_flk"], 1), rd(syms["cl_fcode"], 2)
+            hbk_ = list(hdr)
             if op[:2] == "BK":
                 key(0x2F, 0)
+                if CL47b:                     # CL47b: "PTN LOAD: CURR PTN" while [BANK] is held, gone at its release
+                    relgone(f"#{i} {op}")
             pend1 = (rd(0x800065BF, 1), rd(0x800065C0, 1))
             qcheck(rd(syms["cl_bank"], 1) == b_ and (pend1 == (b_, k_) or code == pc_) and rd(syms["cl_open"], 1) == 1
                    and len(reqs) == nr_,
                    f"#{i} {op}: the pattern pick {chr(65 + b_)}{k_ + 1:02d}: the view on {chr(65 + rd(syms['cl_bank'], 1))}, "
                    f"stock's cue {pend1}, Clyps open, {len(reqs) - nr_} Clyps load(s)")
-            h_ = list(hdr)
+            h_ = hbk_ if CL47b else list(hdr)
             qcheck((fl_ > 0 and fc_ == code) if (code != pc_ or CL44b) else fl_ == 0,
                    f"#{i} {op}: the execute flash on {code:#06x} ({fl_} ticks on {fc_:#06x}; the pattern you are on {pc_:#06x})")
             if CL44b:
@@ -1437,6 +1482,19 @@ def main(argv):
             qcheck((rd(syms["cl_cur"], 1), rd(syms["cl_bank"], 1), rd(syms["cl_pmoved"], 1)) == (c0_, b0_, m0_),
                    f"#{i} B2: arrows with the chord held: cur {c0_ + 1} -> {rd(syms['cl_cur'], 1) + 1}, view "
                    f"{chr(65 + b0_)} -> {chr(65 + rd(syms['cl_bank'], 1))}, shown {m0_} -> {rd(syms['cl_pmoved'], 1)}")
+            continue
+        if op[0] in "DU" and len(op) == 3:    # CL47b: one key down / up (hex code), e.g. D10 = TRACK 1 held
+            key(int(op[1:], 16), int(op[0] == "D"))
+            settle(34)
+            print(f"      #{i} {op}: cl_hov {rd(syms['cl_hov'], 1)} bound {rd(syms['cl_hovb'], 1)} keys "
+                  f"{rd(syms['cl_hovh'], 1)}; toast {rd(0x460D1E70, 4):#x} countdown {rd(0x460D1E6C, 4)}; {list(hdr)}",
+                  flush=True)
+            continue
+        if op[:2] == "HE" and len(op) == 4:   # CL47b: let go of key hex -- the header and its toast end at once
+            hv0_ = rd(syms["cl_hov"], 1)
+            qcheck(hv0_ != 0, f"#{i} {op}: an execution header up before the release (cl_hov {hv0_})")
+            key(int(op[2:], 16), 0)
+            relgone(f"#{i} {op}")
             continue
         if op[:2] == "SB":                    # CL47 (the user, 2026-11-24): the active track's select box on this pattern
             k_ = op[2:]                       # (SBk: slot k of the playing bank, 0-based; SB-: none, the highlight alone)

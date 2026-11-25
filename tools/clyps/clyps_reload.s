@@ -896,13 +896,7 @@ rd_lost:
     bra.b   rd_show
 rd_msg:
     tst.b   rq_msg
-    beq.w   rt_out
-    tst.l   PTN_HELD                    | CL47: not while [PTN] is held -- DIRECT JUMP's [PTN] release closes any
-    beq.b   rd_now                      | toast up (dj_ptnrel): the UI tail shows it once [PTN] is up (cl_ctoast)
-    moveq   #1,%d0
-    move.b  %d0,cl_ctoast
-    rts
-rd_now:
+    beq.b   rt_out
     lea     rq_line1,%a0
     move.l  %a0,rq_lines
     move.l  rq_l2p,%a0
@@ -967,6 +961,7 @@ cl_rqarm:
     tst.l   %d0
     bne.b   qa_bpg
     clr.b   rq_msg                      | refused: no card toast either
+    jsr     cl_hdrop                    | CL47: and the one shown at the press goes, with its header
     bra.b   qa_bpp
 qa_bpg:
 .endif
@@ -989,6 +984,7 @@ qa_trk:
     clr.w   rq_seqm
     clr.w   rq_fullm
     clr.b   rq_msg                      | refused: no card toast either
+    jsr     cl_hdrop                    | CL47: and the one shown at the press goes, with its header
     bra.w   qa_out
 qa_bpok:
 .endif
@@ -1041,6 +1037,7 @@ cl_rqarm1:
     tst.l   %d0
     bne.b   q1_bpok
     clr.b   rq_msg                      | refused: no card toast either
+    jsr     cl_hdrop                    | CL47: and the one shown at the press goes, with its header
     bra.w   q1_out
 q1_bpok:
 .endif

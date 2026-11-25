@@ -152,6 +152,7 @@
     .equ HOV_ORIG,    5                 | CL45: an ORIG track load's "ORIG TRK SEQ / FULL" (was the flash's cl_ftgt 2)
                                         | CL45 (the user, 2026-11-23): each lasts as stock's toast does -- its own toast
                                         | while that is up (cl_hsetb), else TOAST_DUR UI ticks (cl_hovtick)
+    .equ HOV_TOAST,   7                 | CL47: a toast whose header is the usual one (temp save, SAVE FIRST!)
     .equ HOV_PPTN,    6                 | CL45 (the user): [PTN]+[BANK]+trig, "PTN LOAD: PRJ PTN" (26 px)
     .equ TOAST_H,     0x460d1e70        | stock's toast window (0: none up)
     .equ FL_TICKS,    30                | the load confirmation: 30 UI ticks of 1/60 s = 0.5 s (the user,
@@ -175,6 +176,7 @@
     .equ HELD_TRK,    0x460fab40        | held TRACK keys, bit t (stock's TRACK press / release)
     .equ LAYERS_HEAD, 0x460d165c        | the keymap layer chain: base first, then each pushed layer
     .equ TOAST,       0x4005a2b8        | (text, dur): stock's block toast (legal from a key handler)
+    .equ HK_TRK,      32                | CL47: cl_hkeys' bit for any TRACK key held
     .equ TOAST_DUR,   0x30              | stock's standard duration
     .equ SCLK,        0x4610757c        | the audio engine's time accumulator: ~127 M units / s
                                         | (2880 per sample at 44.1 kHz, measured in the emulator)
@@ -664,7 +666,7 @@ cl_k_trig:
     movea.l %d1,%a0
     adda.l  #BLOB+0x9b336,%a0
     tst.l   (%a0)
-    bne.b   kt_out
+    bne.w   kt_out
     clr.l   -(%sp)                      | (no track)
     lsl.l   #8,%d0
     moveq   #15,%d1
@@ -677,7 +679,9 @@ cl_k_trig:
     lea     12(%sp),%sp
     jsr     cl_flcode
     moveq   #HOV_PPTN,%d0               | CL45 (the user, 2026-11-23): "PTN LOAD: PRJ PTN" until its toast, then while
-    jsr     cl_hset                     | that is up (rd_show)
+    jsr     cl_hsetq                    | that is up (rd_show)
+    moveq   #1,%d0                      | CL47 (the user, 2026-11-24): the toast at the press (this message's UI tail)
+    move.b  %d0,cl_ctoast
     tst.b   cl_chordout                 | the chord opened Clyps: close it (begun inside: stay)
     beq.w   cl_refresh
     clr.b   cl_chordout
@@ -1280,7 +1284,9 @@ ktr_t:
     move.l  (%sp),%d0                   | CL44b: the header reads "Tn LOAD: PROJ TRK SEQ" / "... FULL" meanwhile
     addq.l  #2,%d0                      | (RQ_TRKSEQ 1 / RQ_TRKFULL 2 -> HOV_PSEQ 3 / HOV_PFULL 4); CL45: until its
     move.l  8(%sp),%d1                  | toast, then while that is up (rd_show)
-    jsr     cl_hset
+    jsr     cl_hsetq
+    moveq   #1,%d0                      | CL47 (the user, 2026-11-24): its toast at the press -- this message's UI
+    move.b  %d0,cl_ctoast               | tail (cl_rqtoast, once: rq_msg), the header bound to it there
     lea     12(%sp),%sp
     moveq   #1,%d0
     move.b  %d0,cl_trl
@@ -1523,8 +1529,17 @@ cl_flstop:                              | CL45: the execution header outlives th
 | toast window goes, runs out or a newer toast replaces it; without a toast, TOAST_DUR UI ticks (stock's standard
 | toast time). A new one replaces the old at once with its own full time; a key pressed meanwhile that changes the
 | header ([PTN], [BANK], [FUNC], [CUE]: cl_hkeys, cl_draw) ends it. Uses d0-d1/a0.
+cl_hsetq:                               | CL47: a card reload's header -- bound at once if its toast is up already
+    bsr.b   cl_hset                     | (rq_msg used: the job or the tail ran first), else when this message's
+    tst.b   rq_msg                      | tail shows it (rd_show) -- either order binds it
+    bne.b   hq_out
+    tst.l   TOAST_H
+    bne.b   hb_bind
+hq_out:
+    rts
 cl_hsetb:
     bsr.b   cl_hset
+hb_bind:
     move.l  TOAST_T,%d0
     move.l  %d0,cl_hovc
     moveq   #1,%d0
@@ -1537,6 +1552,7 @@ cl_hset:
     move.b  %d0,cl_hovk
     clr.b   cl_hovb
     bsr.b   cl_hkeys
+    andi.l  #HK_TRK-1,%d0               | (a TRACK key is the trigger, not the chord: [PTN] / [BANK] + TRACK)
     move.b  %d0,cl_hovh                 | the keys held now (the gesture's own)
     move.l  (%sp)+,%d0
     move.b  %d0,cl_hov                  | CL47: last -- a draw in between (the sys task) sees the old header or the
@@ -1554,6 +1570,10 @@ hk_p:
     beq.b   hk_f
     addq.l  #2,%d0
 hk_f:
+    tst.b   HELD_TRK+3                  | CL47: any TRACK key (HK_TRK) -- a chord key only for the temp actions
+    beq.b   hk_t
+    ori.l   #HK_TRK,%d0
+hk_t:
     tst.b   cl_fn
     beq.b   hk_c
     ori.l   #8,%d0
@@ -1562,6 +1582,38 @@ hk_c:
     beq.b   hk_out
     ori.l   #16,%d0
 hk_out:
+    rts
+| cl_hrel (the UI tail, after every message, while cl_hov): CL47 (the user, 2026-11-24: "Allow all toasts and header
+| text changes to be dismissed upon release of the various chords that initiate them") -- a key of the chord held at
+| the execution (cl_hovh: [BANK], [PTN], [FUNC], [CUE]; the TRACK keys for the temp actions) let go: the header ends and
+| its toast closes at the next UI tick (as DIRECT JUMP's [PTN] release does); none held (a lone trig or [YES]): its
+| time only. A newly pressed [BANK] / [PTN] / [FUNC] / [CUE] ends the header (CL45), the toast stays. Uses d0-d1/a0.
+cl_hrel:
+    tst.b   cl_hov
+    beq.b   hr_out
+    bsr.w   cl_hkeys
+    moveq   #0,%d1
+    move.b  cl_hovh,%d1
+    movea.l %d0,%a0                     | the keys held now
+    not.l   %d0
+    and.l   %d1,%d0
+    bne.b   hr_rel                      | one of the chord's let go
+    move.l  %a0,%d0
+    not.l   %d1
+    and.l   %d1,%d0
+    andi.l  #HK_TRK-1,%d0
+    beq.b   hr_out                      | no new one
+    bra.w   hv_end
+hr_rel:
+cl_hdrop:                               | (also: a card reload refused after its toast showed at the press)
+    tst.b   cl_hovb
+    beq.w   hv_end
+    tst.l   TOAST_H
+    beq.w   hv_end
+    moveq   #1,%d0
+    move.l  %d0,TOAST_T                 | closed by stock's UI tick next
+    bra.w   hv_end
+hr_out:
     rts
 | cl_hovtick (the UI tick, cl_uitick, while cl_hov): the header's time; at its end a redraw is asked of the sys
 | task (cl_dreq). Uses d0-d1/a0-a1.
@@ -3402,13 +3454,19 @@ ty_1r:
 ty_toast:
     jsr     TOAST
     addq.l  #8,%sp
+    moveq   #HOV_TOAST,%d0              | CL47 (the user, 2026-11-24): every temp toast ends with its TRACK keys
     tst.l   %d4
-    beq.b   ty_view
+    beq.b   ty_hs
     tst.l   %d5
-    beq.b   ty_view
+    beq.b   ty_hs
     moveq   #HOV_TEMP,%d0               | a reload done: "Tn LOAD: TEMP TRK" (several: "MULTI LOAD: TEMP TRKS")
+ty_hs:
     move.l  %d2,%d1                     | while its toast is up (CL45)
     jsr     cl_hsetb
+    moveq   #0,%d0                      | its chord: the TRACK keys
+    move.b  cl_hovh,%d0
+    ori.l   #HK_TRK,%d0
+    move.b  %d0,cl_hovh
 ty_view:
     tst.b   cl_open                     | inside Clyps: the view follows (SAVED TRK, the grid)
     beq.b   ty_done
@@ -7305,6 +7363,7 @@ cl_uitail:
     jsr     BP_UITAIL                   | KYOTI V1.8BC: BLACKPYRAMIDS_303's net first (the site is ours: SUPERSEDE)
 .endif
     clr.b   cl_dpend                    | CL39c: the UI tick may post again
+    jsr     cl_hrel                     | CL47 (the user, 2026-11-24): a chord let go ends its toast and header
     jsr     cl_pkt                      | CL39b: what the UI tick asked for, drawn here in the sys task: a peek's
     tst.b   cl_drq                      | deferred return, the blink / flash phases (cl_dreq)
     beq.b   ut_ndq
@@ -7317,8 +7376,6 @@ ut_ndq:
 ut_ng:
     tst.b   cl_ctoast                   | a card reload landed: its toast (the user, 2026-11-08)
     beq.b   ut_nct
-    tst.l   PTN_HELD                    | CL47: once [PTN] is up -- DIRECT JUMP's [PTN] release closes any toast
-    bne.b   ut_nct                      | (dj_ptnrel), and its header comes back bound to it (rd_show)
     clr.b   cl_ctoast
     jsr     cl_rqtoast
 ut_nct:
@@ -7939,21 +7996,13 @@ cl_draw:
     jsr     cl_trk
     move.l  %d0,%d6                     | d6 >= 8: the MIDI side
     tst.b   cl_hov                      | CL44b (the user, 2026-11-22): an execution's header (cl_hov); CL45: for a
-    beq.w   cd_nov                      | toast's time (cl_hovtick), unless a key pressed since changes the header
-    jsr     cl_hkeys
-    moveq   #0,%d1
-    move.b  cl_hovh,%d1
-    and.l   %d0,%d1                     | the gesture's keys still held
-    move.b  %d1,cl_hovh
-    eor.l   %d1,%d0
-    beq.b   cd_hv                       | no new one
-    clr.b   cl_hov
-    bra.w   cd_nov
-cd_hv:
+    beq.w   cd_nov                      | toast's time (cl_hovtick); CL47: a key pressed or let go ends it (cl_hrel)
     moveq   #0,%d0
     move.b  cl_hov,%d0
     cmpi.l  #HOV_ORIG,%d0
     beq.w   cd_nov                      | ORIG TRK SEQ / FULL: the usual label, forced (cd_r1)
+    cmpi.l  #HOV_TOAST,%d0
+    beq.w   cd_nov
     lea     cl_s_pptn,%a2
     cmpi.l  #HOV_PPTN,%d0
     beq.b   cd_ov1
