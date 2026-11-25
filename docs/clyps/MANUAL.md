@@ -60,7 +60,7 @@ The analogy holds closely:
 
 **The active pattern and the library.** The pattern you're on is the **active pattern**, and you can improvise freely without ever
 needing to leave it.
-Every pattern in every bank is a library you load clips from, one track at a time, or in a group as part of a
+Every pattern in every bank comprises a library you load clips from, one track at a time, or in a group as part of a
 Multi. A load replaces that one track's sequence in the active pattern. The pattern number, its Part link and the
 other tracks stay as they were.
 
