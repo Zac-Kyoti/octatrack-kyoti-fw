@@ -67,7 +67,7 @@ cl_rlreq:
     move.b  %d0,rq_nl
     cmpi.l  #RQ_PTN,%d2
     bne.b   rr_trk
-    moveq   #HOV_PPTN,%d0               | CL45: "PTN LOAD: PRJ PTN"
+    moveq   #HOV_PPTN,%d0               | CL45: "PTN LOAD: PROJ PTN"
     move.b  %d0,rq_hk
     moveq   #15,%d0
     and.l   %d3,%d0

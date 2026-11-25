@@ -153,7 +153,7 @@
                                         | CL45 (the user, 2026-11-23): each lasts as stock's toast does -- its own toast
                                         | while that is up (cl_hsetb), else TOAST_DUR UI ticks (cl_hovtick)
     .equ HOV_TOAST,   7                 | CL47: a toast whose header is the usual one (temp save, SAVE FIRST!)
-    .equ HOV_PPTN,    6                 | CL45 (the user): [PTN]+[BANK]+trig, "PTN LOAD: PRJ PTN" (26 px)
+    .equ HOV_PPTN,    6                 | CL45 (the user): [PTN]+[BANK]+trig, "PTN LOAD: PROJ PTN" (26 px)
     .equ TOAST_H,     0x460d1e70        | stock's toast window (0: none up)
     .equ FL_TICKS,    30                | the load confirmation: 30 UI ticks of 1/60 s = 0.5 s (the user,
     .equ FL_HALF,     5                 | 2026-10-30), its phase toggling every 5 ticks: 3 inverted /
@@ -678,7 +678,7 @@ cl_k_trig:
     move.l  4(%sp),%d0                  | CL40: the pattern's slot flashes, as every load's
     lea     12(%sp),%sp
     jsr     cl_flcode
-    moveq   #HOV_PPTN,%d0               | CL45 (the user, 2026-11-23): "PTN LOAD: PRJ PTN" until its toast, then while
+    moveq   #HOV_PPTN,%d0               | CL45 (the user, 2026-11-23): "PTN LOAD: PROJ PTN" until its toast, then while
     jsr     cl_hsetq                    | that is up (rd_show)
     moveq   #1,%d0                      | CL47 (the user, 2026-11-24): the toast at the press (this message's UI tail)
     move.b  %d0,cl_ctoast
@@ -854,7 +854,9 @@ cl_k_peek:
     beq.w   kqpk_rel
     rts                                 | a hold: nothing
 kqpk_press:
-    bsr.w   kqpk_begin
+    tst.l   FUNC_HELD                   | CL47c (the user on CLB16): [FUNC] held, as stock: SETUP <-> page 1 on every
+    bne.w   kqf_press                   | press -- after a peek's return (cl_layer popped / pushed) the held [FUNC]'s
+    bsr.w   kqpk_begin                  | sub-map no longer reached cl_k_fpeek: the press came here and only peeked
     move.l  4(%sp),%d0
     subi.l  #0x22,%d0
     lea     0x400a7280,%a0              | stock's page of the key
@@ -1559,7 +1561,7 @@ cl_hset:
     rts                                 | whole new one, never the new kind with the old keys (it ended it)
 | cl_hkeys -> d0 = the keys that shape the header: [BANK] 1, [PTN] 2, [FUNC] 8, [CUE] 16. Uses d0. CL47: the keys
 | themselves, not cl_hstate's bits -- letting go of one key of the [PTN]+[BANK] chord (state 2 -> 1 / 4) read as a
-| new key and ended "PTN LOAD: PRJ PTN" at the chord's release instead of with its toast.
+| new key and ended "PTN LOAD: PROJ PTN" at the chord's release instead of with its toast.
 cl_hkeys:
     moveq   #0,%d0
     tst.l   BANK_HELD
@@ -8011,7 +8013,7 @@ cl_draw:
     bne.b   cd_ov2
 cd_ov1:
     moveq   #4,%d0                      | HOV_CURRP: "PTN LOAD: CURR PTN+PRT", the [PTN]-alone header (CL42);
-    or.l    %d0,%d7                     | HOV_PPTN: "PTN LOAD: PRJ PTN"
+    or.l    %d0,%d7                     | HOV_PPTN: "PTN LOAD: PROJ PTN"
     bra.w   cd_rl
 cd_ov2:
     lea     cl_s_ttrk,%a2               | HOV_TEMP "TEMP TRK" (30 px), HOV_PSEQ "PROJ TRK SEQ" (45),
@@ -9673,7 +9675,7 @@ cl_s_orig:  .asciz "ORIG"
 cl_s_origs: .asciz "ORIG TRK SEQ"
 cl_s_origf: .asciz "ORIG TRK FULL"
 cl_s_origp: .asciz "ORIG PTN"             | CL45 (the user): was ORIG PTN+PRT -- 30 px, its box ends at x 70
-cl_s_pptn:  .asciz "PRJ PTN"              | CL45: 26 px, its box ends at x 66
+cl_s_pptn:  .asciz "PROJ PTN"             | CL47c (the user): was PRJ PTN -- 30 px, its box ends at x 70 (BNK's at 88)
 cl_s_currp: .asciz "CURR PTN"             | [PTN] alone held (CL42, the user); CL45 (the user): was CURR PTN+PRT -- 30 px
 cl_s_ttrk:  .asciz "TEMP TRK"             | CL44b: the execution headers (header font 0x400c246a): 30 px
 cl_s_ttrks: .asciz "TEMP TRKS"            | CL45: several tracks held, 34 px

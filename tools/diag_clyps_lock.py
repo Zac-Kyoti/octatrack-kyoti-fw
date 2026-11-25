@@ -271,7 +271,9 @@ def main(argv):
         (st["tick"], bytes(uc.mem_read(rd(uc.reg_read(er.eb.UC_M68K_REG_A7) + 4, 4), 32)).split(b"\0")[0].decode("latin-1"))),
         begin=0x4005A2B8, end=0x4005A2B8)
     CURRP = "CURR PTN" if CL45 else "CURR PTN+PRT"   # CL45 (the user): renamed
-    EXH = {"TEMP TRK", "TEMP TRKS", "PROJ TRK SEQ", "PROJ TRK FULL", CURRP, "PRJ PTN"}   # CL44b / CL45 execution labels
+    PPTN = bytes(u.mem_read(syms["cl_s_pptn"], 12)).split(b"\0")[0].decode() if "cl_s_pptn" in syms else "PRJ PTN"
+    EXH = {"TEMP TRK", "TEMP TRKS", "PROJ TRK SEQ", "PROJ TRK FULL", CURRP, PPTN}   # CL44b / CL45 execution labels
+                                                     # (CL47c: PRJ PTN -> PROJ PTN, read from the image)
 
     def fw(font_w, text):               # CL45: a text's width in a font (stock's widths + 1 px between glyphs)
         return sum(rd(font_w + ord(c_), 1) for c_ in text) + len(text) - 1
@@ -931,11 +933,11 @@ def main(argv):
                 key(0x2E, 0)
                 if CL45:                      # CL45 (the user): the chord's header "PTN LOAD: ORIG PTN" (was ORIG PTN+PRT);
                     lw_ = 3 + fw(0x400C246A, "PTN LOAD:") + 4   # the reload's "PTN LOAD: PRJ PTN"
-                    qcheck(hc_[:2] == ["PTN LOAD:", "ORIG PTN"] and hx_[:2] == ["PTN LOAD:", "PRJ PTN"]
+                    qcheck(hc_[:2] == ["PTN LOAD:", "ORIG PTN"] and hx_[:2] == ["PTN LOAD:", PPTN]
                            and rd(syms["cl_hov"], 1) == (0 if CL47b else 6),
                            f"#{i} {opx}: the chord's header {hc_} ({fw(0x400C246A, 'ORIG PTN')} px, box to x "
-                           f"{lw_ + fw(0x400C246A, 'ORIG PTN') + 1}); after the trig {hx_} ({fw(0x400C246A, 'PRJ PTN')} px, "
-                           f"box to x {lw_ + fw(0x400C246A, 'PRJ PTN') + 1})")
+                           f"{lw_ + fw(0x400C246A, 'ORIG PTN') + 1}); after the trig {hx_} ({fw(0x400C246A, PPTN)} px, "
+                           f"box to x {lw_ + fw(0x400C246A, PPTN) + 1})")
             else:
                 key(0x2E, 1); key(0x2F, 1); key(k_, 1); key(k_, 0); key(0x2F, 0); key(0x2E, 0)
             g = 0
@@ -1482,6 +1484,30 @@ def main(argv):
             qcheck((rd(syms["cl_cur"], 1), rd(syms["cl_bank"], 1), rd(syms["cl_pmoved"], 1)) == (c0_, b0_, m0_),
                    f"#{i} B2: arrows with the chord held: cur {c0_ + 1} -> {rd(syms['cl_cur'], 1) + 1}, view "
                    f"{chr(65 + b0_)} -> {chr(65 + rd(syms['cl_bank'], 1))}, shown {m0_} -> {rd(syms['cl_pmoved'], 1)}")
+            continue
+        if op[:2] == "FP" and len(op) == 4:   # CL47c (the user on CLB16): [FUNC] held + page key hex pressed 4 times, as
+            k_ = int(op[2:], 16)              # stock: page 1 <-> SETUP each press; in Clyps while peeking, Clyps' window
+            su_ = lambda: int(rd(rd(0x400BCD14, 4) + 8, 4) != 0)       # hidden while the key is down, back after
+            vis_ = lambda: rd(rd(syms["cl_win"], 4) + 35, 1) & 1 if rd(syms["cl_open"], 1) else -1
+            key(FUNC, 1)
+            settle(68)
+            seq_ = []
+            for n_ in range(4):
+                key(k_, 1)
+                settle(68)
+                a_ = (su_(), vis_(), rd(0x46C7D8D8, 1))
+                key(k_, 0)
+                u.mem_write(0x460D5DE0, (100).to_bytes(4, "big"))   # stock's double-tap window past (route A runs no
+                settle(500)                                         # LED tick to age it): the peek's return runs
+                seq_.append((a_, (su_(), vis_())))
+            key(FUNC, 0)
+            settle(300)
+            pr_ = [x[0][0] for x in seq_]
+            alt_ = all(pr_[j] != pr_[j + 1] for j in range(3))
+            okv_ = all(x[0][1] in (0, -1) and x[1][1] in (1, -1) for x in seq_)
+            qcheck(alt_ and okv_, f"#{i} {op}: [FUNC] + page {k_:#x} x4 -- SETUP open after each press {pr_} (want "
+                   f"alternating), Clyps' window hidden while down / shown after {[(x[0][1], x[1][1]) for x in seq_]}, "
+                   f"page {[x[0][2] for x in seq_]}; open {rd(syms['cl_open'], 1)}")
             continue
         if op[0] in "DU" and len(op) == 3:    # CL47b: one key down / up (hex code), e.g. D10 = TRACK 1 held
             key(int(op[1:], 16), int(op[0] == "D"))
