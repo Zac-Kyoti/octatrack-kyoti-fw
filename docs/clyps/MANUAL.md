@@ -172,7 +172,7 @@ highlighted, changed (x), its sequence loaded from A05. (4) Slot 3, named BASS1,
 - **Flashes:** every action flashes its slot once, even when nothing changes: slot and Multi loads, pattern picks
   (the pattern you're on included), card pattern reloads, and ORIG (the highlight). ORIG PTN, card track reloads,
   temp saves and temp reloads flash the active pattern's slot. A cued action then blinks its slot's text until it
-  lands. Arrow presses, paging, track changes, renaming and Direct Jump Kyoti on/off don't flash.
+  lands.
 
 ### The grid
 
