@@ -148,7 +148,7 @@ highlighted, changed (x), its sequence loaded from A05. (4) Slot 3, named BASS1,
     - While [BANK] is held, the bank gets a box.
   - After an action, the header briefly names it, for as long as its message shows (about a second when there's
     no message); the next action, or a [PTN], [BANK], [FUNC] or [CUE] press, ends it early:
-    `PTN LOAD: CURR PTN` (a [BANK] pattern pick), `PTN LOAD: PRJ PTN` (a card pattern reload),
+    `PTN LOAD: CURR PTN` (a [BANK] pattern pick), `PTN LOAD: PROJ PTN` (a card pattern reload),
     `T1 LOAD: TEMP TRK` (several tracks: `MULTI LOAD: TEMP TRKS`), `T1 LOAD: PROJ TRK SEQ` / `PROJ TRK FULL`
     (card track reloads), `ORIG TRK SEQ` / `ORIG TRK FULL` (ORIG).
 - **The slots**: 1–8 on the left, 9–16 on the right. Each shows the active track's sequence in that pattern:
