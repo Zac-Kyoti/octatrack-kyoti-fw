@@ -169,7 +169,6 @@ highlighted, changed (x), its sequence loaded from A05. (4) Slot 3, named BASS1,
     track keeps its own cue. A cue in another bank blinks when you page there;
   - **x**: that slot's sequence differs from its original (edited). An "x" only indicates the sequence is
         different; editing its Part does not create an edit "x".
-- While [PTN] + [BANK] is held, the box and the arrows stay as they are.
 - **Flashes:** every action flashes its slot once, even when nothing changes: slot and Multi loads, pattern picks
   (the pattern you're on included), card pattern reloads, and ORIG (the highlight). ORIG PTN, card track reloads,
   temp saves and temp reloads flash the active pattern's slot. A cued action then blinks its slot's text until it
